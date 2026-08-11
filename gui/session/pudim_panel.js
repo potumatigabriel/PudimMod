@@ -27,6 +27,25 @@ function pudim_DateKey() {
 		String(d.getDate()).padStart(2, "0");
 }
 
+// ─── Identidade da partida ────────────────────────────────────────────────────
+// O log é por PARTIDA, não por dia: assim um jogo inteiro fica num registro só e
+// dá para reler do começo ao fim. A retenção guarda as 10 últimas partidas.
+var g_PudimMatchKey = null;
+const PUDIM_MATCH_RETENTION = 10;
+
+function pudim_MatchKey() {
+	if (!g_PudimMatchKey) {
+		const d = new Date();
+		g_PudimMatchKey = d.getFullYear() +
+			String(d.getMonth() + 1).padStart(2, "0") +
+			String(d.getDate()).padStart(2, "0") + "-" +
+			String(d.getHours()).padStart(2, "0") +
+			String(d.getMinutes()).padStart(2, "0") +
+			String(d.getSeconds()).padStart(2, "0");
+	}
+	return g_PudimMatchKey;
+}
+
 // pudim_Log(level, category, message)  OU  pudim_Log(level, message)  [categoria padrão="MOD"]
 function pudim_Log(level, catOrMsg, msgOrUndef) {
 	if (level === "DEBUG" && !g_PudimShowDebug) return;
@@ -47,12 +66,14 @@ function pudim_Log(level, catOrMsg, msgOrUndef) {
 
 	// Persistência diária via ConfigDB (máx 200 entradas/dia)
 	try {
-		const key = "pudim.log." + pudim_DateKey();
+		const key = "pudim.log." + pudim_MatchKey();
 		let existing = Engine.ConfigDB_GetValue("user", key);
 		let arr = [];
 		try { arr = existing ? JSON.parse(existing) : []; } catch(e) { arr = []; }
 		arr.push(entry);
-		if (arr.length > 200) arr = arr.slice(arr.length - 200);
+		// Teto alto de propósito: o objetivo é o log COMPLETO da partida. O controle de
+		// espaço em disco é a retenção de 10 partidas em pudim_LogInit, não truncar o jogo.
+		if (arr.length > 5000) arr = arr.slice(arr.length - 5000);
 		Engine.ConfigDB_CreateValue("user", key, JSON.stringify(arr));
 		// Sem isso o log do dia nunca chega no user.cfg — fica só em memória e se perde
 		// se o jogo não passar por outra ação que dispare SaveChanges antes de fechar.
@@ -68,6 +89,34 @@ function pudim_Log(level, catOrMsg, msgOrUndef) {
 function pudim_LogInfo(msg)  { pudim_Log("INFO",  msg); }
 function pudim_LogWarn(msg)  { pudim_Log("WARN",  msg); }
 function pudim_LogError(msg) { pudim_Log("ERROR", msg); }
+
+// ─── Snapshot periódico da partida ────────────────────────────────────────────
+// Um retrato por minuto gravado no PRÓPRIO log, junto das decisões do mod. Assim dá
+// para reler a partida inteira depois e ver como economia, exército e combate
+// evoluíram, sem depender de screenshot (um mod do 0AD não consegue tirar print).
+var g_PudimSnapshotAccum = 0;
+const PUDIM_SNAPSHOT_INTERVAL = 60000;
+
+function pudim_LogSnapshot() {
+	try {
+		const allies = Engine.GuiInterfaceCall("pudim_GetAllyStats");
+		if (!allies || !allies.length) return;
+		let me = null;
+		for (const a of allies) if (a && a.isSelf) { me = a; break; }
+		if (!me) return;
+		const r = me.res || {}, g = me.gatherers || {};
+		const f = function(v) { return Math.floor(v || 0); };
+		pudim_Log("INFO", "SNAP",
+			"pop " + me.popCount + "/" + me.popLimit + " fase " + me.phase +
+			" | rec F" + f(r.food) + " W" + f(r.wood) + " S" + f(r.stone) + " M" + f(r.metal) +
+			" | colet F" + (g.food || 0) + " W" + (g.wood || 0) +
+			      " S" + (g.stone || 0) + " M" + (g.metal || 0) +
+			" | trop inf" + me.infantry + " cav" + me.cavalry + " cerc" + me.siege +
+			      " dist" + me.ranged + " camp" + me.champion + " sup" + me.support +
+			" | k" + me.kills + " d" + me.deaths +
+			(me.inCombat ? " | COMBATE x" + me.combatSize : ""));
+	} catch(e) {}
+}
 
 // ─── Painel de Log Visual ─────────────────────────────────────────────────────
 
@@ -147,17 +196,28 @@ function pudim_LogGetBuffer(level) {
 }
 
 function pudim_LogInit() {
-	// Remove logs de mais de 7 dias do ConfigDB
+	// Retenção: registra esta partida no índice e apaga o log das que saíram das 10 últimas.
+	// Antes a limpeza era por data e varria só os dias 8..14 atrás — quem jogasse muito num
+	// dia acumulava tudo num registro só, e quem ficasse 15 dias sem jogar nunca limpava.
 	try {
-		const now = Date.now();
-		for (let i = 8; i <= 14; i++) {
-			const d = new Date(now - i * 24 * 60 * 60 * 1000);
-			const key = "pudim.log." + d.getFullYear() + "-" +
-				String(d.getMonth() + 1).padStart(2, "0") + "-" +
-				String(d.getDate()).padStart(2, "0");
-			if (Engine.ConfigDB_GetValue("user", key))
-				Engine.ConfigDB_CreateValue("user", key, "");
+		const idxKey = "pudim.matches";
+		let matches = [];
+		try {
+			const raw = Engine.ConfigDB_GetValue("user", idxKey);
+			matches = raw ? JSON.parse(raw) : [];
+			if (!Array.isArray(matches)) matches = [];
+		} catch(e) { matches = []; }
+
+		const cur = pudim_MatchKey();
+		if (matches.indexOf(cur) === -1) matches.push(cur);
+
+		while (matches.length > PUDIM_MATCH_RETENTION) {
+			const old = matches.shift();
+			// String vazia é como este ConfigDB "apaga" — não há API de remoção de chave.
+			Engine.ConfigDB_CreateValue("user", "pudim.log." + old, "");
 		}
+
+		Engine.ConfigDB_CreateValue("user", idxKey, JSON.stringify(matches));
 		Engine.ConfigDB_SaveChanges("user");
 	} catch(e) {}
 }
@@ -1182,6 +1242,13 @@ function pudim_Tick(dt)
 	g_PudimCombatAccum += dt;
 	g_PudimRepeatAccum += dt;
 	g_PudimAdvancedAIAccum += dt;
+
+	g_PudimSnapshotAccum += dt;
+	if (g_PudimSnapshotAccum >= PUDIM_SNAPSHOT_INTERVAL)
+	{
+		g_PudimSnapshotAccum = 0;
+		pudim_LogSnapshot();
+	}
 
 	// Auto-Trabalho: bloqueado durante pânico (não redirecionar trabalhadores em batalha)
 	if (g_PudimAutoWorkEnabled && g_PudimAutoWorkAccum >= PUDIM_AUTOWORK_INTERVAL && g_PudimInitialBalanceDone && !g_PudimPanicFull)

@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<object name="pudim_mainPanel" type="image" size="20 50%-514 340 50%+514" sprite="ModernDarkBoxGold" z="150" hidden="true">
+<!-- Ancorado à DIREITA da tela (100%-340 .. 100%-20): a esquerda fica livre para o chat
+     e para a barra de aliados. Largura de 320 mantida; a JS ajusta só a altura. -->
+<object name="pudim_mainPanel" type="image" size="100%-340 50%-514 100%-20 50%+550" sprite="ModernDarkBoxGold" z="150" hidden="true">
   <object name="pudim_header" type="text" style="TitleText" size="50%-80 -16 50%+80 16"><translatableAttribute id="caption">PudimMod</translatableAttribute></object>
   <object name="pudim_compactBtn" type="button" size="4 6 50 28" style="StoneButton" tooltip="Alternar modo compacto"><action on="Press">pudim_ToggleCompact();</action><object name="pudim_compactLabel" type="text" size="0 0 100% 100%" font="sans-bold-13" text_align="center" text_valign="center" textcolor="200 200 200 255" ghost="true"><translatableAttribute id="caption">▼</translatableAttribute></object></object>
   <object name="pudim_logBtn" type="button" size="100%-76 6 100%-32 28" style="StoneButton" tooltip="Abre o painel de debug"><action on="Press">pudim_ToggleLog();</action><translatableAttribute id="caption">Log</translatableAttribute></object>

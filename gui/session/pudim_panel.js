@@ -206,7 +206,8 @@ function pudim_ApplyCompactMode()
 	// Redimensiona o painel: compacto mostra só o estimador (~240px), cheio mostra tudo (~1028px)
 	const panel = Engine.TryGetGUIObjectByName("pudim_mainPanel");
 	if (panel)
-		panel.size = hidden ? "20 50%-514 340 50%-274" : "20 50%-514 340 50%+550";
+		// Painel ancorado à direita da tela (ver 02_pudim_panel.xml)
+		panel.size = hidden ? "100%-340 50%-514 100%-20 50%-274" : "100%-340 50%-514 100%-20 50%+550";
 	// Atualiza ícone do botão
 	const lbl = Engine.TryGetGUIObjectByName("pudim_compactLabel");
 	if (lbl) lbl.caption = hidden ? "▶" : "▼";

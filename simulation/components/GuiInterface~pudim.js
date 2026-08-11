@@ -1772,6 +1772,8 @@ GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
                 "phase": 1,
                 "isResearchingPhase": false,
                 "gatherers": { "food": 0, "wood": 0, "stone": 0, "metal": 0, "isUnderAttack": false },
+                "inCombat": false,      // tropas deste jogador lutando agora
+                "combatPos": null,      // {x, z} de onde está a luta (para o flare)
                 "kills": 0,
                 "deaths": 0,
                 "support": 0, "infantry": 0, "cavalry": 0, "ranged": 0, "siege": 0, "champion": 0
@@ -1824,12 +1826,54 @@ GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
                         }
                     }
                     
-                    // Removed IsAttacking dummy check
-                    
-                    // Remover GetTimeOfLastDamage inexistente no motor 0ad
+                    // Combate: unidade com ordem Attack/WalkAndFight cujo alvo esteja vivo.
+                    // Serve para o pisca-pisca da barra de aliados e para o flare automático.
+                    // Guardamos também a posição para o flare cair no local certo.
+                    if (_ord0es && (_ord0es.type === "Attack" || _ord0es.type === "WalkAndFight")) {
+                        const tgt = _ord0es.data && _ord0es.data.target;
+                        const tgtHp = tgt ? Engine.QueryInterface(tgt, IID_Health) : null;
+                        if (tgtHp && tgtHp.GetHitpoints() > 0) {
+                            stats.inCombat = true;
+                            if (!stats.combatPos) {
+                                const cp = Engine.QueryInterface(ent, IID_Position);
+                                if (cp && cp.IsInWorld()) {
+                                    const cpp = cp.GetPosition2D();
+                                    // formato {x, z}: é o que triggerFlareAction/AddTargetMarker esperam
+                                    stats.combatPos = { x: cpp.x, z: cpp.y };
+                                }
+                            }
+                        }
+                    }
                 }
             }
-            
+
+            // Também conta como combate estar SOFRENDO ataque: inimigo com ordem de ataque
+            // mirando uma unidade/estrutura deste jogador (pega quem está só apanhando).
+            if (!stats.inCombat && cmpDiplomacy) {
+                const enemyList = cmpDiplomacy.GetEnemies() || [];
+                outerAtk: for (const ep of enemyList) {
+                    const eEnts = cmpRangeManager.GetEntitiesByPlayer(ep) || [];
+                    for (const eE of eEnts) {
+                        const eAI = Engine.QueryInterface(eE, IID_UnitAI);
+                        const eOrd = eAI && eAI.orderQueue && eAI.orderQueue.length > 0 ? eAI.orderQueue[0] : null;
+                        if (!eOrd || (eOrd.type !== "Attack" && eOrd.type !== "WalkAndFight")) continue;
+                        const tgt = eOrd.data && eOrd.data.target;
+                        if (!tgt) continue;
+                        const tOwn = Engine.QueryInterface(tgt, IID_Ownership);
+                        if (!tOwn || tOwn.GetOwner() !== i) continue;
+                        const tHp = Engine.QueryInterface(tgt, IID_Health);
+                        if (!tHp || tHp.GetHitpoints() <= 0) continue;
+                        stats.inCombat = true;
+                        const tp = Engine.QueryInterface(tgt, IID_Position);
+                        if (tp && tp.IsInWorld()) {
+                            const tpp = tp.GetPosition2D();
+                            stats.combatPos = { x: tpp.x, z: tpp.y };
+                        }
+                        break outerAtk;
+                    }
+                }
+            }
+
             allies.push(stats);
         }
     }

@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<object name="pudimAllyBar" hidden="true" absolute="true" size="50%-440 56 50%+500 100%" z="9999" ghost="true">
+<!-- z=-1: o chatPanel do jogo é z=0 (gui/session/session.xml:46). Com o z=9999 anterior
+     a barra cobria o chat e atrapalhava a leitura; agora fica atrás dele. -->
+<object name="pudimAllyBar" hidden="true" absolute="true" size="50%-440 56 50%+500 100%" z="-1" ghost="true">
     <repeat count="9" var="n">
         <object name="pudimAllyRow[n]" hidden="true" size="0 0 100% 26" type="image" sprite="color: 0 0 0 140" ghost="true">
             <!-- Separador -->

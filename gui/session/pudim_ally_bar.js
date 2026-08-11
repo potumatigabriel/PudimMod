@@ -12,6 +12,67 @@ const PUDIM_PHASE_LABELS = { 1: "I", 2: "II", 3: "III", 4: "IV" };
 const PUDIM_PHASE_COLORS = { 1: "200 200 100", 2: "100 200 140", 3: "80 150 240", 4: "200 100 240" };
 const PUDIM_MAX_ROWS = 9;
 
+/**
+ * Cor do jogador (componentes 0..1) clareada para leitura sobre fundo escuro.
+ * As cores cruas do jogo têm tons bem escuros (azul do P1 = 10,10,190; verde-escuro
+ * = 20,80,60) que praticamente somem no preto do painel. Aqui a cor é elevada até um
+ * brilho mínimo mantendo o matiz, para continuar identificando o jogador de relance.
+ * @returns {string} "r g b" em 0..255, sem alfa.
+ */
+function pudim_LightenPlayerColor(c) {
+    let r = Math.round((c.r || 0) * 255);
+    let g = Math.round((c.g || 0) * 255);
+    let b = Math.round((c.b || 0) * 255);
+    const maxc = Math.max(r, g, b);
+    // Sobe o canal mais forte até 235 preservando a proporção entre canais (matiz)
+    if (maxc > 0 && maxc < 235) {
+        const k = 235 / maxc;
+        r = Math.min(255, Math.round(r * k));
+        g = Math.min(255, Math.round(g * k));
+        b = Math.min(255, Math.round(b * k));
+    }
+    // Piso de luminância: mistura com branco se ainda estiver escuro demais
+    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    if (lum < 130) {
+        const m = (130 - lum) / 255;
+        r = Math.min(255, Math.round(r + (255 - r) * m));
+        g = Math.min(255, Math.round(g + (255 - g) * m));
+        b = Math.min(255, Math.round(b + (255 - b) * m));
+    }
+    return r + " " + g + " " + b;
+}
+
+/** Fundo da linha: cor do jogador bem escurecida, para diferenciar sem ofuscar o texto */
+function pudim_RowTint(c, alpha) {
+    const r = Math.round((c.r || 0) * 255 * 0.32);
+    const g = Math.round((c.g || 0) * 255 * 0.32);
+    const b = Math.round((c.b || 0) * 255 * 0.32);
+    return "color: " + r + " " + g + " " + b + " " + alpha;
+}
+
+// ─── Flare automático de combate ──────────────────────────────────────────────
+// Marca no minimapa quando há tropas (suas ou de aliado) em combate, e repete a cada
+// 30s enquanto a batalha continuar. Usa triggerFlareAction (gui/session/input.js:1289),
+// a MESMA função do flare manual: ela já respeita o cooldown interno de 3s do jogo,
+// desenha o marcador, toca o som e envia o flare pela rede aos aliados.
+// Um flare por foco de combate (por jogador), para não poluir o minimapa.
+var g_PudimLastAutoFlare = {};   // playerId -> timestamp do último flare
+const PUDIM_AUTOFLARE_INTERVAL = 30000;
+
+function pudim_AutoFlareCombat(now, allies) {
+    if (typeof triggerFlareAction !== "function") return; // API ausente: não faz nada
+    if (typeof g_IsObserver !== "undefined" && g_IsObserver) return;
+
+    for (const d of allies) {
+        if (!d || !d.inCombat || !d.combatPos) continue;
+        const last = g_PudimLastAutoFlare[d.id] || 0;
+        if (now - last < PUDIM_AUTOFLARE_INTERVAL) continue;
+        g_PudimLastAutoFlare[d.id] = now;
+        try { triggerFlareAction({ "x": d.combatPos.x, "z": d.combatPos.z }); } catch(e) {}
+        return; // no máximo um flare por atualização
+    }
+}
+
 function pudim_UpdateAllyBar() {
     const now = Date.now();
     if (now - g_PudimAllyBarLastUpdate < 1000) return;
@@ -27,6 +88,8 @@ function pudim_UpdateAllyBar() {
     }
 
     if (container) container.hidden = false;
+
+    pudim_AutoFlareCombat(now, allies);
 
     for (let i = 0; i < PUDIM_MAX_ROWS; ++i) {
         const row = Engine.TryGetGUIObjectByName("pudimAllyRow[" + i + "]");
@@ -79,7 +142,9 @@ function pudim_UpdateAllyBar() {
         let armyObj  = Engine.TryGetGUIObjectByName("pudimAllyArmy[" + i + "]");
 
         let cColor = d.color || {r: 1, g: 1, b: 1};
-        let colorStr = Math.round(cColor.r * 255) + " " + Math.round(cColor.g * 255) + " " + Math.round(cColor.b * 255) + " 255";
+        // Cor do jogador CLAREADA: as cores cruas do jogo incluem tons escuros (o azul do
+        // P1 é 10,10,190) que somem no fundo preto do painel. Clarear garante contraste.
+        let colorStr = pudim_LightenPlayerColor(cColor) + " 255";
 
         const prefix = d.isSelf ? "★" : " ";
         let nick = (g_Players && g_Players[pid] && g_Players[pid].name) ? g_Players[pid].name : ("P" + pid);
@@ -136,9 +201,19 @@ function pudim_UpdateAllyFlash(now, allies) {
 
         const bgOverlay = Engine.TryGetGUIObjectByName("pudimAllyBgOverlay[" + i + "]");
 
+        // EM COMBATE tem prioridade sobre tudo: pisca vermelho escuro enquanto houver
+        // tropas lutando (próprias ou do aliado) e para sozinho quando a luta acabar —
+        // o estado vem da simulação a cada atualização, não de um timer.
+        if (d && d.inCombat) {
+            const blink = (Math.floor(now / 400) % 2 === 0);
+            row.sprite = blink ? "color: 120 12 12 215" : "color: 45 6 6 200";
+            if (bgOverlay) bgOverlay.sprite = "color: 0 0 0 0";
+            continue;
+        }
+
         if (d && d.isSelf) {
-            // Próprio jogador: fundo azul escuro semi-transparente no row, overlay transparente
-            row.sprite = "color: 10 30 100 180";
+            // Próprio jogador: fundo na própria cor (mais forte) para destacar a sua linha
+            row.sprite = pudim_RowTint(d.color || { r: 0.1, g: 0.3, b: 0.8 }, 210);
             if (bgOverlay) bgOverlay.sprite = "color: 0 0 0 0";
         } else if (flashEnd > now) {
             if (flashType === "phase_upgrade") {
@@ -157,7 +232,8 @@ function pudim_UpdateAllyFlash(now, allies) {
                 g_PudimAllyFlashType[pid] = null;
                 g_PudimAllyFlashEndTime[pid] = 0;
             }
-            row.sprite = "color: 0 0 0 190";
+            // Fundo padrão: tom escuro da cor do jogador, para identificar a linha de relance
+            row.sprite = d && d.color ? pudim_RowTint(d.color, 190) : "color: 0 0 0 190";
             if (bgOverlay) bgOverlay.sprite = "color: 0 0 0 0";
         }
     }

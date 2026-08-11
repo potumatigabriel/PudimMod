@@ -52,10 +52,14 @@ function pudim_RowTint(c, alpha) {
 
 // ─── Flare automático de combate ──────────────────────────────────────────────
 // Marca no minimapa o foco de uma batalha real — UMA vez por batalha, não em série.
-// Usa triggerFlareAction (a mesma função do flare manual): desenha o marcador, toca o
-// som e envia o flare pela rede aos aliados.
-// LIMITAÇÃO: o flare do 0AD é sempre transmitido aos aliados; não existe marcador
-// local-only exposto ao mod. Por isso o disparo é único por batalha, para não incomodar.
+//
+// SOMENTE LOCAL: usamos renderAndPlayFlare (gui/session/unit_actions.js), que desenha o
+// marcador, faz o ping no minimapa, toca o som e escreve no chat — tudo no nosso cliente.
+// Quem avisa os aliados é Engine.SendNetworkFlare, chamado apenas dentro de
+// triggerFlareAction — que de propósito NÃO usamos aqui. Assim o aviso não incomoda
+// ninguém. Isso também pula o cooldown global de flare do jogo, o que é desejado:
+// nosso próprio controle (um por batalha) já limita a frequência, e o flare manual do
+// jogador continua com o cooldown dele intacto.
 var g_PudimFlaredThisBattle = {};   // playerId -> já sinalizou a batalha em curso
 var g_PudimCombatQuietTicks = {};   // playerId -> ticks seguidos sem combate
 
@@ -66,7 +70,7 @@ const PUDIM_AUTOFLARE_MIN_UNITS = 3;
 const PUDIM_COMBAT_END_TICKS = 10;
 
 function pudim_AutoFlareCombat(now, allies) {
-    if (typeof triggerFlareAction !== "function") return; // API ausente: não faz nada
+    if (typeof renderAndPlayFlare !== "function") return; // API ausente: não faz nada
     if (typeof g_IsObserver !== "undefined" && g_IsObserver) return;
 
     for (const d of allies) {
@@ -87,7 +91,10 @@ function pudim_AutoFlareCombat(now, allies) {
         g_PudimCombatQuietTicks[pid] = 0;
         if (g_PudimFlaredThisBattle[pid]) continue; // um flare por batalha
         g_PudimFlaredThisBattle[pid] = true;
-        try { triggerFlareAction({ "x": d.combatPos.x, "z": d.combatPos.z }); } catch(e) {}
+        try {
+            renderAndPlayFlare({ "x": d.combatPos.x, "z": d.combatPos.z },
+                               Engine.GetPlayerGUID());
+        } catch(e) {}
         return; // no máximo um flare por atualização
     }
 }

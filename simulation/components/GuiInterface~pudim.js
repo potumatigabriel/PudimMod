@@ -425,12 +425,36 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 		const densityWeight = type === "food" ? 20 : 40;
 		const distToDropsiteWeight = type === "food" ? 2 : 3;
 
+		// Densidade via grade espacial em vez de comparar todos contra todos.
+		// O laço aninhado anterior era O(n²) no caminho MAIS quente do mod: roda para cada
+		// trabalhador ocioso, a cada ciclo, e com busca de 400m o safeResources chega
+		// facilmente a centenas de nós — centenas de milhares de comparações por ciclo.
+		// Como só interessa quem está a menos de searchRadius, basta agrupar em células
+		// desse tamanho e olhar as 9 células vizinhas: passa a ser O(n) na prática.
+		const cellSide = Math.sqrt(searchRadiusSq);
+		const densityGrid = {};
+		for (const res of safeResources) {
+			const gx = Math.floor(res.pos.x / cellSide);
+			const gz = Math.floor(res.pos.y / cellSide);
+			const gk = gx + "," + gz;
+			if (!densityGrid[gk]) densityGrid[gk] = [];
+			densityGrid[gk].push(res.pos);
+		}
+
 		for (const res of safeResources) {
 			let density = 0;
-			for (const other of safeResources) {
-				const dx = res.pos.x - other.pos.x;
-				const dz = res.pos.y - other.pos.y;
-				if (dx*dx + dz*dz < searchRadiusSq) density++;
+			const gx = Math.floor(res.pos.x / cellSide);
+			const gz = Math.floor(res.pos.y / cellSide);
+			for (let cx = gx - 1; cx <= gx + 1; ++cx) {
+				for (let cz = gz - 1; cz <= gz + 1; ++cz) {
+					const bucket = densityGrid[cx + "," + cz];
+					if (!bucket) continue;
+					for (const op of bucket) {
+						const dx = res.pos.x - op.x;
+						const dz = res.pos.y - op.y;
+						if (dx*dx + dz*dz < searchRadiusSq) density++;
+					}
+				}
 			}
 			const dx = res.pos.x - pos.x;
 			const dz = res.pos.y - pos.y;

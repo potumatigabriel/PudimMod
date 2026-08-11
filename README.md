@@ -12,6 +12,30 @@ clients stay in lockstep.
 
 ---
 
+## Installation
+
+Download the repository (**Code → Download ZIP**, or `git clone`) and put the `PudimMod`
+folder inside your 0 A.D. `mods` directory:
+
+| System  | Path |
+|---------|------|
+| Windows | `%APPDATA%\0ad\mods\` — or `Documents\My Games\0ad\mods\` |
+| Linux   | `~/.local/share/0ad/mods/` |
+| macOS   | `~/Library/Application Support/0ad/mods/` |
+
+If you are unsure, the game's own reference is at
+<https://trac.wildfiregames.com/wiki/GameDataPaths>.
+
+The folder must sit directly inside `mods/`, so that `mods/PudimMod/mod.json` exists — a
+common mistake is ending up with `mods/PudimMod/PudimMod/`.
+
+Then open 0 A.D., go to **Settings → Mod Selection**, pick **PudimMod**, click **Enable**,
+then **Save Configuration** and **Start Mods**.
+
+To update, replace the folder with the newer version and restart the game.
+
+---
+
 ## Control panel
 
 Open it from the pudim icon in the top bar. The header has three buttons: **▼ / ▶** collapses the
@@ -131,6 +155,30 @@ permanecem em lockstep.
 > **Sem dependências além do próprio 0 A.D.** O PudimMod traz o seu `pudim_patchApplyN` para
 > modificar funções do jogo, então não precisa do AutoCiv — e como o auxiliar fica no namespace
 > próprio, rodar os dois mods juntos não gera conflito.
+
+---
+
+## Instalação
+
+Baixe o repositório (**Code → Download ZIP**, ou `git clone`) e coloque a pasta `PudimMod`
+dentro do diretório `mods` do 0 A.D.:
+
+| Sistema | Caminho |
+|---------|---------|
+| Windows | `%APPDATA%\0ad\mods\` — ou `Documentos\My Games\0ad\mods\` |
+| Linux   | `~/.local/share/0ad/mods/` |
+| macOS   | `~/Library/Application Support/0ad/mods/` |
+
+Na dúvida, a referência oficial do jogo está em
+<https://trac.wildfiregames.com/wiki/GameDataPaths>.
+
+A pasta precisa ficar direto dentro de `mods/`, de modo que exista `mods/PudimMod/mod.json` —
+o erro mais comum é acabar com `mods/PudimMod/PudimMod/`.
+
+Depois abra o 0 A.D., vá em **Configurações → Seleção de Mods**, escolha **PudimMod**, clique em
+**Ativar**, depois em **Salvar Configuração** e **Iniciar Mods**.
+
+Para atualizar, substitua a pasta pela versão nova e reinicie o jogo.
 
 ---
 

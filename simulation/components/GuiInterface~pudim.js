@@ -1766,6 +1766,10 @@ GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
         if (cmpAlly && cmpDiplomacy && (cmpDiplomacy.IsMutualAlly(i) || i === player)) {
             let stats = {
                 "id": i,
+                // Cor do jogador (componentes 0..1). Sem isto o cliente cai no branco
+                // e todos os nomes da barra ficam iguais.
+                "color": cmpAlly.GetColor ? cmpAlly.GetColor() : null,
+                "isSelf": i === player,
                 "popCount": cmpAlly.GetPopulationCount(),
                 "popLimit": cmpAlly.GetPopulationLimit(),
                 "res": cmpAlly.GetResourceCounts(),
@@ -1773,7 +1777,8 @@ GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
                 "isResearchingPhase": false,
                 "gatherers": { "food": 0, "wood": 0, "stone": 0, "metal": 0, "isUnderAttack": false },
                 "inCombat": false,      // tropas deste jogador lutando agora
-                "combatPos": null,      // {x, z} de onde está a luta (para o flare)
+                "combatPos": null,      // {x, z} do foco da luta (para o flare)
+                "combatSize": 0,        // unidades no foco — filtro de escaramuça
                 "kills": 0,
                 "deaths": 0,
                 "support": 0, "infantry": 0, "cavalry": 0, "ranged": 0, "siege": 0, "champion": 0
@@ -1802,6 +1807,15 @@ GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
                 }
             }
             
+            // Inimigos REAIS deste jogador. Usado para não confundir caça com batalha:
+            // atacar galinha/veado é ordem "Attack" contra Gaia (owner 0), não combate.
+            const cmpAllyDiplo = QueryPlayerIDInterface(i, IID_Diplomacy);
+            const allyEnemies = cmpAllyDiplo ? (cmpAllyDiplo.GetEnemies() || []) : [];
+            const isRealEnemy = (owner) => owner > 0 && allyEnemies.indexOf(owner) !== -1;
+            // Pontos de contato de combate — o flare vai no centro do maior aglomerado,
+            // não na primeira unidade que aparecer na iteração (ordem arbitrária).
+            const combatPoints = [];
+
             const ents = cmpRangeManager.GetEntitiesByPlayer(i);
             if (ents) {
                 for (let ent of ents) {
@@ -1831,15 +1845,19 @@ GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
                     // Guardamos também a posição para o flare cair no local certo.
                     if (_ord0es && (_ord0es.type === "Attack" || _ord0es.type === "WalkAndFight")) {
                         const tgt = _ord0es.data && _ord0es.data.target;
-                        const tgtHp = tgt ? Engine.QueryInterface(tgt, IID_Health) : null;
-                        if (tgtHp && tgtHp.GetHitpoints() > 0) {
-                            stats.inCombat = true;
-                            if (!stats.combatPos) {
-                                const cp = Engine.QueryInterface(ent, IID_Position);
-                                if (cp && cp.IsInWorld()) {
-                                    const cpp = cp.GetPosition2D();
-                                    // formato {x, z}: é o que triggerFlareAction/AddTargetMarker esperam
-                                    stats.combatPos = { x: cpp.x, z: cpp.y };
+                        if (tgt) {
+                            // Só conta como combate se o alvo pertence a um jogador INIMIGO.
+                            // Gaia (owner 0) = caça/animais: nunca é batalha.
+                            const tOwnC = Engine.QueryInterface(tgt, IID_Ownership);
+                            if (tOwnC && isRealEnemy(tOwnC.GetOwner())) {
+                                const tgtHp = Engine.QueryInterface(tgt, IID_Health);
+                                if (tgtHp && tgtHp.GetHitpoints() > 0) {
+                                    const cp = Engine.QueryInterface(ent, IID_Position);
+                                    if (cp && cp.IsInWorld()) {
+                                        const cpp = cp.GetPosition2D();
+                                        // formato {x, z}: é o que triggerFlareAction espera
+                                        combatPoints.push({ x: cpp.x, z: cpp.y });
+                                    }
                                 }
                             }
                         }
@@ -1849,9 +1867,8 @@ GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
 
             // Também conta como combate estar SOFRENDO ataque: inimigo com ordem de ataque
             // mirando uma unidade/estrutura deste jogador (pega quem está só apanhando).
-            if (!stats.inCombat && cmpDiplomacy) {
-                const enemyList = cmpDiplomacy.GetEnemies() || [];
-                outerAtk: for (const ep of enemyList) {
+            if (combatPoints.length === 0 && allyEnemies.length > 0) {
+                for (const ep of allyEnemies) {
                     const eEnts = cmpRangeManager.GetEntitiesByPlayer(ep) || [];
                     for (const eE of eEnts) {
                         const eAI = Engine.QueryInterface(eE, IID_UnitAI);
@@ -1863,15 +1880,40 @@ GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
                         if (!tOwn || tOwn.GetOwner() !== i) continue;
                         const tHp = Engine.QueryInterface(tgt, IID_Health);
                         if (!tHp || tHp.GetHitpoints() <= 0) continue;
-                        stats.inCombat = true;
+                        // Posição do NOSSO alvo atacado: é lá que o reforço precisa chegar.
                         const tp = Engine.QueryInterface(tgt, IID_Position);
                         if (tp && tp.IsInWorld()) {
                             const tpp = tp.GetPosition2D();
-                            stats.combatPos = { x: tpp.x, z: tpp.y };
+                            combatPoints.push({ x: tpp.x, z: tpp.y });
                         }
-                        break outerAtk;
                     }
                 }
+            }
+
+            // Foco do combate: centroide do MAIOR aglomerado de contatos (raio 40m).
+            // Antes usava a primeira unidade encontrada — com ordem de iteração arbitrária
+            // o flare caía numa escaramuça isolada em vez da batalha principal.
+            if (combatPoints.length > 0) {
+                stats.inCombat = true;
+                let bestIdx = 0, bestCount = -1;
+                for (let a = 0; a < combatPoints.length; ++a) {
+                    let c = 0;
+                    for (let b = 0; b < combatPoints.length; ++b) {
+                        const dxc = combatPoints[a].x - combatPoints[b].x;
+                        const dzc = combatPoints[a].z - combatPoints[b].z;
+                        if (dxc*dxc + dzc*dzc <= 40*40) ++c;
+                    }
+                    if (c > bestCount) { bestCount = c; bestIdx = a; }
+                }
+                let sx = 0, sz = 0, n = 0;
+                for (const p of combatPoints) {
+                    const dxc = p.x - combatPoints[bestIdx].x;
+                    const dzc = p.z - combatPoints[bestIdx].z;
+                    if (dxc*dxc + dzc*dzc <= 40*40) { sx += p.x; sz += p.z; ++n; }
+                }
+                stats.combatPos = { x: sx / n, z: sz / n };
+                // Quantas unidades no foco — o flare exige um mínimo para não avisar escaramuça.
+                stats.combatSize = bestCount;
             }
 
             allies.push(stats);

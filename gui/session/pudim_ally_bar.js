@@ -51,23 +51,42 @@ function pudim_RowTint(c, alpha) {
 }
 
 // ─── Flare automático de combate ──────────────────────────────────────────────
-// Marca no minimapa quando há tropas (suas ou de aliado) em combate, e repete a cada
-// 30s enquanto a batalha continuar. Usa triggerFlareAction (gui/session/input.js:1289),
-// a MESMA função do flare manual: ela já respeita o cooldown interno de 3s do jogo,
-// desenha o marcador, toca o som e envia o flare pela rede aos aliados.
-// Um flare por foco de combate (por jogador), para não poluir o minimapa.
-var g_PudimLastAutoFlare = {};   // playerId -> timestamp do último flare
-const PUDIM_AUTOFLARE_INTERVAL = 30000;
+// Marca no minimapa o foco de uma batalha real — UMA vez por batalha, não em série.
+// Usa triggerFlareAction (a mesma função do flare manual): desenha o marcador, toca o
+// som e envia o flare pela rede aos aliados.
+// LIMITAÇÃO: o flare do 0AD é sempre transmitido aos aliados; não existe marcador
+// local-only exposto ao mod. Por isso o disparo é único por batalha, para não incomodar.
+var g_PudimFlaredThisBattle = {};   // playerId -> já sinalizou a batalha em curso
+var g_PudimCombatQuietTicks = {};   // playerId -> ticks seguidos sem combate
+
+// Mínimo de unidades no foco para valer um flare. Caça a animais já é filtrada no
+// servidor (alvo Gaia não é inimigo); isto barra escaramuça de 1-2 unidades.
+const PUDIM_AUTOFLARE_MIN_UNITS = 3;
+// Ticks (de 1s) sem combate para considerar a batalha encerrada e liberar novo flare.
+const PUDIM_COMBAT_END_TICKS = 10;
 
 function pudim_AutoFlareCombat(now, allies) {
     if (typeof triggerFlareAction !== "function") return; // API ausente: não faz nada
     if (typeof g_IsObserver !== "undefined" && g_IsObserver) return;
 
     for (const d of allies) {
-        if (!d || !d.inCombat || !d.combatPos) continue;
-        const last = g_PudimLastAutoFlare[d.id] || 0;
-        if (now - last < PUDIM_AUTOFLARE_INTERVAL) continue;
-        g_PudimLastAutoFlare[d.id] = now;
+        if (!d) continue;
+        const pid = d.id;
+        const fighting = d.inCombat && d.combatPos &&
+                         (d.combatSize || 0) >= PUDIM_AUTOFLARE_MIN_UNITS;
+
+        if (!fighting) {
+            // A batalha só termina após alguns ticks quietos — sem isso, a troca de alvo
+            // entre dois golpes zeraria o estado e o flare voltaria a disparar em série.
+            g_PudimCombatQuietTicks[pid] = (g_PudimCombatQuietTicks[pid] || 0) + 1;
+            if (g_PudimCombatQuietTicks[pid] >= PUDIM_COMBAT_END_TICKS)
+                g_PudimFlaredThisBattle[pid] = false;
+            continue;
+        }
+
+        g_PudimCombatQuietTicks[pid] = 0;
+        if (g_PudimFlaredThisBattle[pid]) continue; // um flare por batalha
+        g_PudimFlaredThisBattle[pid] = true;
         try { triggerFlareAction({ "x": d.combatPos.x, "z": d.combatPos.z }); } catch(e) {}
         return; // no máximo um flare por atualização
     }

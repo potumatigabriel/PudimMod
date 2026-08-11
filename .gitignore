@@ -5,3 +5,6 @@
 
 # Rascunhos de trabalho
 scratch*.txt
+
+# Estado local do Visual Studio (não pertence ao repositório)
+.vs/

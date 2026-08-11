@@ -2835,6 +2835,8 @@ GuiInterface.prototype.pudim_GetThreats = function(player, data) { return null; 
 // Verifica se há armazém/fundação perto, encontra builder civil, retorna candidatos de posição.
 GuiInterface.prototype.pudim_GetProactiveStorehouseData = function(player, data)
 {
+	// Armazém serve madeira, pedra e metal — nunca aceita construtor vindo da comida.
+	const pudimDropsiteIsFood = false;
 	if (!data || data.nearX === undefined || data.nearZ === undefined) return null;
 
 	const cmpPlayerManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_PlayerManager);
@@ -2932,7 +2934,17 @@ GuiInterface.prototype.pudim_GetProactiveStorehouseData = function(player, data)
 					const rt = ord.data.type || ord.data.resourceType;
 					if (rt) generic = rt.generic;
 				}
-				rank = generic === "wood" ? 0 : (generic === "food" ? 3 : 2);
+				// REGRA DURA: o construtor tem de estar no MESMO lado que o dropsite serve.
+				// Celeiro (comida) só aceita quem já está na comida; armazém (madeira,
+				// pedra, metal) só aceita quem está nesses três. Não é preferência, é
+				// proibição: um ranking que apenas deixasse o lado errado em último lugar
+				// ainda o escolheria quando fosse a única opção — que é justamente o caso
+				// no início de partida. Tirar gente do outro lado desfalca a coleta mais
+				// frágil e, de quebra, a viagem se perde: o trabalhador termina longe do
+				// recurso a que voltaria. Sem candidato válido é melhor adiar a construção;
+				// ela sai alguns segundos depois, sem custo permanente.
+				if ((generic === "food") !== pudimDropsiteIsFood) continue;
+				rank = generic === "wood" ? 0 : 2;
 			}
 			if (rank < bestRank) {
 				bestRank = rank; best = ent;
@@ -2992,6 +3004,8 @@ GuiInterface.prototype.pudim_GetProactiveStorehouseData = function(player, data)
 // Chamado pelo panel quando pudim_GetIdleWorkersAndBestResource retorna suggestFarmstead.
 GuiInterface.prototype.pudim_GetProactiveFarmsteadData = function(player, data)
 {
+	// Celeiro serve comida — só aceita construtor que já está na comida.
+	const pudimDropsiteIsFood = true;
 	if (!data || data.nearX === undefined || data.nearZ === undefined) return null;
 
 	const cmpPlayerManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_PlayerManager);
@@ -3059,7 +3073,17 @@ GuiInterface.prototype.pudim_GetProactiveFarmsteadData = function(player, data)
 					const rt = ord.data.type || ord.data.resourceType;
 					if (rt) generic = rt.generic;
 				}
-				rank = generic === "wood" ? 0 : (generic === "food" ? 3 : 2);
+				// REGRA DURA: o construtor tem de estar no MESMO lado que o dropsite serve.
+				// Celeiro (comida) só aceita quem já está na comida; armazém (madeira,
+				// pedra, metal) só aceita quem está nesses três. Não é preferência, é
+				// proibição: um ranking que apenas deixasse o lado errado em último lugar
+				// ainda o escolheria quando fosse a única opção — que é justamente o caso
+				// no início de partida. Tirar gente do outro lado desfalca a coleta mais
+				// frágil e, de quebra, a viagem se perde: o trabalhador termina longe do
+				// recurso a que voltaria. Sem candidato válido é melhor adiar a construção;
+				// ela sai alguns segundos depois, sem custo permanente.
+				if ((generic === "food") !== pudimDropsiteIsFood) continue;
+				rank = generic === "wood" ? 0 : 2;
 			}
 			if (rank < bestRank) {
 				bestRank = rank; best = ent;
@@ -4053,11 +4077,20 @@ GuiInterface.prototype.pudim_GetDropsiteFoundationData = function(player, data)
 				if (!nearFound) continue;
 			}
 
-			// Determinar tipo de recurso que o worker ia coletar
+			// Determinar tipo de recurso que o worker ia coletar.
+			// Cobre também GatherNearPosition e ReturnResource: o mod emite muito essas duas
+			// ordens, e antes só "Gather" era reconhecido — quem estivesse voltando com
+			// carga ou indo coletar perto de uma posição ficava com tipo nulo e escapava do
+			// filtro logo abaixo, que era como aldeãs da fruta acabavam erguendo armazém.
 			let workerResType = null;
-			if (ord0 && ord0.type === "Gather" && ord0.data && ord0.data.target) {
-				const cmpRS = Engine.QueryInterface(ord0.data.target, IID_ResourceSupply);
-				if (cmpRS) { const rt = cmpRS.GetType(); workerResType = rt ? rt.generic : null; }
+			if (ord0 && ord0.data) {
+				if (ord0.type === "Gather" && ord0.data.target) {
+					const cmpRS = Engine.QueryInterface(ord0.data.target, IID_ResourceSupply);
+					if (cmpRS) { const rt = cmpRS.GetType(); workerResType = rt ? rt.generic : null; }
+				} else if (ord0.type === "GatherNearPosition" || ord0.type === "ReturnResource") {
+					const rt = ord0.data.type || ord0.data.resourceType;
+					if (rt) workerResType = rt.generic || null;
+				}
 			}
 
 			// Prioridade: ociosos > novos > coletando (para não interromper quem está longe)
@@ -4072,8 +4105,12 @@ GuiInterface.prototype.pudim_GetDropsiteFoundationData = function(player, data)
 			for (const cand of candidates) {
 				if (helpersAdded >= needed) break;
 				if (assignedThisCall.has(cand.id)) continue;
-				// Dropsite: só ajuda quem já coleta o mesmo recurso que o dropsite vai armazenar
-				if (cand.workerResType && cand.workerResType !== foundData.resourceType) continue;
+				// Dropsite: só ajuda quem já coleta o MESMO recurso que ele vai armazenar.
+				// Ocioso (priority 0) e recém-nascido (1) entram sempre — não desfalcam nada.
+				// Para quem está coletando a regra é dura, e o tipo DESCONHECIDO agora também
+				// é recusado: antes o "cand.workerResType &&" transformava tipo nulo em
+				// passe livre, que era o furo por onde a comida era drenada.
+				if (cand.priority === 2 && cand.workerResType !== foundData.resourceType) continue;
 				const dx = cand.x - foundData.x, dz = cand.z - foundData.z;
 				if (dx*dx + dz*dz > 250*250) continue; // muito longe
 				result.assignments.push({ foundationId: foundId, workerId: cand.id });

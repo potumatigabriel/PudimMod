@@ -303,6 +303,10 @@ function pudim_Init()
 	pudim_LogInit();
 	pudim_LogInfo("PudimMod inicializado.");
 
+	// Tooltips de todos os botões, no idioma detectado (pudim_i18n.js). Sobrepõe os
+	// tooltips fixos do XML, que estavam só em português e faltavam na maioria dos botões.
+	try { pudim_ApplyTooltips(); } catch(e) {}
+
 	const awL = Engine.TryGetGUIObjectByName("pudim_autoWorkLabel");
 	if (awL) {
 		awL.caption = "( LIGADO ) Auto-Trabalho"; awL.textcolor = "0 255 0 255";

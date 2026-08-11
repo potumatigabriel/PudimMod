@@ -1,0 +1,61 @@
+[
+	{
+		"label": "PudimMod",
+		"options": [
+			{
+				"type": "boolean",
+				"label": "[color=\"210 100 230\"]Auto-Trabalho:[/color] Ativo ao Iniciar",
+				"tooltip": "Inicia o jogo com o sistema de Auto-Trabalho (idle workers) já ativado por padrão.",
+				"config": "pudim.autowork.enabled"
+			},
+			{
+				"type": "slider",
+				"label": "[color=\"210 100 230\"]Auto-Trabalho:[/color] Intervalo de Verificação (s)",
+				"tooltip": "Tempo em segundos entre cada verificação e redirecionamento de trabalhadores ociosos.",
+				"config": "pudim.autowork.interval",
+				"min": 1,
+				"max": 15
+			},
+			{
+				"type": "slider",
+				"label": "[color=\"210 100 230\"]Combate:[/color] Intervalo do Estimador (s)",
+				"tooltip": "Tempo em segundos entre cada atualização da estimativa de combate no painel.",
+				"config": "pudim.combat.interval",
+				"min": 1,
+				"max": 10
+			},
+			{
+				"type": "slider",
+				"label": "[color=\"210 100 230\"]Prioridades:[/color] Peso Comida",
+				"tooltip": "Urgência padrão para coletar comida (0=desativado, 10=máxima).",
+				"config": "pudim.autowork.weights.food",
+				"min": 0,
+				"max": 10
+			},
+			{
+				"type": "slider",
+				"label": "[color=\"210 100 230\"]Prioridades:[/color] Peso Madeira",
+				"tooltip": "Urgência padrão para coletar madeira (0=desativado, 10=máxima).",
+				"config": "pudim.autowork.weights.wood",
+				"min": 0,
+				"max": 10
+			},
+			{
+				"type": "slider",
+				"label": "[color=\"210 100 230\"]Prioridades:[/color] Peso Pedra",
+				"tooltip": "Urgência padrão para coletar pedra (0=desativado, 10=máxima).",
+				"config": "pudim.autowork.weights.stone",
+				"min": 0,
+				"max": 10
+			},
+			{
+				"type": "slider",
+				"label": "[color=\"210 100 230\"]Prioridades:[/color] Peso Metal",
+				"tooltip": "Urgência padrão para coletar metal (0=desativado, 10=máxima).",
+				"config": "pudim.autowork.weights.metal",
+				"min": 0,
+				"max": 10
+			}
+		]
+	}
+]

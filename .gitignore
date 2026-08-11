@@ -1,0 +1,7 @@
+# Backups automáticos criados antes de cada alteração
+*.bak
+*.bak-*
+*.bak.*
+
+# Rascunhos de trabalho
+scratch*.txt

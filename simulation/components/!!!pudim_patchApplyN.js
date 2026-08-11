@@ -1,0 +1,43 @@
+/**
+ * PudimMod - !!!pudim_patchApplyN.js (Simulation side)
+ * Fallback de autociv_patchApplyN caso o AutoCiv esteja desativado.
+ */
+if (typeof autociv_patchApplyN === "undefined")
+{
+	global.autociv_patchApplyN = function()
+	{
+		if (arguments.length < 2)
+		{
+			let error = new Error("Insufficient arguments to patch: " + arguments[0]);
+			warn(error.message);
+			warn(error.stack);
+			return;
+		}
+
+		let prefix, method, patch;
+		if (arguments.length == 2)
+		{
+			prefix = global;
+			method = arguments[0];
+			patch = arguments[1];
+		}
+		else
+		{
+			prefix = arguments[0];
+			method = arguments[1];
+			patch = arguments[2];
+		}
+
+		if (!(method in prefix))
+		{
+			let error = new Error("Function not defined: " + method);
+			warn(error.message);
+			warn(error.stack);
+			return;
+		}
+
+		prefix[method] = new Proxy(prefix[method], { apply: patch });
+	};
+
+	Engine.RegisterGlobal("autociv_patchApplyN", autociv_patchApplyN);
+}

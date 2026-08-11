@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<object name="pudim_workersLabel"
+  type="text"
+  size="100%-660 4 100%-460 28"
+  font="sans-bold-13"
+  textcolor="255 255 255 200"
+  text_align="right"
+  text_valign="center"
+  ghost="true"
+  hidden="true"
+  z="100">
+</object>

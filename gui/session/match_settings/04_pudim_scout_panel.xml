@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<object name="pudimScoutPanelRight" hidden="true" size="100%-345 100%-90 100%-171 100%-52" z="200">
+    <object name="unitPudimScoutLocalButton" style="iconButton" type="button" size="0 0 38 38" tooltip_style="sessionToolTipBottomBold">
+        <action on="Press">pudim_ToggleScout("local");</action>
+        <object name="unitPudimScoutLocalIcon" type="image" ghost="true" size="3 3 35 35"/>
+        <object name="unitPudimScoutLocalSelection" hidden="true" type="image" ghost="true" size="3 3 35 35" sprite="stretched:session/icons/corners.png"/>
+    </object>
+    <object name="unitPudimScoutDeepButton" style="iconButton" type="button" size="42 0 80 38" tooltip_style="sessionToolTipBottomBold">
+        <action on="Press">pudim_ToggleScout("deep");</action>
+        <object name="unitPudimScoutDeepIcon" type="image" ghost="true" size="3 3 35 35"/>
+        <object name="unitPudimScoutDeepSelection" hidden="true" type="image" ghost="true" size="3 3 35 35" sprite="stretched:session/icons/corners.png"/>
+    </object>
+    <object type="text" font="sans-bold-12" textcolor="200 200 200 200" text_align="left" text_valign="center"
+            size="84 0 174 38" ghost="true">
+        <action on="load">this.caption = "Auto Scout";</action>
+    </object>
+</object>

@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- pudimAllyBar foi movido para match_settings/05_pudim_ally_bar.xml para ser sempre visivel -->
+<object name="pudimAllyBarPlaceholder" hidden="true" size="0 0 0 0"/>

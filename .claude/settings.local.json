@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs grep -l \"auto\\\\|Auto\")",
+      "Bash(rtk grep *)",
+      "PowerShell(Get-ChildItem \"D:\\\\OneDrive\\\\Documentos\\\\My Games\\\\0ad\" -Recurse -Filter \"input.js\" -ErrorAction SilentlyContinue | ForEach-Object { Select-String -Path $_.FullName -Pattern \"triggerFlare|INPUT_FLARE|flare\" } | Select-Object -First 20)",
+      "Bash(rtk ls *)",
+      "Bash(xargs grep -l \"autoqueue\\\\|AutoQueue\")",
+      "Bash(rtk find *)",
+      "Bash(xargs grep -l \"autoqueue\")",
+      "Bash(xargs grep -l \"PostNetworkCommand\")"
+    ]
+  }
+}

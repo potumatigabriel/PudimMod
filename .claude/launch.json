@@ -1,0 +1,53 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mascote",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "7788", "--directory", "C:\\Users\\gabri\\AppData\\Local\\Temp\\claude\\D--OneDrive-Documentos-My-Games-0ad-mods-PudimMod\\fd264a79-3cc7-4ec6-9be1-a51df8d88fb9\\scratchpad"],
+      "port": 7788
+    }
+    ,{
+      "name": "testerive",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "7789", "--directory", "D:\\inetpub\\wwwroot\\fems\\promu\\testerive"],
+      "port": 7789
+    }
+    ,{
+      "name": "promu-api",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--no-build", "--launch-profile", "http", "--project", "D:\\inetpub\\wwwroot\\fems\\promu\\api"],
+      "port": 5019
+    }
+    ,{
+      "name": "splash-preview",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8765", "--directory", "D:\\inetpub\\wwwroot\\fems\\promu\\front\\build"],
+      "port": 8765
+    }
+    ,{
+      "name": "promu-web-debug",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "cd /d D:\\inetpub\\wwwroot\\fems\\promu\\front && flutter run -d web-server --web-port 8766"],
+      "port": 8766
+    }
+    ,{
+      "name": "insignias",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "7791", "--directory", "D:\\inetpub\\wwwroot\\fems\\promu\\Trab"],
+      "port": 7791
+    }
+    ,{
+      "name": "fiscalflex",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--launch-profile", "http", "--project", "D:\\inetpub\\wwwroot\\fiscalflex\\site\\FiscalFlex\\FiscalFlex.csproj"],
+      "port": 5078
+    }
+    ,{
+      "name": "clinicascope",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "D:\\inetpub\\wwwroot\\clinicascope\\ClinicaScope\\ClinicaScope.csproj", "--urls", "http://localhost:5180"],
+      "port": 5180
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<object name="pudim_toggleBtn"
+  type="button"
+  size="100%-314 4 100%-286 32"
+  style="iconButton"
+  tooltip_style="sessionToolTipBold"
+  z="100"
+  hidden="false">
+  <translatableAttribute id="tooltip">[font="sans-bold-13"]PudimMod[/font]&#10;[font="sans-12"]Abre/fecha o painel de recursos avançados do PudimMod.&#10;&#10;Recursos disponíveis:&#10;• Estimador de Combate: veja a força de aliados vs inimigos&#10;• Auto-Trabalho: envie trabalhadores ociosos automaticamente&#10;• Repetir Construção: construa automaticamente ao terminar[/font]</translatableAttribute>
+  <action on="Press">pudim_TogglePanel();</action>
+  <object size="2 2 100%-2 100%-2" type="image" sprite="stretched:session/icons/pudim.png" ghost="true"/>
+</object>

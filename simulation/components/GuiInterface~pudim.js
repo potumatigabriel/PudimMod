@@ -665,7 +665,16 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 	}
 
 	let deficits = { "food": 0, "wood": 0, "stone": 0, "metal": 0 };
-	
+
+	// Puxar um coletor ATIVO de um recurso para outro custa a viagem inteira (ida, volta e
+	// o tempo parado no caminho). Com população pequena isso pesa muito no total coletado,
+	// então só vale com desequilíbrio extremo — o certo é esperar as unidades que estão
+	// nascendo e mandá-las direto para o recurso em falta.
+	// Acima de 100 de população, um coletor a menos é ruído: pode rebalancear normalmente.
+	const popCountRb = cmpPlayer ? cmpPlayer.GetPopulationCount() : 0;
+	const bigPopRb = popCountRb > 100;
+	const surplusThreshold = bigPopRb ? 8 : 20;
+
 	if (totalWeight > 0) {
 		let worstSurplus = -Infinity;
 		let worstSurplusRes = null;
@@ -676,9 +685,9 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 			const diff = targetQuota - currentCount; // Positivo: precisa de gente. Negativo: excesso.
 			deficits[type] = diff;
 			
-			// Rebalancear ativos SOMENTE com excesso EXTREMO (>8 acima da cota).
+			// Rebalancear ativos SOMENTE com excesso extremo (limiar depende da população).
 			// Preferir sempre aguardar novos trabalhadores nascidos da produção.
-			if (diff < -8) {
+			if (diff < -surplusThreshold) {
 				if (-diff > worstSurplus) {
 					worstSurplus = -diff;
 					worstSurplusRes = type;
@@ -687,14 +696,16 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 		}
 
 		// Tirar worker ativo SOMENTE se:
-		//   1. Sem workers ociosos disponíveis
+		//   1. Sem workers ociosos disponíveis (novos nascidos têm prioridade absoluta)
 		//   2. Base não está sob ataque
-		//   3. Excesso extremo existe (>8 acima da cota)
-		//   4. Algum tipo de recurso com peso > 0 tem ZERO trabalhadores (não apenas abaixo da cota)
-		// Regra: sempre preferir esperar novos trabalhadores de produção; só redirecionar ativo
-		// quando o desequilíbrio é total (recurso completamente sem cobertura).
-		const worstDeficitType = activeWeights.reduce((best, t) =>
-			(activeGatherers[t].length === 0 && deficits[t] > (best ? deficits[best] : 0)) ? t : best, null);
+		//   3. Excesso acima do limiar (20 com pop baixa, 8 com pop > 100)
+		//   4. Existe recurso carente — com pop baixa, apenas se estiver com ZERO coletores
+		// Regra: sempre preferir esperar novos trabalhadores de produção; com pop pequena só
+		// redirecionar ativo quando o recurso está completamente sem cobertura.
+		const worstDeficitType = activeWeights.reduce((best, t) => {
+			if (!bigPopRb && activeGatherers[t].length !== 0) return best;
+			return deficits[t] > (best ? deficits[best] : 0) ? t : best;
+		}, null);
 		if (worstSurplusRes && worstDeficitType && activeGatherers[worstSurplusRes].length > 0 &&
 		    idleWorkersList.length === 0 && !baseUnderAttack) {
 			const candidates = activeGatherers[worstSurplusRes];

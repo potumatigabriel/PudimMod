@@ -1819,7 +1819,39 @@ GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
     const cmpRangeManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_RangeManager);
     let allies = [];
     let cmpDiplomacy = QueryPlayerIDInterface(player, IID_Diplomacy);
-    
+
+    // ── Quem está sendo atacado: UMA varredura das entidades inimigas ────────────────
+    // Esta varredura ficava DENTRO do laço de aliados: num 4v4 ela rodava 16 vezes por
+    // segundo (4 aliados × 4 inimigos), percorrendo todas as entidades de cada inimigo.
+    // Agora é uma passada só, montando dono-atacado → posições atingidas, e cada aliado
+    // apenas consulta o mapa. O resultado é o mesmo com uma fração do custo.
+    const attackedByOwner = {};
+    {
+        const globalEnemies = cmpDiplomacy ? (cmpDiplomacy.GetEnemies() || []) : [];
+        for (const ep of globalEnemies) {
+            const eEnts = cmpRangeManager.GetEntitiesByPlayer(ep) || [];
+            for (const eE of eEnts) {
+                const eAI = Engine.QueryInterface(eE, IID_UnitAI);
+                if (!eAI || !eAI.orderQueue || !eAI.orderQueue.length) continue;
+                const eOrd = eAI.orderQueue[0];
+                if (eOrd.type !== "Attack" && eOrd.type !== "WalkAndFight") continue;
+                const tgt = eOrd.data && eOrd.data.target;
+                if (!tgt) continue;
+                const tOwn = Engine.QueryInterface(tgt, IID_Ownership);
+                if (!tOwn) continue;
+                const owner = tOwn.GetOwner();
+                if (owner <= 0) continue;
+                const tHp = Engine.QueryInterface(tgt, IID_Health);
+                if (!tHp || tHp.GetHitpoints() <= 0) continue;
+                const tp = Engine.QueryInterface(tgt, IID_Position);
+                if (!tp || !tp.IsInWorld()) continue;
+                const tpp = tp.GetPosition2D();
+                if (!attackedByOwner[owner]) attackedByOwner[owner] = [];
+                attackedByOwner[owner].push({ x: tpp.x, z: tpp.y });
+            }
+        }
+    }
+
     for (let i = 1; i < cmpPlayerManager.GetNumPlayers(); ++i) {
         let cmpAlly = QueryPlayerIDInterface(i, IID_Player);
         if (cmpAlly && cmpDiplomacy && (cmpDiplomacy.IsMutualAlly(i) || i === player)) {
@@ -1926,28 +1958,11 @@ GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
 
             // Também conta como combate estar SOFRENDO ataque: inimigo com ordem de ataque
             // mirando uma unidade/estrutura deste jogador (pega quem está só apanhando).
-            if (combatPoints.length === 0 && allyEnemies.length > 0) {
-                for (const ep of allyEnemies) {
-                    const eEnts = cmpRangeManager.GetEntitiesByPlayer(ep) || [];
-                    for (const eE of eEnts) {
-                        const eAI = Engine.QueryInterface(eE, IID_UnitAI);
-                        const eOrd = eAI && eAI.orderQueue && eAI.orderQueue.length > 0 ? eAI.orderQueue[0] : null;
-                        if (!eOrd || (eOrd.type !== "Attack" && eOrd.type !== "WalkAndFight")) continue;
-                        const tgt = eOrd.data && eOrd.data.target;
-                        if (!tgt) continue;
-                        const tOwn = Engine.QueryInterface(tgt, IID_Ownership);
-                        if (!tOwn || tOwn.GetOwner() !== i) continue;
-                        const tHp = Engine.QueryInterface(tgt, IID_Health);
-                        if (!tHp || tHp.GetHitpoints() <= 0) continue;
-                        // Posição do NOSSO alvo atacado: é lá que o reforço precisa chegar.
-                        const tp = Engine.QueryInterface(tgt, IID_Position);
-                        if (tp && tp.IsInWorld()) {
-                            const tpp = tp.GetPosition2D();
-                            combatPoints.push({ x: tpp.x, z: tpp.y });
-                        }
-                    }
-                }
-            }
+            // Posição dos NOSSOS alvos atacados: é lá que o reforço precisa chegar.
+            // Vem do mapa montado numa passada única antes deste laço.
+            if (combatPoints.length === 0 && attackedByOwner[i])
+                for (const p of attackedByOwner[i])
+                    combatPoints.push(p);
 
             // Foco do combate: centroide do MAIOR aglomerado de contatos (raio 40m).
             // Antes usava a primeira unidade encontrada — com ordem de iteração arbitrária
@@ -3596,7 +3611,12 @@ GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 	};
 
 	// Pré-coletar techs atualmente em pesquisa em qualquer edifício (evita enviar duplicatas)
+	// Uma passada só monta os DOIS conjuntos: antes eram dois laços sobre todas as
+	// entidades, cada um chamando QueryInterface(ProductionQueue) e GetQueue() de novo
+	// para ler exatamente a mesma fila. O "confirmadas" também usava Array.includes()
+	// dentro do laço, que é busca linear — agora é Set.
 	const alreadyQueued = new Set();
+	const confirmedSet = new Set();
 	for (const ent of allEnts) {
 		const cmpPQ0 = Engine.QueryInterface(ent, IID_ProductionQueue);
 		if (!cmpPQ0) continue;
@@ -3606,23 +3626,15 @@ GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 			// Itens de pesquisa não têm unitTemplate; podem ter 'template' ou 'tech'
 			if (qItem.tech) alreadyQueued.add(qItem.tech);
 			if (!qItem.unitTemplate && qItem.template) alreadyQueued.add(qItem.template);
+			// Confirmadas: qualquer item de fila, para o painel parar de reenviar
+			const t = qItem.tech || qItem.template;
+			if (t) confirmedSet.add(t);
 		}
 	}
 
 	const blacklist = (data && Array.isArray(data.blacklist)) ? new Set(data.blacklist) : new Set();
 
-	// Coletar techs confirmadas (em fila ou já pesquisadas) para retornar ao painel
-	const confirmedTechs = [];
-	for (const ent of allEnts) {
-		const cmpPQ0b = Engine.QueryInterface(ent, IID_ProductionQueue);
-		if (!cmpPQ0b) continue;
-		const q0b = cmpPQ0b.GetQueue();
-		if (!q0b) continue;
-		for (const qi of q0b) {
-			const t = qi.tech || qi.template;
-			if (t && !confirmedTechs.includes(t)) confirmedTechs.push(t);
-		}
-	}
+	const confirmedTechs = Array.from(confirmedSet);
 	// Também incluir as já concluídas que foram enviadas pelo painel
 	if (data && Array.isArray(data.sentTechs)) {
 		for (const t of data.sentTechs) {

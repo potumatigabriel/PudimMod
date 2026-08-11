@@ -145,13 +145,12 @@ Portuguese or English, detected automatically from the game's language. To force
 
 PudimMod is released under the **GNU General Public License v3 or later** — see `LICENSE`.
 
-It contains code derived from [AutoCiv](https://github.com/nanihadesuka/autociv) by **nani**,
-also GPL-3.0. Derived files carry a header naming the original and describing what changed;
-see `NOTICE` for the full attribution.
+All code is original — see `NOTICE`.
 
-PudimMod hotkeys live in their own `pudim.*` namespace and ship **unbound by default**, so
-running it alongside AutoCiv never produces a key conflict. Bind the ones you want in
-**Settings → Hotkeys**.
+**On AutoCiv:** PudimMod deliberately does *not* reimplement what
+[AutoCiv](https://github.com/nanihadesuka/autociv) already does. The two mods run side by
+side and cover different ground: AutoCiv gives you hotkeys, selection filters and lobby
+tooling, while PudimMod automates the economy and adds tactical analysis. Run both.
 
 ---
 ---
@@ -304,10 +303,9 @@ Português ou inglês, detectado automaticamente pelo idioma do jogo. Para forç
 
 O PudimMod é distribuído sob a **GNU General Public License v3 ou posterior** — veja `LICENSE`.
 
-Contém código derivado do [AutoCiv](https://github.com/nanihadesuka/autociv), do **nani**, também
-GPL-3.0. Os arquivos derivados trazem um cabeçalho indicando o original e o que foi alterado; a
-atribuição completa está no `NOTICE`.
+Todo o código é original — veja o `NOTICE`.
 
-Os atalhos do PudimMod ficam no namespace `pudim.*` e vêm **sem tecla atribuída por padrão**, então
-rodar junto com o AutoCiv nunca gera conflito de tecla. Configure os que quiser em
-**Configurações → Atalhos**.
+**Sobre o AutoCiv:** o PudimMod de propósito *não* refaz o que o
+[AutoCiv](https://github.com/nanihadesuka/autociv) já faz. Os dois rodam lado a lado e cobrem
+terrenos diferentes: o AutoCiv dá atalhos, filtros de seleção e ferramentas de lobby, enquanto o
+PudimMod automatiza a economia e acrescenta análise tática. Use os dois.

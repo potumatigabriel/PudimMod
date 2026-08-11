@@ -1435,6 +1435,9 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	// Teto de fazendas construídas automaticamente. Acima disso o jogador decide se quer
 	// mais — o mod não continua expandindo sozinho indefinidamente.
 	const PUDIM_MAX_FARMS = 9;
+	// Capacidade real de um campo, conferida em
+	// simulation/templates/template_structure_resource_field.xml: <MaxGatherers>5</MaxGatherers>
+	const PUDIM_FIELD_CAPACITY = 5;
 	if (farmCount >= PUDIM_MAX_FARMS || ccPositions.length === 0) { result._dbg.reason = "limit"; return result; }
 
 	const hasWoodForFarm = cmpPlayer.GetResourceCounts().wood >= 100;
@@ -1581,7 +1584,13 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	// Quantos workers de comida o ratio exige no total
 	const desiredFoodWorkers = Math.min(Math.ceil(effectiveTotal * foodW / totalW), totalGatherers);
 	// Fruta cobre até naturalFoodCapacity workers — fazendas cobrem o excedente
-	const farmWorkerTarget = Math.max(0, desiredFoodWorkers - naturalFoodCapacity);
+	// 9 fazendas x 5 coletores = teto de 45 trabalhadores em comida vinda de fazenda.
+	// Sem esse limite o alvo podia pedir mais gente do que as fazendas comportam, gerando
+	// déficit permanente: o mod tentaria construir para sempre e os workers excedentes
+	// ficariam sem vaga.
+	const farmWorkerCap = PUDIM_MAX_FARMS * PUDIM_FIELD_CAPACITY;
+	const farmWorkerTarget = Math.min(farmWorkerCap,
+		Math.max(0, desiredFoodWorkers - naturalFoodCapacity));
 	const deficit = farmWorkerTarget - currentFarmWorkers;
 
 	result._dbg.nfc = naturalFoodCount;
@@ -1599,7 +1608,7 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	farFoodWorkers = woodWorkerPool.slice(0, deficit);
 
 	// ── Verificar se fazendas existentes têm capacidade livre ────────────────────────────
-	// (GetMaxGatherers default = 25; GetNumGatherers = atual agora)
+	// (GetMaxGatherers de um campo = 5, conferido no template; GetNumGatherers = atual agora)
 	// Se há espaço: redirecionar workers para a fazenda mais próxima.
 	// Só construir nova fazenda quando não houver mais espaço nas existentes.
 	const farmsWithCap = [];

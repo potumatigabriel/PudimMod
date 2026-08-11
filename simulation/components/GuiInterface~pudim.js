@@ -584,9 +584,21 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 				// O filtro por território nos dois lados (cavaleiro + animal) evita o loop
 				// infinito de perseguição de animais que fugiam para fora da base.
 				if (baseUnderAttack) continue; // inimigo na base: não interferir
-				const isInsideTerritory = cmpTerritoryManager &&
-					cmpTerritoryManager.GetOwner(workerPos.x, workerPos.y) === player;
-				if (!isInsideTerritory) continue; // fora da base: não interferir
+				// Margem fora da fronteira: rebanhos (ovelhas, cabras) costumam pastar logo
+				// depois da borda do território, e exigir GetOwner() === player deixava a
+				// cavalaria parada olhando comida a 20m dali. A margem é amostrada em 8
+				// direções — se qualquer ponto a até `m` de distância for nosso, vale.
+				const nearOwnTerritory = (x, z, m) => {
+					if (!cmpTerritoryManager) return false;
+					if (cmpTerritoryManager.GetOwner(x, z) === player) return true;
+					const d = m * 0.7071; // componente diagonal
+					const pts = [[m,0],[-m,0],[0,m],[0,-m],[d,d],[-d,d],[d,-d],[-d,-d]];
+					for (const p of pts)
+						if (cmpTerritoryManager.GetOwner(x + p[0], z + p[1]) === player) return true;
+					return false;
+				};
+				// A própria cavalaria pode estar um pouco fora enquanto persegue.
+				if (!nearOwnTerritory(workerPos.x, workerPos.y, 60)) continue;
 				// workerPos já é Vector2D {x, y}; o {x, z} anterior deixava y undefined e a
 				// consulta voltava vazia — a cavalaria nunca achava caça e ficava parada
 				const cavNearby = cmpRangeManager.ExecuteQueryAroundPos(
@@ -602,8 +614,10 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 					const aPos = Engine.QueryInterface(ae, IID_Position);
 					if (!aPos || !aPos.IsInWorld()) continue;
 					const ap = aPos.GetPosition2D();
-					// Animal deve estar dentro do território do jogador
-					if (!cmpTerritoryManager || cmpTerritoryManager.GetOwner(ap.x, ap.y) !== player) continue;
+					// Animal até 40m FORA da fronteira ainda vale: é perto o bastante para
+					// caçar e voltar sem se expor. Mais que isso já é aventura no mapa, que
+					// era justamente o loop de perseguição que removemos antes.
+					if (!nearOwnTerritory(ap.x, ap.y, 40)) continue;
 					const dx = ap.x - workerPos.x, dz = ap.y - workerPos.y;
 					const d = dx*dx + dz*dz;
 					if (d < cavMinDist) { cavMinDist = d; cavBest = { id: ae, x: ap.x, z: ap.y, type: aType }; }

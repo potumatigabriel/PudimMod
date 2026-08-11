@@ -692,7 +692,13 @@ function pudim_RunAutoWork()
 		if (nowAutoWork > g_PudimHouseBuilderCooldown[bid])
 			delete g_PudimHouseBuilderCooldown[bid];
 	}
-	const idleWorkers = result.idleWorkers.filter(w => !g_PudimHouseBuilderCooldown[w.id]);
+	// Limpa carências vencidas e ignora quem acabou de ser despachado (ver g_PudimDispatchedAt)
+	for (const did in g_PudimDispatchedAt)
+		if (nowAutoWork - g_PudimDispatchedAt[did] > PUDIM_DISPATCH_GRACE)
+			delete g_PudimDispatchedAt[did];
+
+	const idleWorkers = result.idleWorkers.filter(w =>
+		!g_PudimHouseBuilderCooldown[w.id] && !g_PudimDispatchedAt[w.id]);
 	const bestResource = result.bestResource;
 
 	// Agrupar trabalhadores por alvo direto (ex: cardume, animal) ou por coordenada genérica
@@ -744,6 +750,7 @@ function pudim_RunAutoWork()
 			"queued": false,
 			"pushFront": false
 		});
+		pudim_MarkDispatched(grp.ids);
 	}
 
 	// 2. Enviar ordens direcionadas por posição (gather-near-position)
@@ -761,6 +768,7 @@ function pudim_RunAutoWork()
 			"force": false
 		};
 		Engine.PostNetworkCommand(cmd);
+		pudim_MarkDispatched(gp.ids);
 	}
 
 	// 3. Construção proativa de armazém (madeira) ou farmstead (fruta) quando worker vai longe.
@@ -984,6 +992,21 @@ var g_LastAutoHouseAttempt = 0;      // última vez que uma casa foi CONSTRUÍDA
 var g_LastAutoHouseCheck = 0;        // última vez que a condição foi VERIFICADA
 var g_PudimLastHouseProdCount = 1;   // CC+barracas na última checagem (cooldown adaptativo)
 var g_PudimHouseBuilderCooldown = {}; // {entityId: expiryMs} — builders protegidos de reassign por 5s após construct
+
+// Trabalhadores que ACABARAM de receber ordem de coleta. PostNetworkCommand é assíncrono:
+// a ordem só aparece no orderQueue alguns ticks depois, então no ciclo seguinte o
+// trabalhador ainda consta como ocioso e era reavaliado do zero. Como o déficit muda entre
+// ciclos, ele era mandado para OUTRO recurso — no log da partida a unidade 8229 recebeu
+// 12 ordens (5737, 161, 167, 7806, cada uma repetida 3x) sem nunca chegar a coletar.
+// Este carência elimina tanto o reenvio quanto o vai-e-vem entre recursos.
+var g_PudimDispatchedAt = {};        // {entityId: timestamp}
+const PUDIM_DISPATCH_GRACE = 6000;   // ms sem reavaliar quem acabou de ser despachado
+
+/** Marca trabalhadores como recém-despachados, protegendo-os de reatribuição. */
+function pudim_MarkDispatched(ids) {
+	const now = Date.now();
+	for (const id of ids) g_PudimDispatchedAt[id] = now;
+}
 // IDs atualmente protegidos (não expirados) — repassar pra simulação, que não tem acesso
 // direto a esse dict do GUI, pra sistemas de "buscar qualquer builder disponível" não
 // sequestrarem quem acabou de ser despachado (ex: aldeãs do balanceamento inicial).

@@ -553,15 +553,20 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 			}
 
 			if (cmpIdentity && cmpIdentity.HasClass("FastMoving")) {
-				// Cavalaria dentro do território: caça animais que estejam também dentro do território.
-				// Fora do território: fica ociosa para combate (não interferir).
-				// O filtro por território nos dois lados (cavaleiro + animal) evita o loop infinito
-				// de perseguição de animais que fugiam para fora da base.
+				// Cavalaria só recebe ordem do mod para CAÇAR, e apenas se: está ociosa
+				// (já garantido neste ramo), está DENTRO da base, e NÃO há inimigo na base.
+				// Com inimigo na base ou fora do território ela fica livre — é tropa de
+				// combate/exploração, e o scout é quem comanda nesses casos.
+				// O filtro por território nos dois lados (cavaleiro + animal) evita o loop
+				// infinito de perseguição de animais que fugiam para fora da base.
+				if (baseUnderAttack) continue; // inimigo na base: não interferir
 				const isInsideTerritory = cmpTerritoryManager &&
 					cmpTerritoryManager.GetOwner(workerPos.x, workerPos.y) === player;
 				if (!isInsideTerritory) continue; // fora da base: não interferir
+				// workerPos já é Vector2D {x, y}; o {x, z} anterior deixava y undefined e a
+				// consulta voltava vazia — a cavalaria nunca achava caça e ficava parada
 				const cavNearby = cmpRangeManager.ExecuteQueryAroundPos(
-					{ x: workerPos.x, z: workerPos.y }, 0, 200, [0], IID_ResourceSupply, false);
+					workerPos, 0, 200, [0], IID_ResourceSupply, false);
 				let cavBest = null, cavMinDist = Infinity;
 				for (const ae of cavNearby) {
 					const aSupply = Engine.QueryInterface(ae, IID_ResourceSupply);
@@ -784,19 +789,18 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 				if (rates[key] > 0) canGather.add(key.split(".")[0]);
 		} catch(e) {}
 
+		// Cavalaria NUNCA passa por aqui: quem a comanda é o ramo de ociosos acima (caçar só
+		// dentro da base e sem inimigo), e o scout. Se ela já está caçando, o rebalanceamento
+		// não pode arrastá-la para outro recurso.
+		if (cmpId && cmpId.HasClass("FastMoving")) continue;
+
 		for (const resType of sortedRes) {
 			if (canGather.size > 0 && !canGather.has(resType)) continue;
 
-
 			let target = null;
 			const isSoldier = cmpId && cmpId.HasClass("CitizenSoldier");
-			const isCav = cmpId && cmpId.HasClass("FastMoving");
 			if (resType === "food") {
-				if (isCav) {
-					// Cavalaria só tem taxa para food.meat (confirmado em
-					// template_unit_cavalry.xml): caçar é a única coleta possível
-					target = findNearestResource(workerPos, "food", 250, assignedEntities, false, "meat");
-				} else if (isSoldier) {
+				if (isSoldier) {
 					// Soldados NUNCA vão para Fields (campos agrícolas): causaria loop de evicção
 					// com pudim_GetFarmBuildData que os recoloca em madeira indefinidamente.
 					// Soldados só coletam frutas/bagas silvestres.
@@ -2198,8 +2202,12 @@ GuiInterface.prototype.pudim_GetScoutStatus = function(player, data) {
         let enemyPos = null;
         let enemyIsBuilding = false;
         if (cmpRangeManager && enemyPlayers.length > 0) {
+            // ExecuteQueryAroundPos espera Vector2D {x, y} (globalscripts/vector.js).
+            // Passava-se {x, z}: o campo y ficava undefined, a consulta não devolvia nada e o
+            // scout NUNCA detectava perigo — por isso o modo agressivo entrava na base
+            // inimiga e morria. p2d é o GetPosition2D() original, já no formato correto.
             const nearEnemies = cmpRangeManager.ExecuteQueryAroundPos(
-                { x: pos.x, z: pos.z }, 0, FLEE_RADIUS, enemyPlayers, IID_Identity, false
+                p2d, 0, FLEE_RADIUS, enemyPlayers, IID_Identity, false
             );
             let minDist = Infinity;
             for (const eEnt of nearEnemies) {

@@ -93,6 +93,36 @@ autociv_patchApplyN("onTick", function(target, that, args)
 	return result;
 });
 
+// ─── Ordens MANUAIS do jogador ────────────────────────────────────────────────
+
+/**
+ * handleUnitAction(position, action) é o funil por onde passa TODA ordem que o jogador
+ * dá às suas unidades (clique direito e botões de ação) — verificado em
+ * gui/session/input.js:1303 do jogo, que resolve a seleção com g_Selection.toList().
+ *
+ * Marcamos as unidades da seleção como "sob ordem do jogador". Enquanto estiverem
+ * executando essa ordem, nenhum sistema do mod as toca. Quando ficarem ociosas, o mod
+ * volta a assumi-las (a checagem de ocioso é feita no lado da simulação).
+ *
+ * Sem isto o mod sobrepunha o comando do jogador: no replay 0013 foram 633 comandos
+ * "gather" (contra 136 de um humano sem mod) — cada ordem nova zerando a anterior.
+ */
+autociv_patchApplyN("handleUnitAction", function(target, that, args)
+{
+	try
+	{
+		if (typeof g_Selection !== "undefined" && g_Selection)
+		{
+			const now = Date.now();
+			for (const ent of g_Selection.toList())
+				g_PudimPlayerOrders[ent] = now;
+		}
+	}
+	catch (e) {}
+
+	return target.apply(that, args);
+});
+
 // ─── Hook de Mudança de Seleção ───────────────────────────────────────────────
 
 /**

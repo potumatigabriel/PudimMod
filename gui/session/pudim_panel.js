@@ -262,6 +262,29 @@ function pudim_MarkModBuilt(x, z) {
 	g_PudimModBuiltPositions = g_PudimModBuiltPositions.filter(p => p.ts > cutoff);
 }
 
+/**
+ * Posições onde o jogador CANCELOU uma fundação do mod. Nunca mais construir ali.
+ * Sem isto o mod reconstruía no mesmo lugar assim que o cooldown expirava — virava loop
+ * e os recursos ficavam presos na fundação (problema relatado em jogo).
+ * Permanente na sessão: cancelar é decisão explícita do jogador.
+ */
+var g_PudimCancelledPositions = [];
+function pudim_MarkCancelled(x, z) {
+	for (const p of g_PudimCancelledPositions) {
+		const dx = p.x - x, dz = p.z - z;
+		if (dx*dx + dz*dz <= 12*12) return; // já registrado
+	}
+	g_PudimCancelledPositions.push({ x: x, z: z });
+	pudim_Log("INFO", "DROP", "construção cancelada pelo jogador em (" + x.toFixed(0) + "," + z.toFixed(0) + ") — não será refeita ali");
+}
+function pudim_IsCancelledSpot(x, z) {
+	for (const p of g_PudimCancelledPositions) {
+		const dx = p.x - x, dz = p.z - z;
+		if (dx*dx + dz*dz <= 40*40) return true;
+	}
+	return false;
+}
+
 
 // ═══════════════════════════════════════════════════════════════════
 // INICIALIZAÇÃO
@@ -518,7 +541,9 @@ function pudim_RunAutoWork()
 	{
 		result = Engine.GuiInterfaceCall("pudim_GetIdleWorkersAndBestResource", {
 			"weights": g_PudimResourceWeights,
-			"repeatBuilders": Object.keys(g_PudimRepeatBuilding).map(Number).filter(ent => g_PudimRepeatBuilding[ent])
+			"repeatBuilders": Object.keys(g_PudimRepeatBuilding).map(Number).filter(ent => g_PudimRepeatBuilding[ent]),
+			"playerOrdered": pudim_GetPlayerOrderedIds(),
+			"protectedIds": pudim_GetProtectedBuilderIds()
 		});
 	}
 	catch (e)
@@ -549,6 +574,7 @@ function pudim_RunAutoWork()
 						if (pd && pd.builderId && pd.template && pd.candidatePositions && pd.candidatePositions.length > 0) {
 							let fx = null, fz = null;
 							for (const pos of pd.candidatePositions) {
+								if (pudim_IsCancelledSpot(pos.x, pos.z)) continue; // jogador cancelou aqui
 								let r2 = null;
 								try { r2 = Engine.GuiInterfaceCall("SetBuildingPlacementPreview",
 									{ "template": pd.template, "x": pos.x, "z": pos.z, "angle": 0, "actorSeed": 0 }); } catch(e2) {}
@@ -687,6 +713,7 @@ function pudim_RunAutoWork()
 				    !proactive.candidatePositions || proactive.candidatePositions.length === 0) continue;
 				let foundX = null, foundZ = null;
 				for (const pos of proactive.candidatePositions) {
+					if (pudim_IsCancelledSpot(pos.x, pos.z)) continue; // jogador cancelou aqui
 					let res2 = null;
 					try {
 						res2 = Engine.GuiInterfaceCall("SetBuildingPlacementPreview", {
@@ -855,6 +882,24 @@ var g_PudimPanicModeStartTime = 0; // Quando o pânico atual começou (válvula 
 // (escaramuça com tropas suficientes) protege trabalhadores em risco mas deixa a economia rodar —
 // no log real, 1 batedor inimigo paralisou o auto-work por 2min e deixou 99 unidades ociosas.
 var g_PudimPanicFull = false;
+// Travas de segurança para NUNCA desguarnecer sozinho (ver pudim_ReturnPanicUnitsToWork).
+// Atualizadas a cada leitura de pudim_GetPanicData.
+var g_PudimNoCivCentre = false;        // Centro Cívico destruído
+var g_PudimSheltersUnderSiege = 0;     // abrigos ocupados com inimigo a ≤80m
+var g_PudimHoldGarrisonLogged = false; // evita repetir o log de "mantendo guarnecidas"
+
+// ── Histerese do pânico ────────────────────────────────────────────────────────
+// No replay 0013 foram 562 "garrison" + 556 "unload" (1.118 de 3.770 comandos), com as
+// MESMAS unidades guarnecidas de 5 a 7 vezes: guarnece → ameaça "some" → solta → detecta
+// de novo → guarnece. Enquanto guarnecido o trabalhador não coleta nada, então esse loop
+// consumia a economia. Três travas: ciclos consecutivos para entrar/sair, e um teto de
+// guarnições por unidade por partida.
+var g_PudimThreatStreak = 0;      // ciclos consecutivos COM ameaça
+var g_PudimCalmStreak = 0;        // ciclos consecutivos SEM ameaça
+var g_PudimGarrisonCount = {};    // entId -> quantas vezes já foi guarnecido
+const PUDIM_THREAT_CYCLES_TO_PANIC = 2;  // ~3s (ciclo de 1,5s) antes de guarnecer
+const PUDIM_CALM_CYCLES_TO_RELEASE = 4;  // ~6s de calma antes de soltar
+const PUDIM_MAX_GARRISON_PER_UNIT = 2;   // depois disso a unidade fica fora do pânico
 var PUDIM_PANIC_MAX_DURATION = 120000; // 2min: força retorno mesmo se detecção ficar "presa" (ex: inimigo parado perto do CC sem atacar)
 
 
@@ -873,6 +918,23 @@ function pudim_GetProtectedBuilderIds() {
 	const ids = [];
 	for (const id in g_PudimHouseBuilderCooldown)
 		if (g_PudimHouseBuilderCooldown[id] > now) ids.push(+id);
+	return ids;
+}
+
+/**
+ * Unidades que receberam ordem MANUAL do jogador (preenchido pelo hook de
+ * handleUnitAction em session~pudim.js). O mod não mexe nelas enquanto estiverem
+ * executando a ordem; assim que ficarem ociosas a simulação as libera.
+ * Mantido pequeno: entradas com mais de 10 min são descartadas.
+ */
+var g_PudimPlayerOrders = {};
+function pudim_GetPlayerOrderedIds() {
+	const cutoff = Date.now() - 600000;
+	const ids = [];
+	for (const id in g_PudimPlayerOrders) {
+		if (g_PudimPlayerOrders[id] < cutoff) { delete g_PudimPlayerOrders[id]; continue; }
+		ids.push(+id);
+	}
 	return ids;
 }
 var g_AutoHouseCandidateOffset = 0;
@@ -1047,6 +1109,8 @@ var g_PudimResearchAccum = 0;
 
 /** IDs de fundações de dropsite conhecidas (para detectar conclusões) */
 var g_PudimDropsiteFoundations = {}; // entityId → true
+/** Posição de cada fundação rastreada — usada para detectar cancelamento pelo jogador */
+var g_PudimDropsiteFoundationPos = {}; // entityId → { x, z }
 
 /** Acumulador de tempo para sistema de fundações de dropsite */
 var g_PudimFoundationAccum = 0;
@@ -1445,14 +1509,28 @@ function pudim_ProcessDropsiteFoundations()
 		const data = Engine.GuiInterfaceCall("pudim_GetDropsiteFoundationData", {
 			prevFoundationIds: prevIds,
 			modBuiltPositions: g_PudimModBuiltPositions,
-			protectedIds: pudim_GetProtectedBuilderIds()
+			protectedIds: pudim_GetProtectedBuilderIds().concat(pudim_GetPlayerOrderedIds())
 		});
 		if (!data) return;
 
-		// Atualizar rastreamento de fundações
+		// Fundação que sumiu SEM virar prédio = o jogador cancelou. Registrar a posição para
+		// nunca reconstruir ali (era o loop de "cancelei o armazém e ele voltava").
+		// data.completions traz as que viraram prédio; o que sumiu e não está lá foi cancelado.
+		const completedIds = new Set((data.completions || []).map(c => c.id));
+		const stillFoundation = new Set((data.foundations || []).map(f => f.id));
+		for (const oldId in g_PudimDropsiteFoundations) {
+			const idNum = +oldId;
+			if (stillFoundation.has(idNum) || completedIds.has(idNum)) continue;
+			const pos = g_PudimDropsiteFoundationPos[idNum];
+			if (pos) pudim_MarkCancelled(pos.x, pos.z);
+			delete g_PudimDropsiteFoundationPos[idNum];
+		}
+
+		// Atualizar rastreamento de fundações (id + posição, para detectar cancelamento acima)
 		g_PudimDropsiteFoundations = {};
 		for (const f of (data.foundations || [])) {
 			g_PudimDropsiteFoundations[f.id] = true;
+			g_PudimDropsiteFoundationPos[f.id] = { x: f.x, z: f.z };
 		}
 
 		// Feature 1: Enviar workers ociosos/novos para ajudar na fundação
@@ -1751,6 +1829,7 @@ function pudim_ProcessAdvancedAI()
 					// FASE 4: Teste de Colisão para posicionamento
 					let foundX = null, foundZ = null;
 					for (const pos of dropsiteData.candidatePositions) {
+						if (pudim_IsCancelledSpot(pos.x, pos.z)) continue; // jogador cancelou aqui
 						let res = null;
 						try {
 							res = Engine.GuiInterfaceCall("SetBuildingPlacementPreview", {
@@ -2240,14 +2319,32 @@ function pudim_ExecuteInitialBalance()
  */
 function pudim_ReturnToWork()
 {
-	pudim_ReturnPanicUnitsToWork();
+	// Botão do painel = ordem explícita do jogador: sempre obedece, mesmo sem CC ou em cerco.
+	pudim_ReturnPanicUnitsToWork(true);
 }
 
 /**
  * Envia de volta ao trabalho todos os trabalhadores que foram guarnecidos pelo pânico.
+ * @param {boolean} manual - true só quando o JOGADOR pediu (botão "Voltar ao Trabalho").
  */
-function pudim_ReturnPanicUnitsToWork()
+function pudim_ReturnPanicUnitsToWork(manual)
 {
+	// Trava de segurança: NUNCA desguarnecer sozinho se
+	//   (a) o Centro Cívico caiu — sem CC a base está sendo tomada; abrir as casas é
+	//       entregar as unidades. Só o jogador decide a hora de sair; ou
+	//   (b) há abrigo ocupado com inimigo a ≤80m (cerco em andamento).
+	// Foi exatamente isso que despejou as unidades no meio do exército inimigo.
+	if (!manual && (g_PudimNoCivCentre || g_PudimSheltersUnderSiege > 0)) {
+		if (!g_PudimHoldGarrisonLogged) {
+			g_PudimHoldGarrisonLogged = true;
+			pudim_Log("WARN", "PANIC", "mantendo unidades guarnecidas ("
+				+ (g_PudimNoCivCentre ? "sem CC" : "cerco: " + g_PudimSheltersUnderSiege + " abrigo(s)")
+				+ ") — use 'Voltar ao Trabalho' para soltar manualmente");
+		}
+		return;
+	}
+	g_PudimHoldGarrisonLogged = false;
+
 	if (g_PudimPanicMode)
 		pudim_Log("SUCCESS", "PANIC", "ameaça encerrada, retornando " + Object.keys(g_PudimPanicGarrisoned).length + " unidade(s) ao trabalho");
 
@@ -2341,7 +2438,22 @@ function pudim_ProcessPanic()
 	} catch(e) { return; }
 	if (!panicData) return;
 
+	// Estado que trava o desguarnecimento automático (ver pudim_ReturnPanicUnitsToWork)
+	g_PudimNoCivCentre = !!panicData.noCivCentre;
+	g_PudimSheltersUnderSiege = panicData.sheltersUnderSiege || 0;
+
 	const statusEl = Engine.TryGetGUIObjectByName("pudim_panicStatus");
+
+	// Histerese: contar ciclos consecutivos com/sem ameaça (mata o loop garrison↔unload)
+	if (panicData.underAttack) { g_PudimThreatStreak++; g_PudimCalmStreak = 0; }
+	else { g_PudimCalmStreak++; g_PudimThreatStreak = 0; }
+
+	// Ameaça ainda não confirmada: espera ciclos consecutivos antes de guarnecer qualquer um
+	if (panicData.underAttack && !g_PudimPanicMode &&
+	    g_PudimThreatStreak < PUDIM_THREAT_CYCLES_TO_PANIC) {
+		if (statusEl) statusEl.caption = "Situação: verificando ameaça...";
+		return;
+	}
 
 	if (panicData.underAttack) {
 		// Válvula de segurança: nunca fica preso em pânico indefinidamente, mesmo se a detecção
@@ -2368,7 +2480,7 @@ function pudim_ProcessPanic()
 		if (canDefend && panicData.enemyCount <= 2) {
 			// Pânico anterior ainda ativo? Ameaça trivial não renova o timer, então o mesmo
 			// timeout de 10s do fluxo normal libera as unidades aqui também.
-			if (g_PudimPanicMode && (now - g_PudimPanicLastThreat > 10000)) {
+			if (g_PudimPanicMode && (now - g_PudimPanicLastThreat > 10000 && g_PudimCalmStreak >= PUDIM_CALM_CYCLES_TO_RELEASE)) {
 				if (statusEl) statusEl.caption = "Retornando ao trabalho...";
 				pudim_ReturnPanicUnitsToWork();
 			} else if (statusEl && !g_PudimPanicMode) {
@@ -2393,12 +2505,16 @@ function pudim_ProcessPanic()
 			const safeCC = panicData.shelters.filter(s => s.type === "cc" && s.freeSlots > 0);
 			for (const worker of panicData.atRiskWorkers) {
 				if (g_PudimPanicGarrisoned[worker.id]) continue;
+				// Teto por unidade: quem já entrou e saiu 2x fica fora do pânico até o fim da
+				// partida — evita o vai-e-volta que travava a coleta
+				if ((g_PudimGarrisonCount[worker.id] || 0) >= PUDIM_MAX_GARRISON_PER_UNIT) continue;
 				if (!g_PudimPanicPreTask[worker.id] && worker.currentOrder)
 					g_PudimPanicPreTask[worker.id] = worker.currentOrder;
 				const shelter = safeCC.find(s => s.freeSlots > 0);
 				if (shelter) {
 					Engine.PostNetworkCommand({ "type": "garrison", "entities": [worker.id], "target": shelter.id, "queued": false });
 					g_PudimPanicGarrisoned[worker.id] = { shelterID: shelter.id };
+					g_PudimGarrisonCount[worker.id] = (g_PudimGarrisonCount[worker.id] || 0) + 1;
 					shelter.freeSlots--;
 				}
 			}
@@ -2439,6 +2555,8 @@ function pudim_ProcessPanic()
 
 		for (const worker of panicData.atRiskWorkers) {
 			if (g_PudimPanicGarrisoned[worker.id]) continue;
+			// Teto por unidade (ver PUDIM_MAX_GARRISON_PER_UNIT)
+			if ((g_PudimGarrisonCount[worker.id] || 0) >= PUDIM_MAX_GARRISON_PER_UNIT) continue;
 
 			// Salvar tarefa anterior (só na primeira vez)
 			if (!g_PudimPanicPreTask[worker.id] && worker.currentOrder)
@@ -2453,6 +2571,7 @@ function pudim_ProcessPanic()
 					"queued": false
 				});
 				g_PudimPanicGarrisoned[worker.id] = { shelterID: shelter.id };
+				g_PudimGarrisonCount[worker.id] = (g_PudimGarrisonCount[worker.id] || 0) + 1;
 				shelter.freeSlots--;
 			} else if (rallyCCPos) {
 				// Sem abrigo disponível: mover para perto do CC
@@ -2489,7 +2608,7 @@ function pudim_ProcessPanic()
 			shelter.freeSlots--;
 		}
 
-	} else if (g_PudimPanicMode && (now - g_PudimPanicLastThreat > 10000)) {
+	} else if (g_PudimPanicMode && (now - g_PudimPanicLastThreat > 10000 && g_PudimCalmStreak >= PUDIM_CALM_CYCLES_TO_RELEASE)) {
 		// Ameaça cessou há 10 segundos — retorno automático ao trabalho
 		if (statusEl) statusEl.caption = "Retornando ao trabalho...";
 		pudim_ReturnPanicUnitsToWork();

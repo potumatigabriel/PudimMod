@@ -235,6 +235,18 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 	// distintos (deduplicados por proximidade) e todos são tentados no mesmo ciclo.
 	const result = { "idleWorkers": [], "bestResource": "food", "suggestStorehouse": [], "suggestFarmstead": [], "longWalkers": [] };
 
+	// Unidades sob ordem MANUAL do jogador (marcadas pelo hook de handleUnitAction).
+	// Enquanto estiverem EXECUTANDO a ordem, nenhum sistema do mod as toca — se o jogador
+	// mandou colher fruta num ponto, é lá que elas ficam. Assim que ficarem ociosas
+	// (tarefa concluída), voltam a ser gerenciadas normalmente.
+	const playerOrdered = new Set(((data && data.playerOrdered) || []).map(Number));
+	const protectedIds = new Set(((data && data.protectedIds) || []).map(Number));
+	const pudimSkipUnit = function(ent, cmpUnitAI) {
+		if (protectedIds.has(ent)) return true;
+		if (!playerOrdered.has(ent)) return false;
+		return !!(cmpUnitAI && !cmpUnitAI.IsIdle()); // ainda cumprindo a ordem do jogador
+	};
+
 	// Workers em trânsito (ordem "Gather" com target específico) para cada entidade-recurso.
 	// Preenchido no scan de entidades abaixo, ANTES de findNearestResource ser chamado.
 	// Corrige superlotação: GetNumGatherers() retorna 0 para workers caminhando — sem isso,
@@ -513,6 +525,8 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 		const cmpUnitAI = Engine.QueryInterface(ent, IID_UnitAI);
 		if (!cmpGatherer || !cmpUnitAI || Engine.QueryInterface(ent, IID_Foundation) || Engine.QueryInterface(ent, IID_Mirage) || cmpUnitAI.isGarrisoned || (data.repeatBuilding && data.repeatBuilding[ent]))
 			continue;
+		// Ordem manual do jogador em andamento (ou unidade recém-comandada pelo mod): não tocar
+		if (pudimSkipUnit(ent, cmpUnitAI)) continue;
 
 		const cmpPos = Engine.QueryInterface(ent, IID_Position);
 		if (!cmpPos || !cmpPos.IsInWorld()) continue;
@@ -838,6 +852,8 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 	for (const ent of allEnts) {
 		const cmpUnitAI2 = Engine.QueryInterface(ent, IID_UnitAI);
 		if (!cmpUnitAI2 || cmpUnitAI2.isGarrisoned || cmpUnitAI2.IsIdle()) continue;
+		// Se o jogador mandou colher longe, é decisão dele — não redirecionar
+		if (pudimSkipUnit(ent, cmpUnitAI2)) continue;
 		const cmpId2 = Engine.QueryInterface(ent, IID_Identity);
 		if (!cmpId2 || cmpId2.HasClass("CitizenSoldier") || cmpId2.HasClass("FastMoving")) continue;
 		if (!Engine.QueryInterface(ent, IID_ResourceGatherer)) continue;
@@ -1050,12 +1066,38 @@ GuiInterface.prototype.pudim_GetPanicData = function(player, data)
 			if (pos && pos.IsInWorld()) ccPositions.push(pos.GetPosition2D());
 		}
 	}
-	if (ccPositions.length === 0) return result;
 
-	// Inimigos combatentes dentro de 220m de qualquer CC
+	// Sem CC (destruído) NÃO é "sem ameaça" — é o momento MAIS perigoso da partida.
+	// Antes havia `if (ccPositions.length === 0) return result;`, que devolvia
+	// underAttack=false: o mod ficava cego para os inimigos dentro da base, o painel
+	// concluía "ameaça cessou" e 10s depois despejava todo mundo das casas no meio do
+	// exército inimigo. Agora usamos outras estruturas como âncora e, em último caso, as
+	// próprias unidades — a detecção continua funcionando com o CC morto.
+	const anchorPositions = ccPositions.slice();
+	if (anchorPositions.length === 0) {
+		for (const ent of myEnts) {
+			const id = Engine.QueryInterface(ent, IID_Identity);
+			if (!id || !id.HasClass("Structure")) continue;
+			if (Engine.QueryInterface(ent, IID_Foundation)) continue;
+			const pos = Engine.QueryInterface(ent, IID_Position);
+			if (pos && pos.IsInWorld()) anchorPositions.push(pos.GetPosition2D());
+		}
+	}
+	if (anchorPositions.length === 0) {
+		for (const ent of myEnts) {
+			if (!Engine.QueryInterface(ent, IID_UnitAI)) continue;
+			const pos = Engine.QueryInterface(ent, IID_Position);
+			if (pos && pos.IsInWorld()) { anchorPositions.push(pos.GetPosition2D()); break; }
+		}
+	}
+	if (anchorPositions.length === 0) return result;
+	result.noCivCentre = ccPositions.length === 0;
+
+	// Inimigos combatentes dentro de 220m de qualquer âncora da base (CC ou, se o CC caiu,
+	// outra estrutura / a própria tropa — ver bloco acima)
 	const enemyNear = [];
 	const seenEnemies = new Set();
-	for (const ccPos of ccPositions) {
+	for (const ccPos of anchorPositions) {
 		const near = cmpRangeManager.ExecuteQueryAroundPos(ccPos, 0, 220, enemies, IID_Identity, false);
 		for (const e of near) {
 			if (seenEnemies.has(e)) continue;
@@ -1116,7 +1158,10 @@ GuiInterface.prototype.pudim_GetPanicData = function(player, data)
 		const pos = Engine.QueryInterface(ent, IID_Position);
 		if (!pos || !pos.IsInWorld()) continue;
 		const ep = pos.GetPosition2D();
-		for (const cc of ccPositions) {
+		// anchorPositions (não ccPositions): com o CC destruído a contagem de defensores
+		// dava 0, e "aliados < inimigos" jogava direto em pânico total justo quando é
+		// preciso decidir com clareza.
+		for (const cc of anchorPositions) {
 			const dx = ep.x - cc.x, dz = ep.y - cc.y;
 			if (dx*dx + dz*dz < 200*200) { alliedMilitary++; break; }
 		}
@@ -1158,6 +1203,24 @@ GuiInterface.prototype.pudim_GetPanicData = function(player, data)
 
 	// Exportar posições dos CCs para fallback "ficar perto do CC"
 	result.ccPositions = ccPositions.map(p => ({ x: p.x, z: p.y }));
+
+	// Abrigos OCUPADOS que estão cercados: enquanto houver inimigo a ≤80m de um prédio com
+	// gente dentro, desguarnecer é sentença de morte. O painel usa isto para nunca soltar
+	// ninguém em cerco (foi o que matou as unidades quando o CC caiu).
+	let occupiedUnderSiege = 0;
+	for (const ent of myEnts) {
+		if (Engine.QueryInterface(ent, IID_Foundation)) continue;
+		const cmpGar = Engine.QueryInterface(ent, IID_GarrisonHolder);
+		if (!cmpGar || cmpGar.GetEntities().length === 0) continue;
+		const gp = Engine.QueryInterface(ent, IID_Position);
+		if (!gp || !gp.IsInWorld()) continue;
+		const gpos = gp.GetPosition2D();
+		for (const ep of enemyPos) {
+			const dx = gpos.x - ep.x, dz = gpos.y - ep.y;
+			if (dx*dx + dz*dz < 80*80) { occupiedUnderSiege++; break; }
+		}
+	}
+	result.sheltersUnderSiege = occupiedUnderSiege;
 
 	// Trabalhadores e soldados em risco (dentro de 120m de inimigo)
 	for (const ent of myEnts) {
@@ -2368,12 +2431,26 @@ GuiInterface.prototype.pudim_GetFocusFireCorrections = function(player, data)
 	// dividir: força suficiente (com margem) pra limpar o grupo pequeno rápido, e o
 	// grosso do exército no grupo grande desde o início.
 
-	// 1. Coletar inimigos vivos perto de qualquer soldado meu (raio 120m, dedup)
+	// 1. Coletar inimigos vivos perto do COMBATE.
+	// Antes isto varria (soldados × jogadores inimigos) — com 100 soldados e 7 inimigos eram
+	// ~700 consultas de raio 120m a cada 2s, e foi uma das causas da queda de desempenho.
+	// Agora: uma varredura por jogador inimigo, centrada no centroide das minhas tropas em
+	// combate, com raio que cobre a dispersão delas + 120m de folga.
+	const cX = attackingSoldiers.reduce((a, u) => a + u.x, 0) / attackingSoldiers.length;
+	const cZ = attackingSoldiers.reduce((a, u) => a + u.z, 0) / attackingSoldiers.length;
+	let spread = 0;
+	for (const s of attackingSoldiers) {
+		const dx = s.x - cX, dz = s.z - cZ;
+		const d = dx*dx + dz*dz;
+		if (d > spread) spread = d;
+	}
+	const scanRadius = Math.min(400, Math.sqrt(spread) + 120);
+
 	const enemyUnits = [];
 	const seenEnemy = new Set();
-	for (const s of attackingSoldiers) {
+	{
 		for (const ep of enemies) {
-			const near = cmpRangeManager.ExecuteQueryAroundPos({ x: s.x, y: s.z }, 0, 120, [ep], IID_Health, false);
+			const near = cmpRangeManager.ExecuteQueryAroundPos({ x: cX, y: cZ }, 0, scanRadius, [ep], IID_Health, false);
 			for (const e of near) {
 				if (seenEnemy.has(e)) continue;
 				const cmpHealth = Engine.QueryInterface(e, IID_Health);

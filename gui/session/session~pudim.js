@@ -196,11 +196,19 @@ function pudim_UpdateSelectionButton()
 
 			if (iconL) iconL.sprite = anyLocal ? "stretched:session/icons/stances/passive.png" : "grayscale:stretched:session/icons/stances/passive.png";
 			if (selL) selL.hidden = !anyLocal;
-			if (btnL) btnL.tooltip = "[font=\"sans-bold-13\"]Explorar Base (PudimMod)[/font]\n[font=\"sans-13\"]Explora as redondezas do seu Centro Civico.\n" + (anyLocal ? "[color=\"80 220 80\"]ATIVADO[/color]" : "[color=\"180 180 180\"]DESATIVADO[/color]") + " - Evita batalhas e contorna inimigos.[/font]";
+			// Texto vem do dicionário (pudim_i18n.js) para respeitar o idioma do jogo
+			const pudimState = (on) => on
+				? "[color=\"80 220 80\"]" + pudim_T("state.on") + "[/color]"
+				: "[color=\"180 180 180\"]" + pudim_T("state.off") + "[/color]";
+			if (btnL) btnL.tooltip = "[font=\"sans-bold-13\"]" + pudim_T("scout.local.title") +
+				"[/font]\n[font=\"sans-13\"]" + pudim_T("scout.local.desc") + "\n" +
+				pudimState(anyLocal) + " - " + pudim_T("scout.local.note") + "[/font]";
 
 			if (iconD) iconD.sprite = anyDeep ? "stretched:session/icons/stances/aggressive.png" : "grayscale:stretched:session/icons/stances/aggressive.png";
 			if (selD) selD.hidden = !anyDeep;
-			if (btnD) btnD.tooltip = "[font=\"sans-bold-13\"]Explorar Mapa Profundo (PudimMod)[/font]\n[font=\"sans-13\"]Explora as pontas distantes do mapa sem visao.\n" + (anyDeep ? "[color=\"80 220 80\"]ATIVADO[/color]" : "[color=\"180 180 180\"]DESATIVADO[/color]") + " - Foge de defesas inimigas automaticamente.[/font]";
+			if (btnD) btnD.tooltip = "[font=\"sans-bold-13\"]" + pudim_T("scout.deep.title") +
+				"[/font]\n[font=\"sans-13\"]" + pudim_T("scout.deep.desc") + "\n" +
+				pudimState(anyDeep) + " - " + pudim_T("scout.deep.note") + "[/font]";
 		} else {
 			pnlR.hidden = true;
 		}

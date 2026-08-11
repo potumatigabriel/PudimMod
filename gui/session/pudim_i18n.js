@@ -110,11 +110,20 @@ const PUDIM_STRINGS = {
 	"tip.counselorCam":  ["Move the camera to the spot the advice refers to.",
 	                      "Leva a câmera até o ponto a que a dica se refere."],
 
-	// Scout (painel de seleção da cavalaria)
-	"tip.scoutLocal":    ["Local scouting: sweep the area around your base looking for resources.",
-	                      "Exploração local: varre a região ao redor da sua base procurando recursos."],
-	"tip.scoutDeep":     ["Deep scouting: find the enemy base and circle it at a safe distance, fleeing from any troops it meets.",
-	                      "Exploração profunda: acha a base inimiga e a contorna a distância segura, fugindo de qualquer tropa que encontrar."]
+	// Scout (painel de seleção da cavalaria) — montados dinamicamente com o estado atual
+	// em pudim_UpdateSelectionButton (session~pudim.js), por isso são partes separadas.
+	"scout.local.title": ["Scout Base (PudimMod)", "Explorar Base (PudimMod)"],
+	"scout.local.desc":  ["Sweeps the area around your Civic Centre looking for resources.",
+	                      "Varre a região ao redor do seu Centro Cívico procurando recursos."],
+	"scout.local.note":  ["Avoids fights and goes around enemies.",
+	                      "Evita batalhas e contorna inimigos."],
+	"scout.deep.title":  ["Scout Deep (PudimMod)", "Explorar Profundo (PudimMod)"],
+	"scout.deep.desc":   ["Finds the enemy base and circles it at a safe distance.",
+	                      "Acha a base inimiga e a contorna a distância segura."],
+	"scout.deep.note":   ["Flees from enemy troops and blacklists risky areas.",
+	                      "Foge de tropas inimigas e marca áreas arriscadas."],
+	"state.on":          ["ON", "ATIVADO"],
+	"state.off":         ["OFF", "DESATIVADO"]
 };
 
 /**
@@ -162,9 +171,10 @@ const PUDIM_TOOLTIP_MAP = {
 	"pudim_toggleAutoHouseBtn":   "tip.autoHouse",
 	"pudim_toggleCounterTrainBtn":"tip.counterTrain",
 	"pudim_toggleAutoQueueBtn":   "tip.autoQueue",
-	"pudim_counselorCameraBtn":   "tip.counselorCam",
-	"unitPudimScoutLocalButton":  "tip.scoutLocal",
-	"unitPudimScoutDeepButton":   "tip.scoutDeep"
+	"pudim_counselorCameraBtn":   "tip.counselorCam"
+	// Os botões de exploração NÃO entram aqui: o tooltip deles é montado em
+	// pudim_UpdateSelectionButton (session~pudim.js) a cada mudança de seleção, porque
+	// inclui o estado ligado/desligado. Repetir aqui seria sobrescrito e viraria letra morta.
 };
 
 /**

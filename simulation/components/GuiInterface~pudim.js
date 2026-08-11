@@ -532,7 +532,6 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 	const idleWorkersList = [];
 	const assignedWorkers = [];
 	const activeGatherers = { "food": [], "wood": [], "stone": [], "metal": [] };
-	let repairWorkersCount = 0; // workers em Repair (construindo) — neutros, não rebalanceáveis
 	
 	for (const ent of allEnts) {
 		const cmpDropsite = Engine.QueryInterface(ent, IID_ResourceDropsite);
@@ -660,8 +659,6 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 				if (ord0.data && ord0.data.type) resType = ord0.data.type.generic;
 				else if (ord0.data && ord0.data.resourceType) resType = ord0.data.resourceType.generic;
 				if (resType && activeGatherers[resType] !== undefined) activeGatherers[resType].push(ent);
-			} else if (ord0 && ord0.type === "Repair") {
-				repairWorkersCount++;
 			}
 		}
 	}
@@ -2906,6 +2903,13 @@ GuiInterface.prototype.pudim_GetProactiveStorehouseData = function(player, data)
 		if (cmpUnitAI.IsIdle()) { builderEnt = ent; break; }
 	}
 	if (!builderEnt) {
+		// Ordem de preferência entre quem JÁ está coletando. Antes pegava o primeiro que
+		// aparecesse na lista — no início de partida isso era tipicamente uma aldeã da
+		// fruta, e a base perdia comida para erguer um dropsite (relatado em jogo: 2
+		// trabalhadores saíram da comida para o armazém e a comida nunca se recuperou).
+		// A comida é a coleta mais frágil no início (poucos arbustos, capacidade pequena),
+		// então ela é sempre a última a ser sacrificada; madeira é a mais abundante.
+		let best = null, bestRank = 99;
 		for (const ent of allEnts) {
 			if (protectedIds.has(ent)) continue;
 			const ci = Engine.QueryInterface(ent, IID_Identity);
@@ -2914,8 +2918,28 @@ GuiInterface.prototype.pudim_GetProactiveStorehouseData = function(player, data)
 			const cmpUnitAI = Engine.QueryInterface(ent, IID_UnitAI);
 			if (!cmpUnitAI) continue;
 			const ord = cmpUnitAI.orderQueue && cmpUnitAI.orderQueue.length > 0 ? cmpUnitAI.orderQueue[0] : null;
-			if (!ord || ord.type === "Gather") { builderEnt = ent; break; }
+			if (ord && ord.type !== "Gather") continue;
+
+			let rank = 1; // sem ordem: praticamente ocioso
+			if (ord) {
+				let generic = null;
+				const tg = ord.data && ord.data.target;
+				if (tg) {
+					const rsB = Engine.QueryInterface(tg, IID_ResourceSupply);
+					const tp = rsB && rsB.GetType();
+					if (tp) generic = tp.generic;
+				} else if (ord.data) {
+					const rt = ord.data.type || ord.data.resourceType;
+					if (rt) generic = rt.generic;
+				}
+				rank = generic === "wood" ? 0 : (generic === "food" ? 3 : 2);
+			}
+			if (rank < bestRank) {
+				bestRank = rank; best = ent;
+				if (rank === 0) break; // já está na madeira: não dá para melhorar
+			}
 		}
+		builderEnt = best;
 	}
 	if (!builderEnt) return null;
 
@@ -3006,6 +3030,13 @@ GuiInterface.prototype.pudim_GetProactiveFarmsteadData = function(player, data)
 		if (cmpUnitAI.IsIdle()) { builderEnt = ent; break; }
 	}
 	if (!builderEnt) {
+		// Ordem de preferência entre quem JÁ está coletando. Antes pegava o primeiro que
+		// aparecesse na lista — no início de partida isso era tipicamente uma aldeã da
+		// fruta, e a base perdia comida para erguer um dropsite (relatado em jogo: 2
+		// trabalhadores saíram da comida para o armazém e a comida nunca se recuperou).
+		// A comida é a coleta mais frágil no início (poucos arbustos, capacidade pequena),
+		// então ela é sempre a última a ser sacrificada; madeira é a mais abundante.
+		let best = null, bestRank = 99;
 		for (const ent of allEnts) {
 			if (protectedIds.has(ent)) continue;
 			const ci = Engine.QueryInterface(ent, IID_Identity);
@@ -3014,8 +3045,28 @@ GuiInterface.prototype.pudim_GetProactiveFarmsteadData = function(player, data)
 			const cmpUnitAI = Engine.QueryInterface(ent, IID_UnitAI);
 			if (!cmpUnitAI) continue;
 			const ord = cmpUnitAI.orderQueue && cmpUnitAI.orderQueue.length > 0 ? cmpUnitAI.orderQueue[0] : null;
-			if (!ord || ord.type === "Gather") { builderEnt = ent; break; }
+			if (ord && ord.type !== "Gather") continue;
+
+			let rank = 1; // sem ordem: praticamente ocioso
+			if (ord) {
+				let generic = null;
+				const tg = ord.data && ord.data.target;
+				if (tg) {
+					const rsB = Engine.QueryInterface(tg, IID_ResourceSupply);
+					const tp = rsB && rsB.GetType();
+					if (tp) generic = tp.generic;
+				} else if (ord.data) {
+					const rt = ord.data.type || ord.data.resourceType;
+					if (rt) generic = rt.generic;
+				}
+				rank = generic === "wood" ? 0 : (generic === "food" ? 3 : 2);
+			}
+			if (rank < bestRank) {
+				bestRank = rank; best = ent;
+				if (rank === 0) break; // já está na madeira: não dá para melhorar
+			}
 		}
+		builderEnt = best;
 	}
 	if (!builderEnt) return null;
 

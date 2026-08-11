@@ -1432,7 +1432,10 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	result._dbg.fc = farmCount;
 	// Limite dinâmico: ~1 fazenda por 5 workers, até 40 total (pop cap 200)
 	// O sistema de ratio já controla quando construir — este limite é apenas segurança
-	if (farmCount >= 40 || ccPositions.length === 0) { result._dbg.reason = "limit"; return result; }
+	// Teto de fazendas construídas automaticamente. Acima disso o jogador decide se quer
+	// mais — o mod não continua expandindo sozinho indefinidamente.
+	const PUDIM_MAX_FARMS = 9;
+	if (farmCount >= PUDIM_MAX_FARMS || ccPositions.length === 0) { result._dbg.reason = "limit"; return result; }
 
 	const hasWoodForFarm = cmpPlayer.GetResourceCounts().wood >= 100;
 	if (!hasWoodForFarm) { result._dbg.reason = "nowood"; return result; }
@@ -1615,7 +1618,13 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 
 	result._dbg.fwc = farFoodWorkers.length;
 	result._dbg.fmc = farmsWithCap.length;
-	if (farmsWithCap.length > 0) {
+	// Só redirecionar EM VEZ de construir quando a capacidade livre cobre todo o déficit.
+	// Antes bastava UMA fazenda com UMA vaga para o mod devolver "assign" e nunca mais
+	// construir — por isso, depois que as frutas acabavam, ele fazia as primeiras fazendas
+	// e parava para sempre. Com o déficit maior que as vagas, agora constrói mais uma.
+	const totalFreeSlots = farmsWithCap.reduce(function(s, f) { return s + f.freeSlots; }, 0);
+	result._dbg.tfs = totalFreeSlots;
+	if (farmsWithCap.length > 0 && totalFreeSlots >= farFoodWorkers.length) {
 		// Distribuir workers para fazendas com espaço (mais próxima primeiro)
 		const assignments = [];
 		const usedSlots = {}; // farmId → slots já alocados nesta rodada
@@ -3538,6 +3547,11 @@ GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 		// Cestos de vime: modifica ResourceGatherer/Rates/food.fruit — é bônus de COMIDA
 		// (o comentário antigo dizia "madeira", conferido errado contra o JSON da tech)
 		if (n.indexOf("wicker") !== -1) return 110;
+		// Capacidade de carga (Cestas → Carrinho de Mão → Carroça): soma +5 em food, wood,
+		// stone E metal de uma vez, então rende mais que qualquer tech de um recurso só.
+		// Cestas já é liberada na Fase 1 (requirements: phase_village) e a regra de fase
+		// daqui a permite; faltava prioridade — com 76 o armazém sempre escolhia outra antes.
+		if (n.indexOf("gather_capacity") !== -1) return 105;
 		if (n.indexOf("woodcutting") !== -1 || n.indexOf("lumbering") !== -1) return 100;
 		if (n.indexOf("farming") !== -1 || n.indexOf("plows") !== -1 || n.indexOf("rotation") !== -1) return 92;
 		if (n.indexOf("mining") !== -1 || n.indexOf("silver") !== -1) return 84;

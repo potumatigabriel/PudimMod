@@ -3979,8 +3979,8 @@ var pudim_exposedFunctions = {
   	"pudim_GetDropsiteFoundationData": 1
 };
 
-if (typeof autociv_patchApplyN !== "undefined") {
-    autociv_patchApplyN(GuiInterface.prototype, "ScriptCall", function(target, that, args)
+if (typeof pudim_patchApplyN !== "undefined") {
+    pudim_patchApplyN(GuiInterface.prototype, "ScriptCall", function(target, that, args)
     {
         const [player, name, vargs] = args;
         if (name in pudim_exposedFunctions)
@@ -3988,7 +3988,8 @@ if (typeof autociv_patchApplyN !== "undefined") {
         return target.apply(that, args);
     });
 } else {
-    // Fallback if autociv is not defined, we just override ScriptCall manually (very basic)
+    // Rede de segurança: se !!!pudim_patchApplyN.js não tiver carregado por algum motivo,
+    // substituímos ScriptCall na mão. Encadeia no original para não quebrar o jogo base.
     const oldScriptCall = GuiInterface.prototype.ScriptCall;
     GuiInterface.prototype.ScriptCall = function(player, name, args) {
         if (name in pudim_exposedFunctions && typeof this[name] === "function") {

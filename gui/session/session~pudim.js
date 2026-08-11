@@ -3,7 +3,7 @@
  *
  * Hook principal na sessão de jogo do 0 A.D.
  * Conecta o painel do PudimMod ao ciclo de vida da sessão usando
- * o mesmo padrão autociv_patchApplyN usado pelo AutoCiv e ModernGUI.
+ * pudim_patchApplyN (gui/common/!!!pudim_patchApplyN.js), nosso próprio wrapper.
  *
  * Funções patcheadas:
  *  - init()    → inicializa o painel após todos os sistemas carregarem
@@ -12,7 +12,7 @@
 
 // ─── Hook de Inicialização ─────────────────────────────────────────────────────
 
-autociv_patchApplyN("init", function(target, that, args)
+pudim_patchApplyN("init", function(target, that, args)
 {
 	const result = target.apply(that, args);
 
@@ -29,7 +29,7 @@ autociv_patchApplyN("init", function(target, that, args)
 	// Patchear updateUnitCommands dinamicamente, pois unit_commands.js carrega depois de session~pudim.js
 	try
 	{
-		autociv_patchApplyN("updateUnitCommands", function(targetUpdate, thatUpdate, argsUpdate)
+		pudim_patchApplyN("updateUnitCommands", function(targetUpdate, thatUpdate, argsUpdate)
 		{
 			const resUpdate = targetUpdate.apply(thatUpdate, argsUpdate);
 			try
@@ -56,7 +56,7 @@ autociv_patchApplyN("init", function(target, that, args)
 // Controle de tempo para o tick do PudimMod
 var g_PudimLastTickTime = 0;
 
-autociv_patchApplyN("onTick", function(target, that, args)
+pudim_patchApplyN("onTick", function(target, that, args)
 {
 	let result;
 	try { result = target.apply(that, args); } catch(e) {}
@@ -107,7 +107,7 @@ autociv_patchApplyN("onTick", function(target, that, args)
  * Sem isto o mod sobrepunha o comando do jogador: no replay 0013 foram 633 comandos
  * "gather" (contra 136 de um humano sem mod) — cada ordem nova zerando a anterior.
  */
-autociv_patchApplyN("handleUnitAction", function(target, that, args)
+pudim_patchApplyN("handleUnitAction", function(target, that, args)
 {
 	try
 	{
@@ -130,7 +130,7 @@ autociv_patchApplyN("handleUnitAction", function(target, that, args)
  * Usamos o padrão de patchear onSimulationUpdate que é chamado após cada
  * atualização da simulação (inclui mudanças de seleção).
  */
-autociv_patchApplyN("onSimulationUpdate", function(target, that, args)
+pudim_patchApplyN("onSimulationUpdate", function(target, that, args)
 {
 	let result;
 	try { result = target.apply(that, args); } catch(e) {}
@@ -595,7 +595,7 @@ function pudim_ForceScoutTick() {
 	}
 }
 
-autociv_patchApplyN("onTick", function(target, that, args) {
+pudim_patchApplyN("onTick", function(target, that, args) {
 	const result = target.apply(that, args);
 
 	const now = Date.now();
@@ -609,7 +609,7 @@ autociv_patchApplyN("onTick", function(target, that, args) {
 });
 
 // Garante que o painel scout some ao selecionar qualquer coisa que nao seja cavalaria
-autociv_patchApplyN("onSelectionChange", function(target, that, args) {
+pudim_patchApplyN("onSelectionChange", function(target, that, args) {
 	const result = target.apply(that, args);
 	try {
 		pudim_UpdateSelectionButton();

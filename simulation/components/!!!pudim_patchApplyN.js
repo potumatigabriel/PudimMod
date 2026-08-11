@@ -1,43 +1,53 @@
 /**
- * PudimMod - !!!pudim_patchApplyN.js (Simulation side)
- * Fallback de autociv_patchApplyN caso o AutoCiv esteja desativado.
+ * PudimMod — pudim_patchApplyN.js (lado simulação)
+ *
+ * Mesma função do arquivo homônimo em gui/common/, para o contexto da simulação.
+ * Os dois contextos são isolados no 0AD, então cada um precisa da sua definição.
+ *
+ * Aqui é obrigatório o Engine.RegisterGlobal: cada componente da simulação roda no seu
+ * próprio escopo, e sem registrar o global a função não estaria visível em
+ * GuiInterface~pudim.js. O prefixo "!!!" garante que este arquivo carregue primeiro.
  */
-if (typeof autociv_patchApplyN === "undefined")
+// Guarda de idempotência: o 0AD recarrega os scripts da simulação (rejoin, deserialização),
+// e Engine.RegisterGlobal falha se o mesmo global for registrado duas vezes.
+if (typeof pudim_patchApplyN === "undefined")
 {
-	global.autociv_patchApplyN = function()
+
+global.pudim_patchApplyN = function()
+{
+	if (arguments.length < 2)
 	{
-		if (arguments.length < 2)
-		{
-			let error = new Error("Insufficient arguments to patch: " + arguments[0]);
-			warn(error.message);
-			warn(error.stack);
-			return;
-		}
+		const error = new Error("PudimMod: argumentos insuficientes para o patch: " + arguments[0]);
+		warn(error.message);
+		warn(error.stack);
+		return;
+	}
 
-		let prefix, method, patch;
-		if (arguments.length == 2)
-		{
-			prefix = global;
-			method = arguments[0];
-			patch = arguments[1];
-		}
-		else
-		{
-			prefix = arguments[0];
-			method = arguments[1];
-			patch = arguments[2];
-		}
+	let prefix, method, patch;
+	if (arguments.length == 2)
+	{
+		prefix = global;
+		method = arguments[0];
+		patch = arguments[1];
+	}
+	else
+	{
+		prefix = arguments[0];
+		method = arguments[1];
+		patch = arguments[2];
+	}
 
-		if (!(method in prefix))
-		{
-			let error = new Error("Function not defined: " + method);
-			warn(error.message);
-			warn(error.stack);
-			return;
-		}
+	if (!(method in prefix))
+	{
+		const error = new Error("PudimMod: função não definida: " + method);
+		warn(error.message);
+		warn(error.stack);
+		return;
+	}
 
-		prefix[method] = new Proxy(prefix[method], { apply: patch });
-	};
+	prefix[method] = new Proxy(prefix[method], { "apply": patch });
+};
 
-	Engine.RegisterGlobal("autociv_patchApplyN", autociv_patchApplyN);
+Engine.RegisterGlobal("pudim_patchApplyN", global.pudim_patchApplyN);
+
 }

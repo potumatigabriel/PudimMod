@@ -3,7 +3,7 @@
  * Adiciona as opções de configuração do PudimMod no menu de opções do 0 A.D.
  */
 
-autociv_patchApplyN("init", function(target, that, args) {
+pudim_patchApplyN("init", function(target, that, args) {
 	const promise = target.apply(that, args);
 
 	try

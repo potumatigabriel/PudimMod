@@ -6,8 +6,9 @@ economy and adds tactical tooling — without ever desyncing a multiplayer match
 Everything runs in the GUI layer and every action goes out as a standard network command, so all
 clients stay in lockstep.
 
-> **Requires [AutoCiv](https://github.com/nanihadesuka/autociv)** — PudimMod uses its
-> `autociv_patchApplyN` helper to patch vanilla functions.
+> **No dependencies beyond 0 A.D. itself.** PudimMod ships its own `pudim_patchApplyN`
+> helper for patching vanilla functions, so it does not need AutoCiv — and because the
+> helper lives in its own namespace, running both mods together causes no conflict.
 
 ---
 
@@ -127,8 +128,9 @@ e acrescenta ferramentas táticas — sem nunca dessincronizar uma partida multi
 Tudo roda na camada de GUI e toda ação sai como comando de rede padrão, então todos os clientes
 permanecem em lockstep.
 
-> **Requer o [AutoCiv](https://github.com/nanihadesuka/autociv)** — o PudimMod usa o auxiliar
-> `autociv_patchApplyN` dele para modificar funções do jogo.
+> **Sem dependências além do próprio 0 A.D.** O PudimMod traz o seu `pudim_patchApplyN` para
+> modificar funções do jogo, então não precisa do AutoCiv — e como o auxiliar fica no namespace
+> próprio, rodar os dois mods juntos não gera conflito.
 
 ---
 

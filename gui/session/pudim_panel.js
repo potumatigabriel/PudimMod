@@ -896,10 +896,19 @@ var g_PudimHoldGarrisonLogged = false; // evita repetir o log de "mantendo guarn
 // guarnições por unidade por partida.
 var g_PudimThreatStreak = 0;      // ciclos consecutivos COM ameaça
 var g_PudimCalmStreak = 0;        // ciclos consecutivos SEM ameaça
-var g_PudimGarrisonCount = {};    // entId -> quantas vezes já foi guarnecido
+var g_PudimLastReleaseTime = {};  // entId -> quando foi solto do abrigo pela última vez
 const PUDIM_THREAT_CYCLES_TO_PANIC = 2;  // ~3s (ciclo de 1,5s) antes de guarnecer
 const PUDIM_CALM_CYCLES_TO_RELEASE = 4;  // ~6s de calma antes de soltar
-const PUDIM_MAX_GARRISON_PER_UNIT = 2;   // depois disso a unidade fica fora do pânico
+// Tempo mínimo entre SOLTAR e guarnecer de novo a MESMA unidade. Não é um teto por
+// partida: se a base for atacada 10 vezes, o trabalhador é protegido 10 vezes. Isto só
+// impede o vai-e-volta patológico (soltar e re-guarnecer em segundos) que travava a coleta.
+const PUDIM_REGARRISON_COOLDOWN = 20000;
+
+/** true se a unidade pode ser guarnecida agora (não foi solta há pouquíssimo tempo) */
+function pudim_CanGarrison(entId) {
+	const last = g_PudimLastReleaseTime[entId];
+	return !last || (Date.now() - last) > PUDIM_REGARRISON_COOLDOWN;
+}
 var PUDIM_PANIC_MAX_DURATION = 120000; // 2min: força retorno mesmo se detecção ficar "presa" (ex: inimigo parado perto do CC sem atacar)
 
 
@@ -2349,8 +2358,12 @@ function pudim_ReturnPanicUnitsToWork(manual)
 		pudim_Log("SUCCESS", "PANIC", "ameaça encerrada, retornando " + Object.keys(g_PudimPanicGarrisoned).length + " unidade(s) ao trabalho");
 
 	// Primeiro: desguarnecer unidades que foram enviadas para abrigo
+	const releaseNow = Date.now();
 	for (const entId in g_PudimPanicGarrisoned)
 	{
+		// Marca o momento da soltura: alimenta o cooldown anti vai-e-volta. A unidade
+		// volta a ser protegida num ataque novo, só não é re-guarnecida em segundos.
+		g_PudimLastReleaseTime[entId] = releaseNow;
 		const garrisonInfo = g_PudimPanicGarrisoned[entId];
 		if (garrisonInfo && garrisonInfo.shelterID) {
 			Engine.PostNetworkCommand({
@@ -2505,16 +2518,15 @@ function pudim_ProcessPanic()
 			const safeCC = panicData.shelters.filter(s => s.type === "cc" && s.freeSlots > 0);
 			for (const worker of panicData.atRiskWorkers) {
 				if (g_PudimPanicGarrisoned[worker.id]) continue;
-				// Teto por unidade: quem já entrou e saiu 2x fica fora do pânico até o fim da
-				// partida — evita o vai-e-volta que travava a coleta
-				if ((g_PudimGarrisonCount[worker.id] || 0) >= PUDIM_MAX_GARRISON_PER_UNIT) continue;
+				// Só bloqueia se foi solto agora há pouco (anti vai-e-volta). Ataque novo
+				// depois do cooldown protege a unidade normalmente, quantas vezes for preciso.
+				if (!pudim_CanGarrison(worker.id)) continue;
 				if (!g_PudimPanicPreTask[worker.id] && worker.currentOrder)
 					g_PudimPanicPreTask[worker.id] = worker.currentOrder;
 				const shelter = safeCC.find(s => s.freeSlots > 0);
 				if (shelter) {
 					Engine.PostNetworkCommand({ "type": "garrison", "entities": [worker.id], "target": shelter.id, "queued": false });
 					g_PudimPanicGarrisoned[worker.id] = { shelterID: shelter.id };
-					g_PudimGarrisonCount[worker.id] = (g_PudimGarrisonCount[worker.id] || 0) + 1;
 					shelter.freeSlots--;
 				}
 			}
@@ -2555,8 +2567,9 @@ function pudim_ProcessPanic()
 
 		for (const worker of panicData.atRiskWorkers) {
 			if (g_PudimPanicGarrisoned[worker.id]) continue;
-			// Teto por unidade (ver PUDIM_MAX_GARRISON_PER_UNIT)
-			if ((g_PudimGarrisonCount[worker.id] || 0) >= PUDIM_MAX_GARRISON_PER_UNIT) continue;
+			// Anti vai-e-volta (ver PUDIM_REGARRISON_COOLDOWN) — não limita quantas vezes a
+			// unidade pode ser protegida ao longo da partida
+			if (!pudim_CanGarrison(worker.id)) continue;
 
 			// Salvar tarefa anterior (só na primeira vez)
 			if (!g_PudimPanicPreTask[worker.id] && worker.currentOrder)
@@ -2571,7 +2584,6 @@ function pudim_ProcessPanic()
 					"queued": false
 				});
 				g_PudimPanicGarrisoned[worker.id] = { shelterID: shelter.id };
-				g_PudimGarrisonCount[worker.id] = (g_PudimGarrisonCount[worker.id] || 0) + 1;
 				shelter.freeSlots--;
 			} else if (rallyCCPos) {
 				// Sem abrigo disponível: mover para perto do CC

@@ -3351,14 +3351,67 @@ GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 	// Auto-pesquisa restrita a: Armazém, Edifício Agrícola e Forja (não CC, não forte, não quartel)
 	const ALLOWED_RESEARCH_CLASSES = ["Storehouse", "Farmstead", "Forge", "Smith", "Blacksmith"];
 
+	// ── Liberação de pesquisa por FASE ────────────────────────────────────────────
+	// Fase 1 (Aldeia): só comida e madeira (+ capacidade de carga, que serve a todos)
+	// Fase 2 (Vila):   + pedra e metal
+	// Fase 3 (Cidade): + combate e saúde
+	// phase_town/phase_city são techs "dummy" marcadas como pesquisadas via o campo
+	// "replaces" da tech real (TechnologyManager.js:106-111) — logo IsTechnologyResearched
+	// funciona para qualquer civ, inclusive as que têm variante própria (athen, pers).
+	const isPhase2 = cmpTechMgr.IsTechnologyResearched("phase_town");
+	const isPhase3 = cmpTechMgr.IsTechnologyResearched("phase_city");
+
+	/**
+	 * Classifica a tech pelos recursos que ela REALMENTE afeta, lendo as modificações do
+	 * template (TechnologyTemplates.Get — mesma fonte usada pelo TechnologyManager).
+	 * Classificar por nome era frágil: gather_wicker_baskets, comentado no código como
+	 * "bônus de madeira", na verdade modifica ResourceGatherer/Rates/food.fruit — é comida.
+	 * Retorna um Set com "food" | "wood" | "stone" | "metal", ou vazio se não for de coleta.
+	 */
+	const techResources = (tech) => {
+		const out = new Set();
+		let tpl = null;
+		try { tpl = TechnologyTemplates.Get(tech); } catch(e) { return out; }
+		if (!tpl || !tpl.modifications) return out;
+		for (const mod of tpl.modifications) {
+			const v = mod && mod.value;
+			if (typeof v !== "string") continue;
+			if (v.indexOf("ResourceGatherer/") !== 0) continue;
+			// formatos: ResourceGatherer/Rates/food.fruit | ResourceGatherer/Capacities/wood
+			const tail = v.split("/").pop();          // "food.fruit" ou "wood"
+			const res = tail.split(".")[0];           // "food" | "wood" | "stone" | "metal"
+			if (res === "food" || res === "wood" || res === "stone" || res === "metal")
+				out.add(res);
+		}
+		return out;
+	};
+
+	/** true se a tech é permitida na fase atual */
+	const allowedInPhase = (tech) => {
+		const n = tech.toLowerCase();
+		// Combate e saúde: só na Fase 3
+		if (n.indexOf("attack_") !== -1 || n.indexOf("armor_") !== -1 || n.indexOf("health_") !== -1)
+			return isPhase3;
+
+		const resSet = techResources(tech);
+		if (resSet.size === 0) return isPhase3; // não é de coleta: trata como não-prioritária
+
+		// Capacidade de carga afeta food+wood também → liberada desde a Fase 1
+		if (resSet.has("food") || resSet.has("wood")) return true;
+		// Só pedra/metal → a partir da Fase 2
+		return isPhase2;
+	};
+
 	// Prioridade por padrão de nome da tecnologia — apenas techs econômicas de coleta
 	const scoreTech = (tech) => {
+		if (!allowedInPhase(tech)) return 0;
 		const n = tech.toLowerCase();
 		// Fase de avanço: decisão manual do jogador — não pesquisar automaticamente
 		if (n.indexOf("phase_") !== -1) return 0;
 		// Techs excluídas explicitamente (inúteis ou imprevisíveis)
 		if (n.indexOf("fertility") !== -1 || n.indexOf("festival") !== -1) return 0;
-		// Cestos de vime (gather_wicker_baskets) — bônus de madeira exclusivo Gaul, máxima prioridade
+		// Cestos de vime: modifica ResourceGatherer/Rates/food.fruit — é bônus de COMIDA
+		// (o comentário antigo dizia "madeira", conferido errado contra o JSON da tech)
 		if (n.indexOf("wicker") !== -1) return 110;
 		if (n.indexOf("woodcutting") !== -1 || n.indexOf("lumbering") !== -1) return 100;
 		if (n.indexOf("farming") !== -1 || n.indexOf("plows") !== -1 || n.indexOf("rotation") !== -1) return 92;

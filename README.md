@@ -1,65 +1,239 @@
-# PudimMod (0 A.D. Mod)
+# PudimMod — a 0 A.D. utility mod
 
-O **PudimMod** é um mod utilitário para o jogo de estratégia **0 A.D.** (Alpha 28). O objetivo é reduzir a microgestão, automatizar comportamentos econômicos e fornecer ferramentas táticas avançadas — sem causar OOS (dessincronização) em multiplayer.
+A quality-of-life mod for **0 A.D. Alpha 28 (Boiorix)**. It cuts micromanagement, automates the
+economy and adds tactical tooling — without ever desyncing a multiplayer match.
 
----
+Everything runs in the GUI layer and every action goes out as a standard network command, so all
+clients stay in lockstep.
 
-## Recursos Principais
-
-### 1. Estimador de Combate
-- Exibe HP total, DPS e contagem por tipo (infantaria M/R, cavalaria, cerco, suporte) para aliados e inimigos próximos.
-- Barra dinâmica de probabilidade de vitória baseada em poder ofensivo.
-
-### 2. Auto-Trabalho (Worker Quotas)
-- Distribui trabalhadores ociosos em cotas percentuais configuráveis por recurso (comida, madeira, pedra, metal).
-- Soldados e cavalarias têm repulsa natural à comida; mulheres ganham prioridade em fazendas.
-- Lenhadores expandem raio de busca até 400m se a madeira próxima acabar, priorizando florestas densas longe de instalações inimigas.
-
-### 3. Auto-Fila Automática
-- Ativa autoqueue em todos os edifícios de produção no início da partida.
-- Reativa automaticamente a cada 8 segundos se o jogo desativar por falta de recursos — a fila nunca para sozinha.
-
-### 4. Auto-Scout de Cavalaria
-- Cavalaria selecionada explora o mapa em modo **Local** (perto do CC) ou **Deep** (mapa inteiro).
-- Memória de setores 8×8: visita setores inexplorados mais próximos do CC primeiro, criando padrão espiral/circular.
-- Fuga automática ao detectar ameaças a 90m — voa 120m em direção oposta.
-- **Marca território inimigo**: ao fugir de estruturas inimigas (CC, torre, castelo), bloqueia permanentemente o setor e os adjacentes — o scout nunca volta para a base inimiga.
-- **Anti-stuck triplo**: (1) movimento <10 unidades/2s → recua ao CC e bloqueia setor imediatamente; (2) timeout de 10s sem progresso → abandona alvo; (3) idle longe do destino → bloqueia setor alvo e atual. Elimina travamento em lagos e terreno impassável.
-- Auto-desativação ao receber comando manual (caminhar, atacar, coletar).
-- Exploração circular: setores inexplorados mais próximos do CC têm prioridade; depois revisa os mais antigos.
-
-### 5. Inteligência Econômica Avançada
-- **Mercado Inteligente (Auto-Barter):** Troca automática quando recurso > 2000 e outro < 500.
-- **Smart Dropsites:** Detecta trabalhadores longe de armazéns (>60m), calcula centroide do cluster florestal, posiciona novo armazém fora da floresta com 8 candidatos validados. Foca em florestas grandes (≥4 nós de recurso) e evita clusters próximos a CC inimigos (< 200m).
-- **Redistribuição pós-armazém:** Workers movidos de 3 em 3 para diferentes árvores próximas ao novo armazém.
-
-### 6. Inteligência Militar Avançada
-- **Auto-Kite:** Infantaria ranged foge automaticamente de inimigos melee a <9m, a cada 600ms.
-- **Retirada Estratégica (Auto-Retreat):** Tropas com HP < 20% recuam para curador ou templo mais próximo.
-- **Foco de Fogo Inteligente:** Atiradores reorientam alvos para curadores, cerco e suporte inimigo em raio de 50m.
-- **Auto-Guarnição Defensiva:** Arqueiros ociosos entram em torres/fortalezas quando inimigos se aproximam.
-- **Sistema de Pânico:** Exército inimigo perto do CC → workers se abrigam em casas/CC, ranged entram em torres. Retorno automático após 6s sem ameaça. Ativável/desativável no painel.
-
-### 7. Repetir Construção
-- Construtores posicionam nova fundação adjacente ao terminar um edifício.
-
-### 8. Barra de Aliados
-- Relatório em tempo real para você e aliados: fase (I–IV), pop, K/D, aldeões, infantaria, cavalaria, arqueiros, cerco e coletores por recurso (F/W/S/M).
-- Fundo azul translúcido quando um jogador está evoluindo de fase; pisca verde por 4 segundos ao concluir.
-- Tudo na mesma barra — sem widgets separados no topo.
+> **Requires [AutoCiv](https://github.com/nanihadesuka/autociv)** — PudimMod uses its
+> `autociv_patchApplyN` helper to patch vanilla functions.
 
 ---
 
-## Painel de Controle
-Acessível pelo ícone do pudim no menu superior. Permite:
-- Ligar/desligar Auto-Trabalho e ajustar cotas por recurso
-- Toggles de todas as IAs avançadas (ON/OFF individuais)
-- Botão "Voltar ao Trabalho" após o sistema de pânico
-- Auto-casas com threshold configurável
+## Control panel
+
+Open it from the pudim icon in the top bar. The header has three buttons: **▼ / ▶** collapses the
+panel down to just the combat estimator, **Log** opens the log viewer, **X** closes the panel.
+
+Every control has a tooltip explaining what it does, in English or Portuguese depending on the
+game's language.
 
 ---
 
-## Compatibilidade
-- **100% OOS-safe em multiplayer**: todo estado fica na GUI, ações via comandos de rede padrão.
-- Requer **AutoCiv** (fornece `autociv_patchApplyN`).
-- Testado em 0 A.D. Alpha 28 (Boiorix).
+## Combat estimator
+
+Side-by-side readout of your forces and the enemy's: unit count, total HP, DPS, and a breakdown by
+type (melee/ranged infantry, cavalry, siege, support). A win-probability bar summarises it. Updates
+on its own, and **Refresh Estimate** recomputes on demand.
+
+## Economy
+
+**Auto-work** sends idle citizens to gather, following per-resource quotas you set with the
+food / wood / stone / metal sliders. Set a resource to zero and the mod never assigns anyone to it —
+the sliders are yours, the mod does not override them.
+
+- Cavalry never gathers. It stays free for combat and scouting, but **does hunt animals inside your
+  own territory** — and only those, so it never chases a fleeing animal across the map.
+- Soldiers gather berries, never farm fields (that would fight with the farm logic).
+- Workers already gathering are **rarely** pulled to another resource: moving one costs the whole
+  round trip. Below 100 population it only happens when a resource has *zero* coverage and another
+  is 20 workers over quota. Above 100 population, where one worker is noise, normal rebalancing
+  resumes. New units coming out of production are always the preferred way to fill a gap.
+
+**Farms** — built once berries can no longer keep up, capped at **9 farms**. Each field holds 5
+gatherers, so the mod targets at most 45 farm workers. It only redirects workers to existing farms
+instead of building when the free slots cover the whole shortfall.
+
+**Proactive dropsites** — a storehouse goes up next to distant forest, and a farmstead next to
+distant fruit, *before* workers waste time walking. It skips spots near enemy civic centres.
+
+**Auto-queue** keeps the training queue full at the civic centre and barracks, learns the batch size
+you configured, and works around the engine bug that silently shrinks a batch when resources run
+short. Female citizens stop at 50, after which production switches to soldiers.
+
+**Auto-houses** builds houses before the population cap blocks training, with a cooldown that adapts
+to how many production buildings you own.
+
+**Auto-research** is deliberately limited to the **storehouse, farmstead and forge** — never the
+civic centre, fortress or barracks, and it never advances the phase: that stays your call. Priority
+follows the phase: phase 1 unlocks food, wood and carrying capacity; phase 2 adds stone and metal;
+phase 3 adds combat and health. Carrying-capacity techs (Baskets → Wheelbarrow → Cart) rank highest
+among gathering techs, since they add to all four resources at once. A tech that never reaches the
+queue within 90 s is blacklisted for the session.
+
+**Smart market** barters surplus for whatever is running short.
+
+## Military
+
+- **Auto-kite** — ranged units step away from melee attackers and are given a queued attack order,
+  so they resume fighting instead of standing still after repositioning.
+- **Auto-retreat** — units below 20% health pull back to a healer or temple.
+- **Focus fire** — your soldiers concentrate on one target instead of each picking a different enemy.
+- **Defensive garrison** — workers shelter in nearby buildings during a raid and come back out once
+  it is calm, with cooldowns that prevent the garrison/ungarrison loop that used to stall the economy.
+- **Panic mode** — on a serious attack, everything stops and the workers are protected. **Back to
+  Work** returns them.
+- **Counter-train** — trains units that answer what the enemy actually has on the field.
+
+## Scouting
+
+Select cavalry and pick a mode:
+
+- **Local** — sweeps the area around your base looking for resources.
+- **Deep** — finds the enemy base and circles it at a safe 120 m, advancing ~40° per waypoint so it
+  genuinely goes around instead of bouncing between a few points.
+
+On contact the scout **runs directly away from the enemy**, not back to the base, and only resumes
+exploring after two consecutive clear checks. Enemy structures blacklist their sector permanently;
+mobile troops blacklist it for three minutes. Anti-stuck detection handles lakes and impassable
+terrain, and any manual order you give hands control straight back to you.
+
+## Awareness
+
+**Ally bar** — a live line per player in your team: name in that player's map colour, phase, pop,
+the four resources, gatherers per resource, kills/deaths and army composition. It flashes while a
+player is advancing a phase and when they are under attack.
+
+**Auto-flare** marks a real battle on the minimap. It is **local only** — it never notifies the
+other players — and fires **once per battle**, at the centre of the largest cluster of fighting, and
+only when at least three units are engaged. Hunting animals is not a battle and never triggers it.
+
+**Strategic advisor** offers a running read on the match, with a button to jump the camera to
+whatever it is talking about.
+
+**Repeat build** — a builder places the next foundation adjacent as soon as it finishes one.
+
+## Match log
+
+Everything the mod decides is recorded, and once a minute a **snapshot** is appended: population,
+phase, all four resources, gatherers per resource, army composition, kills/deaths, and whether you
+are in combat. The log is kept **per match** (not per day) and the **last 10 matches** are retained,
+so a whole game can be read back from start to finish without filling the disk.
+
+## Language
+
+Portuguese or English, detected automatically from the game's language. To force one, set
+`pudim.lang` to `pt` or `en` in the user config.
+
+---
+---
+
+# PudimMod — mod utilitário para 0 A.D.
+
+Mod de conveniência para o **0 A.D. Alpha 28 (Boiorix)**. Reduz a microgestão, automatiza a economia
+e acrescenta ferramentas táticas — sem nunca dessincronizar uma partida multiplayer.
+
+Tudo roda na camada de GUI e toda ação sai como comando de rede padrão, então todos os clientes
+permanecem em lockstep.
+
+> **Requer o [AutoCiv](https://github.com/nanihadesuka/autociv)** — o PudimMod usa o auxiliar
+> `autociv_patchApplyN` dele para modificar funções do jogo.
+
+---
+
+## Painel de controle
+
+Abra pelo ícone do pudim na barra superior. O cabeçalho tem três botões: **▼ / ▶** encolhe o painel
+para mostrar só o estimador de combate, **Log** abre o visualizador de log, **X** fecha o painel.
+
+Todo controle tem um tooltip explicando o que faz, em português ou inglês conforme o idioma do jogo.
+
+---
+
+## Estimador de combate
+
+Leitura lado a lado das suas forças e das inimigas: contagem de unidades, HP total, DPS e a divisão
+por tipo (infantaria corpo a corpo/à distância, cavalaria, cerco, suporte). Uma barra de
+probabilidade de vitória resume tudo. Atualiza sozinho, e **Atualizar Estimativa** recalcula na hora.
+
+## Economia
+
+O **auto-trabalho** manda cidadãos ociosos coletarem, seguindo as cotas por recurso que você define
+nos controles de comida / madeira / pedra / metal. Zere um recurso e o mod nunca manda ninguém para
+ele — as prioridades são suas, o mod não passa por cima.
+
+- A cavalaria nunca coleta. Fica livre para combate e exploração, mas **caça animais dentro do seu
+  território** — e só esses, então nunca sai perseguindo animal que foge pelo mapa.
+- Soldados coletam frutas, nunca campos de fazenda (isso brigaria com a lógica das fazendas).
+- Trabalhadores que já estão coletando **raramente** são puxados para outro recurso: mover um custa a
+  viagem inteira. Abaixo de 100 de população isso só acontece quando um recurso está com *zero*
+  cobertura e outro está 20 trabalhadores acima da cota. Acima de 100, onde um trabalhador é ruído, o
+  rebalanceamento normal volta. As unidades que estão nascendo são sempre a forma preferida de
+  preencher uma falta.
+
+**Fazendas** — construídas quando as frutas já não dão conta, com teto de **9 fazendas**. Cada campo
+comporta 5 coletores, então o alvo máximo é 45 trabalhadores em fazenda. Só redireciona para as
+fazendas existentes em vez de construir quando as vagas livres cobrem todo o déficit.
+
+**Armazéns proativos** — um armazém sobe perto de floresta distante, e um edifício agrícola perto de
+fruta distante, *antes* de os trabalhadores perderem tempo andando. Evita pontos perto de centros
+cívicos inimigos.
+
+A **auto-fila** mantém a fila de treino cheia no centro cívico e nos quartéis, aprende o tamanho de
+lote que você configurou e contorna o bug do motor que encolhe o lote em silêncio quando falta
+recurso. Cidadãs param em 50, e a partir daí a produção passa a soldados.
+
+As **auto-casas** constroem casas antes de o limite de população travar o treino, com um tempo de
+espera que se adapta à quantidade de edifícios de produção que você tem.
+
+A **auto-pesquisa** é limitada de propósito ao **armazém, edifício agrícola e forja** — nunca centro
+cívico, fortaleza ou quartel, e nunca avança de fase: isso continua sendo decisão sua. A prioridade
+segue a fase: a fase 1 libera comida, madeira e capacidade de carga; a fase 2 acrescenta pedra e
+metal; a fase 3 acrescenta combate e vida. As techs de capacidade de carga (Cestas → Carrinho de Mão
+→ Carroça) são as mais prioritárias entre as de coleta, porque somam nos quatro recursos de uma vez.
+Uma tech que não entra na fila em 90 s vai para a lista negra da sessão.
+
+O **mercado inteligente** troca o que está sobrando pelo que está faltando.
+
+## Militar
+
+- **Auto-kite** — unidades à distância se afastam de atacantes corpo a corpo e recebem uma ordem de
+  ataque enfileirada, então voltam a lutar em vez de ficar paradas depois de reposicionar.
+- **Auto-retirada** — unidades abaixo de 20% de vida recuam para um curador ou templo.
+- **Foco de fogo** — seus soldados concentram num alvo só em vez de cada um escolher um inimigo.
+- **Guarnição defensiva** — trabalhadores se abrigam em prédios próximos durante um ataque e voltam
+  quando acalma, com esperas que impedem o vai-e-volta de guarnecer/soltar que travava a economia.
+- **Modo pânico** — num ataque sério, tudo para e os trabalhadores são protegidos. **Voltar ao
+  Trabalho** os traz de volta.
+- **Counter-train** — treina unidades que fazem frente ao que o inimigo realmente tem em campo.
+
+## Exploração
+
+Selecione a cavalaria e escolha o modo:
+
+- **Local** — varre a região ao redor da sua base procurando recursos.
+- **Profundo** — acha a base inimiga e a contorna a 120 m de distância segura, avançando ~40° por
+  ponto para de fato dar a volta em vez de ricochetear entre poucos pontos.
+
+Ao ser avistado, o scout **foge na direção oposta ao inimigo**, não de volta para a base, e só volta
+a explorar após duas verificações seguidas sem perigo. Estruturas inimigas bloqueiam o setor
+permanentemente; tropas móveis bloqueiam por três minutos. A detecção de travamento cuida de lagos e
+terreno impassável, e qualquer ordem manual sua devolve o controle na hora.
+
+## Percepção
+
+**Barra de aliados** — uma linha ao vivo por jogador do seu time: nome na cor daquele jogador no
+mapa, fase, população, os quatro recursos, coletores por recurso, abates/perdas e composição do
+exército. Pisca enquanto um jogador avança de fase e quando está sob ataque.
+
+O **flare automático** marca uma batalha real no minimapa. Ele é **só local** — nunca avisa os outros
+jogadores — e dispara **uma vez por batalha**, no centro do maior aglomerado de luta, e apenas quando
+há pelo menos três unidades envolvidas. Caçar animais não é batalha e nunca aciona o aviso.
+
+O **conselheiro estratégico** dá uma leitura contínua da partida, com um botão que leva a câmera até
+o ponto comentado.
+
+**Repetir construção** — o construtor coloca a próxima fundação ao lado assim que termina uma.
+
+## Log da partida
+
+Tudo o que o mod decide é registrado e, uma vez por minuto, é acrescentado um **snapshot**: população,
+fase, os quatro recursos, coletores por recurso, composição do exército, abates/perdas e se você está
+em combate. O log é guardado **por partida** (não por dia) e as **10 últimas partidas** são
+preservadas, então dá para reler um jogo inteiro do começo ao fim sem encher o disco.
+
+## Idioma
+
+Português ou inglês, detectado automaticamente pelo idioma do jogo. Para forçar um deles, defina
+`pudim.lang` como `pt` ou `en` na configuração do usuário.

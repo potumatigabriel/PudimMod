@@ -688,7 +688,15 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 	// NOVO ALGORITMO DE DISTRIBUIÇÃO (Cota Percentual de Trabalhadores)
 	let activeWeights = [];
 	let totalWeight = 0;
-	let totalWorkers = idleWorkersList.length + repairWorkersCount; // repair = neutros, não rebalanceáveis
+	// Construtores (ordem Repair) NÃO entram na conta. Eles não coletam nada agora, então
+	// incluí-los inflava as cotas de todos os recursos: com 10 coletando e 2 construindo, as
+	// cotas somavam 12 para 10 braços disponíveis, criando déficit aparente permanente e
+	// empurrando gente para o recurso que parecesse mais vazio.
+	// Isso mordia junto com outro efeito no início de partida: os 2 trabalhadores que saem
+	// da comida para erguer o armazém somem de activeGatherers.wood enquanto constroem, e a
+	// madeira passa a parecer sem ninguém — então todo ocioso era despachado para lá.
+	// Quando o construtor termina e fica ocioso, ele volta a ser contado normalmente.
+	let totalWorkers = idleWorkersList.length;
 	for (const type of ["food", "wood", "stone", "metal"]) {
 		if (weights[type] > 0) {
 			activeWeights.push(type);

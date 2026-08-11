@@ -771,18 +771,32 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 			return localDeficits[b] - localDeficits[a];
 		});
 
+		// O que ESTA unidade consegue coletar, lido do próprio componente em vez de
+		// deduzido pela classe. GetGatherRates() devolve { "food.meat": 5, "wood.tree": ... }
+		// (ResourceGatherer.js:119-132), então o prefixo antes do ponto é o recurso genérico.
+		// Campeão nem chega aqui: não tem ResourceGatherer, logo já foi filtrado antes.
+		// Verificado nos templates do motor: infantaria coleta os 4 recursos; cavalaria só
+		// food.meat. A regra antiga barrava TODA a cavalaria e presumia classes fixas.
+		const canGather = new Set();
+		try {
+			const rates = cmpGatherer.GetGatherRates() || {};
+			for (const key in rates)
+				if (rates[key] > 0) canGather.add(key.split(".")[0]);
+		} catch(e) {}
+
 		for (const resType of sortedRes) {
-			const isCavalry = cmpId && cmpId.HasClass("FastMoving");
-			// Cavalaria permanece ociosa — disponível para combate/scouting.
-			// Não coleta frutas (não consegue) nem outros recursos.
-			if (isCavalry) continue;
-			// Soldados de infantaria podem coletar tudo.
-			
+			if (canGather.size > 0 && !canGather.has(resType)) continue;
+
 
 			let target = null;
 			const isSoldier = cmpId && cmpId.HasClass("CitizenSoldier");
+			const isCav = cmpId && cmpId.HasClass("FastMoving");
 			if (resType === "food") {
-				if (isSoldier) {
+				if (isCav) {
+					// Cavalaria só tem taxa para food.meat (confirmado em
+					// template_unit_cavalry.xml): caçar é a única coleta possível
+					target = findNearestResource(workerPos, "food", 250, assignedEntities, false, "meat");
+				} else if (isSoldier) {
 					// Soldados NUNCA vão para Fields (campos agrícolas): causaria loop de evicção
 					// com pudim_GetFarmBuildData que os recoloca em madeira indefinidamente.
 					// Soldados só coletam frutas/bagas silvestres.
@@ -3521,6 +3535,14 @@ GuiInterface.prototype.pudim_GetDropsiteFoundationData = function(player, data)
 	const prevSet = new Set(prevFoundationIds.map(Number));
 	// Workers recém-despachados (ex: balanceamento inicial) — nunca sequestrar como ajudante
 	const protectedIds = new Set(((data && data.protectedIds) || []).map(Number));
+	// Sob ordem MANUAL do jogador: intocáveis enquanto executam a ordem; assim que ficam
+	// ociosos (terminaram de construir/coletar) voltam a ser gerenciados pelo mod.
+	const playerOrdered = new Set(((data && data.playerOrdered) || []).map(Number));
+	const isPlayerBusy = function(ent) {
+		if (!playerOrdered.has(ent)) return false;
+		const ua = Engine.QueryInterface(ent, IID_UnitAI);
+		return !!(ua && !ua.IsIdle());
+	};
 	// Posições de armazém/celeiro que o PRÓPRIO MOD mandou construir (passadas pelo painel).
 	// O sistema de "enviar ajuda" só deve agir nessas — construção iniciada pelo jogador
 	// (incluindo QUALQUER edifício militar, que o mod nunca decide construir sozinho)

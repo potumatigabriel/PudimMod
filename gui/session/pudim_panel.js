@@ -932,13 +932,18 @@ function pudim_GetProtectedBuilderIds() {
 
 /**
  * Unidades que receberam ordem MANUAL do jogador (preenchido pelo hook de
- * handleUnitAction em session~pudim.js). O mod não mexe nelas enquanto estiverem
- * executando a ordem; assim que ficarem ociosas a simulação as libera.
- * Mantido pequeno: entradas com mais de 10 min são descartadas.
+ * handleUnitAction em session~pudim.js).
+ *
+ * Regra de proteção — o que vier primeiro:
+ *   • 2 minutos desde a ordem, OU
+ *   • a unidade ficar ociosa (terminou de construir/coletar) → livre na hora.
+ * A checagem de "ociosa" é feita no lado da simulação, que é quem enxerga o UnitAI.
+ * Aqui só aplicamos o teto de tempo.
  */
 var g_PudimPlayerOrders = {};
+const PUDIM_PLAYER_ORDER_PROTECTION = 120000; // 2 min
 function pudim_GetPlayerOrderedIds() {
-	const cutoff = Date.now() - 600000;
+	const cutoff = Date.now() - PUDIM_PLAYER_ORDER_PROTECTION;
 	const ids = [];
 	for (const id in g_PudimPlayerOrders) {
 		if (g_PudimPlayerOrders[id] < cutoff) { delete g_PudimPlayerOrders[id]; continue; }
@@ -1518,7 +1523,9 @@ function pudim_ProcessDropsiteFoundations()
 		const data = Engine.GuiInterfaceCall("pudim_GetDropsiteFoundationData", {
 			prevFoundationIds: prevIds,
 			modBuiltPositions: g_PudimModBuiltPositions,
-			protectedIds: pudim_GetProtectedBuilderIds().concat(pudim_GetPlayerOrderedIds())
+			protectedIds: pudim_GetProtectedBuilderIds(),
+			// separado de protectedIds: estes são liberados assim que ficarem ociosos
+			playerOrdered: pudim_GetPlayerOrderedIds()
 		});
 		if (!data) return;
 

@@ -1357,10 +1357,16 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 	const enemyBasePos = (data && data.enemyBasePos) ? data.enemyBasePos : null;
 	if (mode === "deep" && enemyBasePos) {
 		const ORBIT_DIST = 120;
-		// 0.7 rad (~40°) → 9 paradas na volta. A corda entre paradas consecutivas fica
-		// em ~82m, MAIOR que o raio de chegada do cliente (~70m); com passo menor o scout
-		// "chegaria" no ponto seguinte sem sair do lugar e queimaria a órbita inteira parado.
-		const ORBIT_STEP = 0.7;
+		// Passo derivado do raio de chegada REAL, não fixo.
+		// O cliente considera "chegou" a menos de sqrt(0.3)×gridSize ≈ 0.55×gridSize, e
+		// gridSize é mapSize/8 — ou seja, escala com o mapa. Um passo fixo de 0.7 rad dá
+		// corda de ~82m: serve num mapa de 1024 (chegada ~70m) e falha num de 1536, onde a
+		// chegada é ~105m e engole a corda — o scout "chega" no ponto seguinte sem sair do
+		// lugar e queima a órbita inteira parado. Com 30% de folga sobre o raio de chegada,
+		// cada parada fica sempre longe o bastante para exigir deslocamento de verdade.
+		const arrivalRadius = 0.5477 * gridSize;
+		const sinHalf = Math.min(0.95, (arrivalRadius * 1.3) / (2 * ORBIT_DIST));
+		const ORBIT_STEP = 2 * Math.asin(sinHalf);
 		// Varredura PROGRESSIVA a partir de theta: devolve o primeiro ponto livre à frente.
 		// Antes usava argmax de cos(a - theta); com o anel quase todo bloqueado sobravam
 		// poucos pontos e o scout ricocheteava entre eles para sempre (loop de 3 pontos

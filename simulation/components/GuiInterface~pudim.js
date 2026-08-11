@@ -2500,7 +2500,16 @@ GuiInterface.prototype.pudim_GetProductionBuildings = function(player, data) {
 			"alwaysQueue": alwaysQueue,
 			"isCC": isCC,
 			"isBarracks": isBarracks,
-			"trainerEntities": cmpProdQueue.GetEntitiesList ? cmpProdQueue.GetEntitiesList() : []
+			// Lista de unidades treináveis: o painel precisa dela pra saber QUAL unidade
+			// enfileirar quando a fila está vazia. Vive em IID_Trainer — ProductionQueue NÃO
+			// tem GetEntitiesList (confirmado no motor 0.28), então o guard `? :` daqui caía
+			// sempre no ramo vazio: o template nunca era resolvido e a auto-fila jamais
+			// semeava a fila no início da partida (CC ficava parado sem treinar).
+			// Mesma fonte que o GuiInterface do motor usa em state.trainer.entities.
+			"trainerEntities": (function() {
+				const cmpTrainer = Engine.QueryInterface(ent, IID_Trainer);
+				return cmpTrainer ? cmpTrainer.GetEntitiesList() : [];
+			})()
 		});
 	}
 	return { "buildings": buildings, "femaleCount": femaleCount, "resources": resources };

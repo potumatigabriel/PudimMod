@@ -1029,6 +1029,8 @@ var g_PudimAutoQueueAccum = 0;
 var g_PudimAutoQueueTemplates = {};
 /** Contagem desejada de treino por edifício — baseada no maior count observado */
 var g_PudimAutoQueueDesiredCount = {};
+/** Edifícios já avisados por falta de template treinável (evita repetir o log a cada 3s) */
+var g_PudimQueueNoTplLogged = {};
 
 /** Edifícios que o Pudim ativou autoqueue — para detectar desativação manual */
 var g_PudimAutoQueueManagedByMod = new Set();
@@ -1350,13 +1352,22 @@ function pudim_ProcessAutoQueue()
 				template = g_PudimAutoQueueTemplates[b.ent];
 				if (atFemaleCap && template && isFemaleTemplate(template)) continue;
 			}
-			if (!template) continue;
+			if (!template) {
+				// Sem template não há como semear a fila. Logar (throttled por edifício) —
+				// esta saída silenciosa escondeu por muito tempo o bug do trainerEntities.
+				if (!g_PudimQueueNoTplLogged[b.ent]) {
+					g_PudimQueueNoTplLogged[b.ent] = true;
+					pudim_Log("WARN", "QUEUE", "edifício " + b.ent + " sem template treinável (fila não semeada)");
+				}
+				continue;
+			}
 
 			// Custo real do template: enfileira o máximo que der; se não der pra nem 1,
 			// espera o próximo ciclo (evita comando inválido que pode disparar o bug nativo)
 			const affordable = pudim_ComputeAffordableCount(template, desiredCount, res);
 			if (affordable <= 0) continue;
 			Engine.PostNetworkCommand({ "type": "train", "entities": [b.ent], "template": template, "count": affordable });
+			pudim_Log("INFO", "QUEUE", "fila semeada em " + b.ent + " x" + affordable + " " + template.split("/").pop());
 		}
 
 		if (atFemaleCap && !g_PudimFemaleCapLogged) {

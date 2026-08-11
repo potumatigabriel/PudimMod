@@ -269,6 +269,7 @@ var g_PudimScoutTargets = {};        // entId -> { x, z } alvo atual do setor
 var g_PudimScoutLastPos = {};        // entId -> { x, z, stuckCount }
 var g_PudimScoutBlocked = {};        // "col,row" -> Infinity (perm) ou timestamp de expiração
 var g_PudimScoutTargetTime = {};     // entId -> timestamp de quando o alvo foi atribuído
+var g_PudimScoutSameCount = {};      // entId -> vezes seguidas que o mesmo alvo foi escolhido
 var g_PudimScoutFleeing = {};        // entId -> true enquanto aguarda área limpar após fuga
 var g_PudimScoutClearTicks = {};     // entId -> ticks consecutivos sem perigo (retomar após ≥2)
 var g_PudimScoutEnemyBase = null;    // { x, z } base inimiga detectada no modo deep
@@ -287,6 +288,7 @@ function pudim_ToggleScout(type) {
 			delete g_PudimScoutRadius[ent];
 			delete g_PudimScoutFleeing[ent];
 			delete g_PudimScoutClearTicks[ent];
+			delete g_PudimScoutSameCount[ent];
 			Engine.PostNetworkCommand({"type": "stop", "entities": [ent], "queued": false});
 		} else {
 			g_PudimScouts[ent] = type;
@@ -340,6 +342,7 @@ function pudim_ForceScoutTick() {
 				delete g_PudimScoutActivatedAt[ent];
 				delete g_PudimScoutFleeing[ent];
 				delete g_PudimScoutClearTicks[ent];
+				delete g_PudimScoutSameCount[ent];
 				pudim_UpdateSelectionButton();
 				continue;
 			}
@@ -546,6 +549,11 @@ function pudim_ForceScoutTick() {
 
 		if (targetData && targetData.x > 0) {
 			bestCell = { x: targetData.x, z: targetData.z };
+			// Órbita: adota o ângulo entregue pelo servidor como novo theta. Assim a próxima
+			// varredura começa DEPOIS deste ponto e o contorno progride sempre no mesmo
+			// sentido, em vez de reescolher os mesmos pontos livres do anel.
+			if (typeof targetData.orbitAngle === "number")
+				g_PudimScoutTheta[ent] = targetData.orbitAngle;
 		} else {
 			// Fallback: explorar em espiral ao redor da posição atual
 			const fallbackR = 60;
@@ -557,6 +565,26 @@ function pudim_ForceScoutTick() {
 		}
 
 		if (bestCell) {
+			// Nunca reenviar o MESMO alvo: cada walk reinicia o pathfinder, e em jogo isso
+			// virou um loop — o scout ficou repetindo 3 destinos e reenviando o comando a
+			// cada tick sem nunca contornar a base. Se o mesmo alvo insistir, bloqueia o
+			// setor por 3min e força outro destino.
+			const prevT = g_PudimScoutTargets[ent];
+			const sameTarget = prevT &&
+				Math.abs(prevT.x - bestCell.x) < 5 && Math.abs(prevT.z - bestCell.z) < 5;
+			if (sameTarget) {
+				g_PudimScoutSameCount[ent] = (g_PudimScoutSameCount[ent] || 0) + 1;
+				if (g_PudimScoutSameCount[ent] >= 3) {
+					const rc = Math.max(0, Math.min(PUDIM_SCOUT_GRID - 1, Math.floor(bestCell.x / cellSize)));
+					const rr = Math.max(0, Math.min(PUDIM_SCOUT_GRID - 1, Math.floor(bestCell.z / cellSize)));
+					g_PudimScoutBlocked[rc + "," + rr] = now + 180000;
+					g_PudimScoutSameCount[ent] = 0;
+					delete g_PudimScoutTargets[ent];
+					delete g_PudimScoutTargetTime[ent];
+				}
+				continue;
+			}
+			g_PudimScoutSameCount[ent] = 0;
 			g_PudimScoutTargets[ent] = { x: bestCell.x, z: bestCell.z };
 			g_PudimScoutTargetTime[ent] = now;
 			Engine.PostNetworkCommand({

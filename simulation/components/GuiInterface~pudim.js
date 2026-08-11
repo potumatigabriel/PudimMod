@@ -1308,20 +1308,26 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 	const enemyBasePos = (data && data.enemyBasePos) ? data.enemyBasePos : null;
 	if (mode === "deep" && enemyBasePos) {
 		const ORBIT_DIST = 120;
-		let orbitBest = { "x": -1, "z": -1 };
-		let orbitScore = -Infinity;
-		for (let a = 0; a < Math.PI * 2; a += 0.15) { // ~42 pontos por órbita completa
+		// 0.7 rad (~40°) → 9 paradas na volta. A corda entre paradas consecutivas fica
+		// em ~82m, MAIOR que o raio de chegada do cliente (~70m); com passo menor o scout
+		// "chegaria" no ponto seguinte sem sair do lugar e queimaria a órbita inteira parado.
+		const ORBIT_STEP = 0.7;
+		// Varredura PROGRESSIVA a partir de theta: devolve o primeiro ponto livre à frente.
+		// Antes usava argmax de cos(a - theta); com o anel quase todo bloqueado sobravam
+		// poucos pontos e o scout ricocheteava entre eles para sempre (loop de 3 pontos
+		// observado em jogo). Avançar sempre no mesmo sentido garante contorno de verdade.
+		for (let k = 1; k <= 32; ++k) {
+			const a = theta + k * ORBIT_STEP;
 			const cx = enemyBasePos.x + Math.cos(a) * ORBIT_DIST;
 			const cz = enemyBasePos.z + Math.sin(a) * ORBIT_DIST;
 			if (cx < 15 || cx > mapSize - 15 || cz < 15 || cz > mapSize - 15) continue;
 			const col = Math.floor(cx / gridSize);
 			const row = Math.floor(cz / gridSize);
 			if (blocked[col + "," + row]) continue;
-			const sc = Math.cos(a - theta); // preferir próximo ângulo atual → progresso circular
-			if (sc > orbitScore) { orbitScore = sc; orbitBest = { "x": cx, "z": cz }; }
+			// orbitAngle volta ao cliente para ele avançar theta e nunca reescolher este ponto
+			return { "x": cx, "z": cz, "orbitAngle": a };
 		}
-		if (orbitBest.x > 0) return orbitBest;
-		// Todos setores da órbita bloqueados: cair na varredura normal
+		// Volta inteira bloqueada: cair na varredura normal de fronteira
 	}
 
 	let bestPos   = { "x": -1, "z": -1 };

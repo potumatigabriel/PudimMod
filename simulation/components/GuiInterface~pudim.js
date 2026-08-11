@@ -1572,6 +1572,29 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 		if (rt && rt.generic === "food" && rt.specific === "fruit") {
 			const id = Engine.QueryInterface(f, IID_Identity);
 			if (id && (id.HasClass("Predator") || id.HasClass("Dangerous"))) continue;
+
+			// Só conta a fruta que os trabalhadores REALMENTE vão aceitar.
+			// findNearestResource descarta comida com score < -200, e o score penaliza a
+			// distância ao dropsite com peso 2 — na prática, arbusto a mais de ~100m de um
+			// dropsite de comida nunca é escolhido. Contar esses arbustos aqui fazia os dois
+			// sistemas discordarem: o de fazendas via "capacidade natural de sobra, não
+			// precisa de fazenda", enquanto o de trabalhadores dizia "nenhuma fruta válida"
+			// e mandava todo mundo para madeira. Resultado observado em jogo: 6 na comida,
+			// 41 na madeira, uma fazenda só.
+			// ATENÇÃO aos campos: ccPositions guarda GetPosition2D() cru, que é {x, y} com
+			// y = coordenada z; farmsteadPositions foi montado como {x, z}. Misturar os dois
+			// dá NaN e o filtro passa a não filtrar nada, silenciosamente.
+			let minDropDist = Infinity;
+			for (const cc of ccPositions) {
+				const ddx = fPos.x - cc.x, ddz = fPos.y - cc.y;
+				minDropDist = Math.min(minDropDist, Math.sqrt(ddx*ddx + ddz*ddz));
+			}
+			for (const fs of farmsteadPositions) {
+				const ddx = fPos.x - fs.x, ddz = fPos.y - fs.z;
+				minDropDist = Math.min(minDropDist, Math.sqrt(ddx*ddx + ddz*ddz));
+			}
+			if (minDropDist > 100) continue;
+
 			naturalFoodCapacity += rs.GetMaxGatherers();
 			naturalFoodCount++;
 		}

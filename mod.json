@@ -4,5 +4,10 @@
   "label": "PudimMod - Gameplay and UI Enhancements",
   "description": "Custom modifications: Combat power estimator, Repeat building queue, Auto-work for idle units, Portuguese translation, and enhanced Auto-Queue. Compatible with vanilla.",
   "ignoreInCompatibilityChecks": true,
-  "dependencies": ["0ad>=0.28.0"]
+  "dependencies": [
+    "0ad>=0.28.0"
+  ],
+  "license": "GPL-3.0-or-later",
+  "url_source_code": "https://github.com/potumatigabriel/PudimMod",
+  "author_name": "Gabriel Potumati"
 }

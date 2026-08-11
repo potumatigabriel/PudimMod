@@ -141,6 +141,18 @@ so a whole game can be read back from start to finish without filling the disk.
 Portuguese or English, detected automatically from the game's language. To force one, set
 `pudim.lang` to `pt` or `en` in the user config.
 
+## License
+
+PudimMod is released under the **GNU General Public License v3 or later** — see `LICENSE`.
+
+It contains code derived from [AutoCiv](https://github.com/nanihadesuka/autociv) by **nani**,
+also GPL-3.0. Derived files carry a header naming the original and describing what changed;
+see `NOTICE` for the full attribution.
+
+PudimMod hotkeys live in their own `pudim.*` namespace and ship **unbound by default**, so
+running it alongside AutoCiv never produces a key conflict. Bind the ones you want in
+**Settings → Hotkeys**.
+
 ---
 ---
 
@@ -287,3 +299,15 @@ preservadas, então dá para reler um jogo inteiro do começo ao fim sem encher 
 
 Português ou inglês, detectado automaticamente pelo idioma do jogo. Para forçar um deles, defina
 `pudim.lang` como `pt` ou `en` na configuração do usuário.
+
+## Licença
+
+O PudimMod é distribuído sob a **GNU General Public License v3 ou posterior** — veja `LICENSE`.
+
+Contém código derivado do [AutoCiv](https://github.com/nanihadesuka/autociv), do **nani**, também
+GPL-3.0. Os arquivos derivados trazem um cabeçalho indicando o original e o que foi alterado; a
+atribuição completa está no `NOTICE`.
+
+Os atalhos do PudimMod ficam no namespace `pudim.*` e vêm **sem tecla atribuída por padrão**, então
+rodar junto com o AutoCiv nunca gera conflito de tecla. Configure os que quiser em
+**Configurações → Atalhos**.

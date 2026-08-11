@@ -4015,7 +4015,12 @@ GuiInterface.prototype.pudim_GetDropsiteFoundationData = function(player, data)
 	// não pedida numa construção que ele mesmo iniciou. Prioriza fundações com menos
 	// construtores. Cap generoso (10): economicamente crítico, e sem limite rígido do motor
 	// (só retorno decrescente suave via BuildTimeModifier).
-	const MAX_BUILDERS_PER_FOUNDATION = 10;
+	// 3, não 10. O replay 2026-08-11_0004 mostra 7 dos 8 aldeões iniciais puxados de uma vez
+	// para um armazém, voltando à coleta e sendo puxados de novo logo depois. Um dropsite é
+	// barato e rápido: 3 construtores já o levantam em segundos, e o ganho de tempo do 4º em
+	// diante não paga o buraco que abre na coleta — ainda mais no início, quando cada
+	// trabalhador parado é uma fatia enorme da economia.
+	const MAX_BUILDERS_PER_FOUNDATION = 3;
 
 	// GetNumBuilders() só conta quem JÁ chegou na fundação — quem foi designado e ainda está
 	// caminhando tem ordem Repair mas não conta, então cada ciclo de 3s reatribuía mais gente

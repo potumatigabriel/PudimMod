@@ -1266,6 +1266,9 @@ function pudim_Tick(dt)
 	g_PudimRepeatAccum += dt;
 	g_PudimAdvancedAIAccum += dt;
 
+	// Idioma pode demorar a ficar detectável (dicionário do jogo carrega depois do init)
+	try { pudim_RefreshTooltipsIfNeeded(); } catch(e) {}
+
 	g_PudimSnapshotAccum += dt;
 	if (g_PudimSnapshotAccum >= PUDIM_SNAPSHOT_INTERVAL)
 	{

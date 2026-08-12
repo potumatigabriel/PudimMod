@@ -17,8 +17,11 @@ var g_PudimLang = null;
  */
 function pudim_Lang()
 {
+	// Só memoriza resposta POSITIVA. Memorizar o padrão "en" era um bug: a primeira
+	// chamada vem de pudim_Init(), que pode rodar antes de o dicionário de tradução do
+	// jogo estar carregado — a sonda falhava, travava em inglês e nunca mais reavaliava.
+	// Sem cache do negativo, a próxima chamada tenta de novo e acerta.
 	if (g_PudimLang) return g_PudimLang;
-	g_PudimLang = "en";
 
 	// 1) Preferência explícita do jogador, se ele quiser forçar um idioma para o mod.
 	try {
@@ -26,23 +29,29 @@ function pudim_Lang()
 		if (forced === "pt" || forced === "en") { g_PudimLang = forced; return g_PudimLang; }
 	} catch(e) {}
 
-	// 2) Locale configurado no jogo (ex.: "pt_BR", "pt_PT").
-	let loc = "";
-	try { loc = Engine.ConfigDB_GetValue("user", "locale") || ""; } catch(e) {}
-	if (loc && loc.toLowerCase().indexOf("pt") === 0) { g_PudimLang = "pt"; return g_PudimLang; }
-
-	// 3) Locale vazio/"auto": o 0AD herdou o idioma do sistema e nada consta na config.
-	//    Sondamos o dicionário do próprio jogo com uma string cuja tradução distingue
-	//    português de espanhol ("Madeira" vs "Madera") — só "Cancel" não serviria, porque
-	//    vira "Cancelar" nos dois idiomas.
-	if (!loc || loc === "auto") {
-		try {
-			if (typeof translate === "function" && translate("Wood") === "Madeira")
-				g_PudimLang = "pt";
-		} catch(e) {}
+	// 2) Locale configurado no jogo (ex.: "pt_BR", "pt_PT"). Tentamos mais de uma chave
+	//    porque a config do 0AD já mudou de nome entre versões.
+	for (const key of ["locale", "language", "gui.locale"]) {
+		let loc = "";
+		try { loc = Engine.ConfigDB_GetValue("user", key) || ""; } catch(e) {}
+		if (loc && loc.toLowerCase().indexOf("pt") === 0) { g_PudimLang = "pt"; return g_PudimLang; }
 	}
 
-	return g_PudimLang;
+	// 3) Sonda o dicionário do próprio jogo. Usamos palavras cuja tradução distingue
+	//    português de espanhol — "Madeira"/"Madera" e "Pedra"/"Piedra". "Cancel" não
+	//    serviria: vira "Cancelar" nos dois idiomas. Basta uma bater.
+	try {
+		if (typeof translate === "function" &&
+		    (translate("Wood") === "Madeira" || translate("Stone") === "Pedra" ||
+		     translate("Food") === "Comida" && translate("Wood") !== "Madera"))
+		{
+			g_PudimLang = "pt";
+			return g_PudimLang;
+		}
+	} catch(e) {}
+
+	// Nada conclusivo AINDA: devolve inglês sem memorizar, para reavaliar na próxima vez.
+	return "en";
 }
 
 // ─── Dicionário ───────────────────────────────────────────────────────────────
@@ -182,6 +191,21 @@ const PUDIM_TOOLTIP_MAP = {
  * no XML — assim eles passam a respeitar o idioma e ficam todos num lugar só.
  * Idempotente: pode ser chamada quantas vezes for.
  */
+var g_PudimTooltipsSettled = false;
+
+/**
+ * Reaplica os tooltips enquanto o idioma não estiver resolvido em definitivo.
+ * Os tooltips escritos em pudim_Init() podem ter saído em inglês se o dicionário do jogo
+ * ainda não tivesse carregado naquele instante; assim que pudim_Lang() consegue decidir,
+ * reescrevemos tudo uma última vez e paramos.
+ */
+function pudim_RefreshTooltipsIfNeeded()
+{
+	if (g_PudimTooltipsSettled) return;
+	pudim_ApplyTooltips();
+	if (g_PudimLang) g_PudimTooltipsSettled = true; // decidido: não precisa mais reaplicar
+}
+
 function pudim_ApplyTooltips()
 {
 	for (const objName in PUDIM_TOOLTIP_MAP)

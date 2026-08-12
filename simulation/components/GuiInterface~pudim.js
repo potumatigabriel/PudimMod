@@ -3737,9 +3737,33 @@ GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 		return isPhase2;
 	};
 
+	// Existe pelo menos uma fazenda? Techs de GRÃOS dependem disso.
+	let hasField = false;
+	for (const fEnt of allEnts) {
+		const fi = Engine.QueryInterface(fEnt, IID_Identity);
+		if (fi && fi.HasClass("Field")) { hasField = true; break; }
+	}
+
+	/** true se a tech só rende com campo agrícola (mexe na taxa de food.grain) */
+	const techNeedsField = (tech) => {
+		let tpl = null;
+		try { tpl = TechnologyTemplates.Get(tech); } catch(e) { return false; }
+		if (!tpl || !tpl.modifications) return false;
+		for (const mod of tpl.modifications) {
+			const v = mod && mod.value;
+			if (typeof v === "string" && v.indexOf("food.grain") !== -1) return true;
+		}
+		return false;
+	};
+
 	// Prioridade por padrão de nome da tecnologia — apenas techs econômicas de coleta
 	const scoreTech = (tech) => {
 		if (!allowedInPhase(tech)) return 0;
+		// Sem nenhuma fazenda, +20% na coleta de grãos multiplica zero. Observado em jogo:
+		// o mod tentou pesquisar "Treinamento de coletas" (300 comida, 200 madeira) com o
+		// banco em 3 de comida e nenhum campo construído — o pior negócio possível.
+		// Detecção pelo template (food.grain), não pelo nome, que varia por civilização.
+		if (!hasField && techNeedsField(tech)) return 0;
 		const n = tech.toLowerCase();
 		// Fase de avanço: decisão manual do jogador — não pesquisar automaticamente
 		if (n.indexOf("phase_") !== -1) return 0;

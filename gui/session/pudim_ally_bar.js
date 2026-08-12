@@ -115,6 +115,15 @@ function pudim_UpdateAllyBar() {
 
     if (container) container.hidden = false;
 
+    // Maior população primeiro: quem está crescendo mais aparece no topo, que é a
+    // comparação que interessa de relance. Reordenar é seguro por construção — todo o
+    // estado de pisca-pisca é indexado por ID de jogador, nunca por número da linha.
+    allies.sort(function(a, b) {
+        const pa = (a && a.popCount) || 0, pb = (b && b.popCount) || 0;
+        if (pb !== pa) return pb - pa;
+        return ((a && a.id) || 0) - ((b && b.id) || 0); // empate: ordem estável por ID
+    });
+
     pudim_AutoFlareCombat(now, allies);
 
     for (let i = 0; i < PUDIM_MAX_ROWS; ++i) {

@@ -2882,6 +2882,33 @@ GuiInterface.prototype.pudim_GetProactiveStorehouseData = function(player, data)
 		if (cnt > anchorDensity) { anchorDensity = cnt; anchorX = t.x; anchorZ = t.z; }
 	}
 
+	// A mata precisa ser GRANDE o bastante para justificar um armazém.
+	// Sem este corte, qualquer moita virava obra: em jogo o mod ergueu um armazém numa
+	// mini-floresta ao lado do Centro Cívico que já estava sendo coletada e que o próprio CC
+	// já cobria. O prédio custa 100 de madeira e tira 3 trabalhadores da coleta, e a mata
+	// acaba em poucos minutos — aí é preciso outro armazém em outro lugar. Melhor deixar
+	// esses coletores irem para uma floresta de verdade.
+	// Conta apenas o núcleo (50m do ponto âncora), que é o que o armazém vai de fato servir.
+	{
+		let coreNodes = 0, coreWood = 0;
+		for (const res of nearbyTrees) {
+			const rs = Engine.QueryInterface(res, IID_ResourceSupply);
+			if (!rs || !rs.IsAvailable()) continue;
+			const rt = rs.GetType();
+			if (!rt || rt.generic !== "wood") continue;
+			const p = Engine.QueryInterface(res, IID_Position);
+			if (!p || !p.IsInWorld()) continue;
+			const pp = p.GetPosition2D();
+			const dx = pp.x - anchorX, dz = pp.y - anchorZ;
+			if (dx*dx + dz*dz > 50*50) continue;
+			coreNodes++;
+			coreWood += rs.GetCurrentAmount();
+		}
+		// 8 árvores e 4000 de madeira: abaixo disso a mata se esgota antes de o armazém
+		// pagar o próprio custo.
+		if (coreNodes < 8 || coreWood < 4000) return null;
+	}
+
 	// Abortar se já há armazém ou fundação de armazém a ≤ 70m da floresta real (âncora corrigida)
 	for (const ent of allEnts) {
 		const ci = Engine.QueryInterface(ent, IID_Identity);

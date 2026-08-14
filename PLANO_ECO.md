@@ -133,6 +133,27 @@ peso novo passaria a rejeitar frutas coladas no celeiro só porque o trabalhador
 estava longe. Agora testa a distância recurso→dropsite diretamente (`> 100 m`),
 que é o que ele sempre quis medir.
 
+**Casa nasce onde o construtor está** — `pudim_GetAutoHouseData` decidia *onde*
+antes de *quem*: a âncora era o centroide de todas as unidades capazes de
+construir (a base inteira, ou seja, o CC), e os construtores eram escolhidos
+depois, sem olhar distância. Agora escolhe-se o construtor-semente primeiro e a
+casa é ancorada nele; os ajudantes são os mais próximos, até 60 units.
+
+**Construtor continua contando no balanceamento** — quem está com ordem `Repair`
+some de `activeGatherers`, então mandar 15 aldeãs erguer 3 fazendas zerava a
+comida no censo, o déficit aparente disparava e cada unidade recém-nascida ia
+para a comida; quando as obras terminavam, sobrava gente demais lá. O painel
+agora guarda a última coleta observada de cada unidade (`g_PudimGathererRes`),
+salva a cada ciclo **antes** de qualquer despacho, e a simulação conta o
+construtor no recurso de origem — nos dois lados da cota, para não recriar a
+incoerência que motivou a exclusão original. O censo também passou a rodar antes
+dos filtros de "não tocar": eles existem para não dar ordem à unidade, não para
+fingir que ela não existe (quem estava sob ordem manual sua também sumia da conta).
+
+Junto veio um guard que nunca funcionou: o painel envia `repeatBuilders` (array)
+e a simulação lia `data.repeatBuilding` (objeto). O nome nunca chegou, então os
+trabalhadores do repeat-build eram despachados por cima da própria obra.
+
 ---
 
 ## 4. Ordem sugerida de execução

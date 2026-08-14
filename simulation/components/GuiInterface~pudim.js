@@ -418,12 +418,19 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 
 		let bestRes = null;
 		let maxScore = -Infinity;
+		let bestDistToDropsite = Infinity;
 		const searchRadiusSq = type === "wood" ? 60*60 : 30*30;
 		// Food: distDropsite peso 2 (era 1) — penaliza mais frutas longe do dropsite para evitar
 		// workers passeando pelo mapa até bagas distantes quando há bagas próximas com capacidade.
 		// Wood/stone/metal: peso 3 para preferir floresta próxima de armazém existente.
 		const densityWeight = type === "food" ? 20 : 40;
 		const distToDropsiteWeight = type === "food" ? 2 : 3;
+		// Distância que o trabalhador precisa percorrer ATÉ o recurso. Estava em 0.1, um valor
+		// perto de zero diante de densidade 40: uma única árvore a mais num agrupamento pagava
+		// por 400m de caminhada, então o mod atravessava a base para começar a coletar. Em 1.5
+		// cada árvore extra compra ~27m de viagem — densidade ainda decide entre matas
+		// parecidas, mas deixa de justificar a travessia do mapa.
+		const distToWorkerWeight = type === "food" ? 1 : 1.5;
 
 		// Densidade via grade espacial em vez de comparar todos contra todos.
 		// O laço aninhado anterior era O(n²) no caminho MAIS quente do mod: roda para cada
@@ -475,19 +482,22 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 				if (d < distToDropsite) distToDropsite = d;
 			}
 
-			const score = (density * densityWeight) - distToDropsite * distToDropsiteWeight - distToWorker * 0.1;
+			const score = (density * densityWeight) - distToDropsite * distToDropsiteWeight - distToWorker * distToWorkerWeight;
 			if (score > maxScore) {
 				maxScore = score;
 				bestRes = res.id;
+				bestDistToDropsite = distToDropsite;
 			}
 		}
 
 		if (!bestRes && assignedEntities) return findNearestResource(pos, type, maxRange, null, excludeMeat, specificType);
 		if (!bestRes) return null;
-		// Para comida: se o melhor score for muito negativo, significa que o recurso está
-		// longe demais do dropsite (>100m). Não mandar o worker — evita passeios longos.
-		// Para madeira/pedra/metal não aplica (esses recursos têm posição fixa, não tem alternativa).
-		if (type === "food" && maxScore < -200) return null;
+		// Para comida: recurso longe demais de qualquer dropsite não compensa a viagem de volta.
+		// O teste é feito na PRÓPRIA distância ao dropsite, não no score: o score agora carrega
+		// também a caminhada do trabalhador, e um limiar sobre a soma rejeitaria frutas coladas
+		// no celeiro só porque o trabalhador estava longe delas — exatamente o oposto do
+		// pretendido. Madeira/pedra/metal não entram: têm posição fixa e não há alternativa.
+		if (type === "food" && bestDistToDropsite > 100) return null;
 
 		const bestObj = safeResources.find(r => r.id === bestRes);
 		return { "id": bestRes, "x": bestObj.pos.x, "z": bestObj.pos.y, "type": bestObj.type };

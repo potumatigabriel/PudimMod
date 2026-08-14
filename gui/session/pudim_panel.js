@@ -697,9 +697,66 @@ function pudim_RunAutoWork()
 		if (nowAutoWork - g_PudimDispatchedAt[did] > PUDIM_DISPATCH_GRACE)
 			delete g_PudimDispatchedAt[did];
 
-	const idleWorkers = result.idleWorkers.filter(w =>
-		!g_PudimHouseBuilderCooldown[w.id] && !g_PudimDispatchedAt[w.id]);
 	const bestResource = result.bestResource;
+
+	// Construção proativa de armazém (madeira) ou farmstead (fruta) quando worker vai longe.
+	// Roda ANTES do despacho: a ordem inversa (despachar e só depois erguer o dropsite)
+	// fazia o coletor sair, encher a carga e atravessar a base de volta ao CC enquanto o
+	// armazém ainda nem tinha sido colocado — a mensagem "antes da 1a colheita" no log
+	// descrevia uma intenção que o código não cumpria. Colocando a fundação primeiro, a
+	// obra corre em paralelo com a caminhada de ida e está pronta na hora da entrega.
+	// result[suggestKey] é uma LISTA de clusters distantes distintos deste ciclo (não só 1) —
+	// tenta cada um até o primeiro que der certo; os outros tentam de novo no próximo ciclo.
+	const proactiveBuilders = {};
+	const pudim_tryProactiveBuild = function(suggestKey, fnName, resKey, logLabel, minCooldown) {
+		const candidates = result[suggestKey];
+		if (!candidates || candidates.length === 0 || !g_PudimAdvancedAIEnabled["dropsites"]) return;
+		const resCooldown = g_PudimLastDropsiteTimeByRes[resKey] || 0;
+		if (Date.now() - resCooldown <= minCooldown) return;
+		for (const cand of candidates) {
+			try {
+				const proactive = Engine.GuiInterfaceCall(fnName, { nearX: cand.x, nearZ: cand.z, protectedIds: pudim_GetProtectedBuilderIds() });
+				if (!proactive || !proactive.builderId || !proactive.template ||
+				    !proactive.candidatePositions || proactive.candidatePositions.length === 0) continue;
+				let foundX = null, foundZ = null;
+				for (const pos of proactive.candidatePositions) {
+					if (pudim_IsCancelledSpot(pos.x, pos.z)) continue; // jogador cancelou aqui
+					let res2 = null;
+					try {
+						res2 = Engine.GuiInterfaceCall("SetBuildingPlacementPreview", {
+							"template": proactive.template, "x": pos.x, "z": pos.z,
+							"angle": 0, "actorSeed": 0
+						});
+					} catch(e2) {}
+					if (res2 && res2.success) { foundX = pos.x; foundZ = pos.z; break; }
+				}
+				try { Engine.GuiInterfaceCall("SetBuildingPlacementPreview", { "template": "" }); } catch(e2) {}
+				if (foundX !== null) {
+					Engine.PostNetworkCommand({
+						"type": "construct",
+						"entities": [proactive.builderId],
+						"template": proactive.template,
+						"x": foundX, "z": foundZ,
+						"angle": 0, "actorSeed": 0,
+						"autorepair": true, "autocontinue": true, "queued": false
+					});
+					pudim_MarkModBuilt(foundX, foundZ);
+					g_PudimLastDropsiteTimeByRes[resKey] = Date.now();
+					// O builder acabou de receber "construct". Sem marcá-lo, o despacho logo
+					// abaixo mandaria o mesmo trabalhador colher e cancelaria a obra — era o
+					// motivo de a ordem antiga (despachar primeiro) parecer funcionar.
+					proactiveBuilders[proactive.builderId] = true;
+					pudim_Log("SUCCESS", "DROP", logLabel + " proativo em (" + foundX.toFixed(0) + "," + foundZ.toFixed(0) + ") antes da 1a colheita");
+					return; // 1 build por ciclo (respeita cooldown); demais candidatos tentam no próximo
+				}
+			} catch(e2) { pudim_Log("ERROR", "DROP", logLabel + " proatv: " + e2); }
+		}
+	};
+	pudim_tryProactiveBuild("suggestStorehouse", "pudim_GetProactiveStorehouseData", "wood", "armazem", 20000);
+	pudim_tryProactiveBuild("suggestFarmstead", "pudim_GetProactiveFarmsteadData", "food", "farmstead", 25000);
+
+	const idleWorkers = result.idleWorkers.filter(w =>
+		!g_PudimHouseBuilderCooldown[w.id] && !g_PudimDispatchedAt[w.id] && !proactiveBuilders[w.id]);
 
 	// Agrupar trabalhadores por alvo direto (ex: cardume, animal) ou por coordenada genérica
 	let targetGroups = {};
@@ -770,52 +827,6 @@ function pudim_RunAutoWork()
 		Engine.PostNetworkCommand(cmd);
 		pudim_MarkDispatched(gp.ids);
 	}
-
-	// 3. Construção proativa de armazém (madeira) ou farmstead (fruta) quando worker vai longe.
-	// result[suggestKey] é uma LISTA de clusters distantes distintos deste ciclo (não só 1) —
-	// tenta cada um até o primeiro que der certo; os outros tentam de novo no próximo ciclo.
-	const pudim_tryProactiveBuild = function(suggestKey, fnName, resKey, logLabel, minCooldown) {
-		const candidates = result[suggestKey];
-		if (!candidates || candidates.length === 0 || !g_PudimAdvancedAIEnabled["dropsites"]) return;
-		const resCooldown = g_PudimLastDropsiteTimeByRes[resKey] || 0;
-		if (Date.now() - resCooldown <= minCooldown) return;
-		for (const cand of candidates) {
-			try {
-				const proactive = Engine.GuiInterfaceCall(fnName, { nearX: cand.x, nearZ: cand.z, protectedIds: pudim_GetProtectedBuilderIds() });
-				if (!proactive || !proactive.builderId || !proactive.template ||
-				    !proactive.candidatePositions || proactive.candidatePositions.length === 0) continue;
-				let foundX = null, foundZ = null;
-				for (const pos of proactive.candidatePositions) {
-					if (pudim_IsCancelledSpot(pos.x, pos.z)) continue; // jogador cancelou aqui
-					let res2 = null;
-					try {
-						res2 = Engine.GuiInterfaceCall("SetBuildingPlacementPreview", {
-							"template": proactive.template, "x": pos.x, "z": pos.z,
-							"angle": 0, "actorSeed": 0
-						});
-					} catch(e2) {}
-					if (res2 && res2.success) { foundX = pos.x; foundZ = pos.z; break; }
-				}
-				try { Engine.GuiInterfaceCall("SetBuildingPlacementPreview", { "template": "" }); } catch(e2) {}
-				if (foundX !== null) {
-					Engine.PostNetworkCommand({
-						"type": "construct",
-						"entities": [proactive.builderId],
-						"template": proactive.template,
-						"x": foundX, "z": foundZ,
-						"angle": 0, "actorSeed": 0,
-						"autorepair": true, "autocontinue": true, "queued": false
-					});
-					pudim_MarkModBuilt(foundX, foundZ);
-					g_PudimLastDropsiteTimeByRes[resKey] = Date.now();
-					pudim_Log("SUCCESS", "DROP", logLabel + " proativo em (" + foundX.toFixed(0) + "," + foundZ.toFixed(0) + ") antes da 1a colheita");
-					return; // 1 build por ciclo (respeita cooldown); demais candidatos tentam no próximo
-				}
-			} catch(e2) { pudim_Log("ERROR", "DROP", logLabel + " proatv: " + e2); }
-		}
-	};
-	pudim_tryProactiveBuild("suggestStorehouse", "pudim_GetProactiveStorehouseData", "wood", "armazem", 20000);
-	pudim_tryProactiveBuild("suggestFarmstead", "pudim_GetProactiveFarmsteadData", "food", "farmstead", 25000);
 
 	// Atualizar status
 	const resNames = { food: "Comida", wood: "Madeira", stone: "Pedra", metal: "Metal" };

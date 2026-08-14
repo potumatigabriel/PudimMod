@@ -2161,7 +2161,9 @@ function pudim_ProcessAdvancedAI()
 						const wdx = foundPos.x - houseData.anchorX, wdz = foundPos.z - houseData.anchorZ;
 						walkTxt = " and=" + Math.round(Math.sqrt(wdx*wdx + wdz*wdz));
 					}
-					pudim_Log("SUCCESS", "CASAS", "build em (" + foundPos.x.toFixed(0) + "," + foundPos.z.toFixed(0) + ") builders=" + houseBuilderIds.length + walkTxt);
+					pudim_Log("SUCCESS", "CASAS", "build em (" + foundPos.x.toFixed(0) + "," + foundPos.z.toFixed(0) +
+						") builders=" + houseBuilderIds.length + walkTxt +
+						" de=" + (houseData.fromRes || "-"));
 					Engine.PostNetworkCommand({
 						"type": "construct",
 						"entities": houseBuilderIds,

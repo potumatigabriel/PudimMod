@@ -2611,10 +2611,22 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 		                (ord.data && ord.data.resourceType) ? ord.data.resourceType.generic : null;
 		if (resType) gatherersPerRes[resType] = (gatherersPerRes[resType] || 0) + 1;
 	}
+	// "Recurso mais abundante" = maior ESTOQUE, não maior número de coletores.
+	// A versão anterior usava a contagem de coletores, e isso erra justamente no caso que
+	// importa: comida com 30 coletores e 20 no estoque não é abundante — é escassa e com
+	// muita gente correndo atrás dela. Tirar um construtor dali é o pior lugar possível.
+	// O estoque diz onde realmente sobra. A contagem de coletores entra só como desempate,
+	// para não escolher um recurso onde não há ninguém de quem tirar.
+	const stockNow = cmpPlayer ? cmpPlayer.GetResourceCounts() : {};
 	let mostAbundantRes = null;
-	let maxGatherers = 0;
+	let bestStock = -1;
 	for (const res in gatherersPerRes) {
-		if (gatherersPerRes[res] > maxGatherers) { maxGatherers = gatherersPerRes[res]; mostAbundantRes = res; }
+		const amt = stockNow[res] || 0;
+		if (amt > bestStock ||
+		    (amt === bestStock && mostAbundantRes && gatherersPerRes[res] > gatherersPerRes[mostAbundantRes])) {
+			bestStock = amt;
+			mostAbundantRes = res;
+		}
 	}
 
 	// Só entra na lista quem realmente sabe erguer casa (o filtro de template antes era
@@ -2659,9 +2671,23 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 
 	const seedPos = Engine.QueryInterface(seedBuilder, IID_Position).GetPosition2D();
 
-	// Ajudantes: os MAIS PRÓXIMOS da semente, não os primeiros da lista. Era daqui que
-	// vinham os "2 ficaram parados e depois foram ajudar" vindos do outro lado da base.
+	// Ajudantes: primeiro os ociosos, depois quem está no RECURSO MAIS ABUNDANTE, e só
+	// então o resto — dentro de cada grupo, o mais próximo da semente.
+	//
+	// A versão anterior ordenava só por distância, então a casa podia levar embora a aldeã
+	// da comida por ela estar dois passos mais perto, enquanto sobrava gente na madeira ao
+	// lado. Tirar do recurso mais abundante é o que menos custa: é justamente onde há gente
+	// de sobra. A distância continua valendo como desempate, para não recriar o problema dos
+	// ajudantes atravessando a base.
 	const maxBuildersForHouse = Math.max(2, Math.min(4, productionBuildingCount));
+	const idleSet = new Set(idleBuilders);
+	const resOf = function(ent) {
+		const cmpUAI = Engine.QueryInterface(ent, IID_UnitAI);
+		const ord = cmpUAI && cmpUAI.orderQueue && cmpUAI.orderQueue.length > 0 ? cmpUAI.orderQueue[0] : null;
+		if (!ord) return null;
+		return (ord.data && ord.data.type) ? ord.data.type.generic :
+		       (ord.data && ord.data.resourceType) ? ord.data.resourceType.generic : null;
+	};
 	const helperPool = [];
 	for (const ent of builders) {
 		if (ent === seedBuilder) continue;
@@ -2670,16 +2696,21 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 		if (!p || !p.IsInWorld()) continue;
 		const pp = p.GetPosition2D();
 		const dx = pp.x - seedPos.x, dz = pp.y - seedPos.y;
-		helperPool.push({ id: ent, dSq: dx*dx + dz*dz });
+		// 0 = ocioso (não custa coleta nenhuma), 1 = recurso mais abundante, 2 = os demais
+		const rank = idleSet.has(ent) ? 0 : (mostAbundantRes && resOf(ent) === mostAbundantRes ? 1 : 2);
+		helperPool.push({ id: ent, rank: rank, dSq: dx*dx + dz*dz });
 	}
-	helperPool.sort((a, b) => a.dSq - b.dSq);
+	helperPool.sort((a, b) => a.rank !== b.rank ? a.rank - b.rank : a.dSq - b.dSq);
 	// 60 units de raio: além disso a viagem do ajudante custa mais do que ele acrescenta.
 	// Se ninguém estiver perto, a casa sai com um construtor só — mais lenta, mas sem
 	// arrancar gente da coleta do outro lado da base.
+	// O filtro de distância é `continue`, não `break`: com a lista ordenada por vocação
+	// primeiro, um candidato longe no grupo 1 não pode encerrar a varredura e esconder os
+	// que vêm depois.
 	const builderIds = [seedBuilder];
 	for (const h of helperPool) {
 		if (builderIds.length >= maxBuildersForHouse) break;
-		if (h.dSq > 60*60) break;
+		if (h.dSq > 60*60) continue;
 		builderIds.push(h.id);
 	}
 	const houseTemplate = seedTemplate;
@@ -2798,7 +2829,9 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 		// para que "casa longe do trabalhador" seja um número verificável no log e não
 		// só uma impressão de quem está jogando.
 		"anchorX": seedPos.x,
-		"anchorZ": seedPos.y
+		"anchorZ": seedPos.y,
+		// De onde vieram os construtores, para conferir a regra no log em vez de no olho.
+		"fromRes": mostAbundantRes || "-"
 	};
 };
 GuiInterface.prototype.pudim_GetScoutStatus = function(player, data) {

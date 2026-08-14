@@ -197,6 +197,21 @@ def limpar(texto):
     return TAGS.sub("", texto).strip()
 
 
+def normalizar_idioma(codigo):
+    """
+    Converte o codigo de idioma do jogo para o formato do tradutor.
+
+    O 0 A.D. escreve locale com underscore ("pt_BR"); o Google espera hifen
+    ("pt-BR"). Ambos aceitam a forma curta ("pt"), que e o que o mod costuma
+    mandar — a conversao so garante que a forma longa tambem funcione.
+
+    Devolve None quando nao ha codigo, para o chamador cair no padrao.
+    """
+    if not codigo:
+        return None
+    return str(codigo).strip().replace("_", "-")
+
+
 # ─── Arquivos de cache e resposta ─────────────────────────────────────────────
 
 def ler_json(caminho, padrao):
@@ -307,10 +322,7 @@ def main():
             # O idioma vem no pedido, escolhido pelo jogo — quem sabe em que
             # lingua o 0 A.D. esta rodando e ele, nao este programa. O --to so
             # vale quando o pedido nao diz nada (mod antigo, ou teste manual).
-            destino = pedido.get("to") or argumentos.to
-            if destino != ultimo_destino:
-                print(f"  idioma de destino: {destino}")
-                ultimo_destino = destino
+            destino = normalizar_idioma(pedido.get("to")) or argumentos.to
 
             novidade = False
             for item in pedido["items"]:
@@ -318,6 +330,14 @@ def main():
                 texto = limpar(str(item.get("text", "")))
                 if not chave or not texto or chave in respostas:
                     continue
+
+                # O idioma so e anunciado quando ha traducao de verdade para
+                # fazer. Anunciar a cada pedido lido confundia: um req.json
+                # parado de uma sessao anterior fazia o programa dizer um idioma
+                # que ninguem tinha pedido agora.
+                if destino != ultimo_destino:
+                    print(f"  traduzindo para: {destino}")
+                    ultimo_destino = destino
 
                 print(f"  > {texto}")
                 traduzido = traduzir(texto, destino, argumentos.origem)

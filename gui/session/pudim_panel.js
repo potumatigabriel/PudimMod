@@ -1884,7 +1884,12 @@ function pudim_ProcessAdvancedAI()
 				} else {
 					g_LastAutoHouseAttempt = nowTimer;
 					const houseBuilderIds = houseData.builderIds || [houseData.builderId];
-					pudim_Log("SUCCESS", "CASAS", "build em (" + foundPos.x.toFixed(0) + "," + foundPos.z.toFixed(0) + ") builders=" + houseBuilderIds.length);
+					let walkTxt = "";
+					if (houseData.anchorX !== undefined) {
+						const wdx = foundPos.x - houseData.anchorX, wdz = foundPos.z - houseData.anchorZ;
+						walkTxt = " and=" + Math.round(Math.sqrt(wdx*wdx + wdz*wdz));
+					}
+					pudim_Log("SUCCESS", "CASAS", "build em (" + foundPos.x.toFixed(0) + "," + foundPos.z.toFixed(0) + ") builders=" + houseBuilderIds.length + walkTxt);
 					Engine.PostNetworkCommand({
 						"type": "construct",
 						"entities": houseBuilderIds,

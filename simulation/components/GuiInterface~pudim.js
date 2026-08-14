@@ -2206,34 +2206,112 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 
 	let targetX = ccPos.x;
 	let targetZ = ccPos.y;
-	
-	// Ângulo preferencial: direção do CC ao centroide dos builders (worker atual).
-	// Guarda também a distância até eles — casa deve nascer perto do construtor,
-	// não no limite do território (senão o deslocamento até lá anula o ganho).
-	let preferredAngle = null;
-	let avgBuilderDist = null;
-	let builderCentroid = null; // ordenar candidatos por proximidade de quem VAI construir
-	if (builders.length > 0) {
-	    let sumX = 0, sumZ = 0, cnt = 0;
-	    for (const bId of builders) {
-	        const bpos = Engine.QueryInterface(bId, IID_Position);
-	        if (bpos && bpos.IsInWorld()) {
-	            const bp = bpos.GetPosition2D();
-	            sumX += bp.x; sumZ += bp.y; cnt++;
-	        }
-	    }
-	    if (cnt > 0) {
-	        builderCentroid = { x: sumX / cnt, z: sumZ / cnt };
-	        const dx = builderCentroid.x - ccPos.x, dz = builderCentroid.z - ccPos.y;
-	        const distSq = dx*dx + dz*dz;
-	        if (distSq > 1) {
-	            preferredAngle = Math.atan2(dz, dx);
-	            avgBuilderDist = Math.sqrt(distSq);
-	        }
-	    }
+
+	// ── QUEM constrói é decidido ANTES de ONDE ────────────────────────────────────
+	// A versão anterior fazia o inverso: ancorava a casa no centroide de `builders`,
+	// que é TODA unidade capaz de construir — ou seja, a base inteira, cujo centroide
+	// cai praticamente em cima do CC. Só depois escolhia os construtores, por uma
+	// ordem (ocioso → recurso mais abundante → resto) que não olhava distância nenhuma.
+	// O resultado observado em jogo: armazém erguido em (1043,1344), casas nascendo em
+	// (1043,1206) e (1063,1206), e os lenhadores do armazém atravessando ~130 units
+	// para construí-las. Escolhendo primeiro um construtor-semente e ancorando a casa
+	// nele, a caminhada passa a ser mínima por construção.
+
+	// Contar coletores por recurso para priorizar builders do recurso mais abundante
+	const gatherersPerRes = {};
+	for (const ent of allEnts) {
+		const cmpUnitAI = Engine.QueryInterface(ent, IID_UnitAI);
+		if (!cmpUnitAI || !cmpUnitAI.orderQueue || cmpUnitAI.orderQueue.length === 0) continue;
+		const ord = cmpUnitAI.orderQueue[0];
+		if (ord.type !== "Gather" && ord.type !== "GatherNearPosition" && ord.type !== "ReturnResource") continue;
+		const resType = (ord.data && ord.data.type) ? ord.data.type.generic :
+		                (ord.data && ord.data.resourceType) ? ord.data.resourceType.generic : null;
+		if (resType) gatherersPerRes[resType] = (gatherersPerRes[resType] || 0) + 1;
+	}
+	let mostAbundantRes = null;
+	let maxGatherers = 0;
+	for (const res in gatherersPerRes) {
+		if (gatherersPerRes[res] > maxGatherers) { maxGatherers = gatherersPerRes[res]; mostAbundantRes = res; }
 	}
 
-	let bestRadius = 0;
+	// Só entra na lista quem realmente sabe erguer casa (o filtro de template antes era
+	// aplicado lá embaixo, na montagem de builderIds).
+	const houseTemplateOf = function(bId) {
+		const cmpB = Engine.QueryInterface(bId, IID_Builder);
+		if (!cmpB) return null;
+		for (const tpl of cmpB.GetEntitiesList())
+			if (tpl.indexOf("house") !== -1 && tpl.indexOf("storehouse") === -1 && tpl.indexOf("farmhouse") === -1)
+				return tpl;
+		return null;
+	};
+
+	// Semente: ocioso primeiro (não custa coleta nenhuma), depois quem está no recurso
+	// mais abundante, depois qualquer um. É a mesma preferência de antes — o que muda é
+	// que ela agora define a ÂNCORA da casa em vez de ser aplicada a uma posição já fixada.
+	let seedBuilder = null, seedTemplate = null;
+	const pickSeed = function(list) {
+		for (const ent of list) {
+			const tpl = houseTemplateOf(ent);
+			if (!tpl) continue;
+			const p = Engine.QueryInterface(ent, IID_Position);
+			if (!p || !p.IsInWorld()) continue;
+			seedBuilder = ent; seedTemplate = tpl;
+			return true;
+		}
+		return false;
+	};
+	if (!pickSeed(idleBuilders) && mostAbundantRes) {
+		const sameRes = builders.filter(ent => {
+			const cmpUnitAI = Engine.QueryInterface(ent, IID_UnitAI);
+			const ord = cmpUnitAI && cmpUnitAI.orderQueue && cmpUnitAI.orderQueue.length > 0 ? cmpUnitAI.orderQueue[0] : null;
+			if (!ord) return false;
+			const resType = (ord.data && ord.data.type) ? ord.data.type.generic :
+			                (ord.data && ord.data.resourceType) ? ord.data.resourceType.generic : null;
+			return resType === mostAbundantRes;
+		});
+		pickSeed(sameRes);
+	}
+	if (!seedBuilder) pickSeed(builders);
+	if (!seedBuilder) return { _skip: "noBuilder2", stuckGhosts: stuckGhosts };
+
+	const seedPos = Engine.QueryInterface(seedBuilder, IID_Position).GetPosition2D();
+
+	// Ajudantes: os MAIS PRÓXIMOS da semente, não os primeiros da lista. Era daqui que
+	// vinham os "2 ficaram parados e depois foram ajudar" vindos do outro lado da base.
+	const maxBuildersForHouse = Math.max(2, Math.min(4, productionBuildingCount));
+	const helperPool = [];
+	for (const ent of builders) {
+		if (ent === seedBuilder) continue;
+		if (!houseTemplateOf(ent)) continue;
+		const p = Engine.QueryInterface(ent, IID_Position);
+		if (!p || !p.IsInWorld()) continue;
+		const pp = p.GetPosition2D();
+		const dx = pp.x - seedPos.x, dz = pp.y - seedPos.y;
+		helperPool.push({ id: ent, dSq: dx*dx + dz*dz });
+	}
+	helperPool.sort((a, b) => a.dSq - b.dSq);
+	// 60 units de raio: além disso a viagem do ajudante custa mais do que ele acrescenta.
+	// Se ninguém estiver perto, a casa sai com um construtor só — mais lenta, mas sem
+	// arrancar gente da coleta do outro lado da base.
+	const builderIds = [seedBuilder];
+	for (const h of helperPool) {
+		if (builderIds.length >= maxBuildersForHouse) break;
+		if (h.dSq > 60*60) break;
+		builderIds.push(h.id);
+	}
+	const houseTemplate = seedTemplate;
+
+	// Ângulo preferencial: direção do CC ao construtor-semente. A casa deve nascer perto
+	// de quem vai erguê-la, não no limite do território. Só é usado como desempate na
+	// varredura de território abaixo — a âncora de verdade é a posição da semente.
+	let preferredAngle = null;
+	const builderCentroid = { x: seedPos.x, z: seedPos.y };
+	{
+		const dx = seedPos.x - ccPos.x, dz = seedPos.y - ccPos.y;
+		if (dx*dx + dz*dz > 1)
+			preferredAngle = Math.atan2(dz, dx);
+	}
+
 	let bestAngle = 0;
 	let bestScore = -Infinity;
 	for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 4) {
@@ -2253,26 +2331,14 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 	        angularPenalty = diff * 40; // 40 units/rad — 180° oposto perde ~126 units de território
 	    }
 	    const score = r - angularPenalty;
-	    if (score > bestScore) { bestScore = score; bestAngle = angle; bestRadius = r; }
+	    if (score > bestScore) { bestScore = score; bestAngle = angle; }
 	}
 	
-	// Mínimo de 80 units: CC footprint=25, house footprint=11, gap ~43 units.
-	// Perto de onde o construtor está de verdade (avgBuilderDist), não a 65% do limite do
-	// território — senão a casa nasce "do outro lado do mapa" em territórios grandes/irregulares.
-	const midRadius = avgBuilderDist !== null
-		? Math.max(80, Math.min(avgBuilderDist, bestRadius))
-		: Math.max(80, bestRadius * 0.65);
-	// Âncora = POSIÇÃO DO CONSTRUTOR, não um ponto no anel ao redor do CC.
-	// O raio já era limitado por avgBuilderDist, mas o ÂNGULO vinha da varredura de
-	// pontuação e podia apontar para o lado oposto ao do trabalhador — com isso a casa
-	// nascia longe assim mesmo e ele atravessava a base inteira (relatado em jogo: soldado
-	// mandado construir "do outro lado do mapa"). Ancorando nele, a distância a percorrer é
-	// mínima por construção. A única restrição mantida é o afastamento de 80 do CC, que é o
-	// footprint do CC mais o da casa e a folga entre eles.
+	// Âncora = POSIÇÃO DO CONSTRUTOR-SEMENTE, não um ponto no anel ao redor do CC.
+	// Mínimo de 80 units do CC: footprint do CC (25) + o da casa (11) + a folga entre eles.
 	// Atenção aos campos: ccPos é GetPosition2D() cru, {x, y} com y = z; builderCentroid é
 	// {x, z}; e baseVillagePoint usa {x, y} com y = z, como o resto desta função espera.
 	let baseVillagePoint;
-	if (builderCentroid)
 	{
 		const bdx = builderCentroid.x - ccPos.x, bdz = builderCentroid.z - ccPos.y;
 		const bd = Math.sqrt(bdx*bdx + bdz*bdz);
@@ -2286,11 +2352,6 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 			baseVillagePoint = { x: ccPos.x + Math.cos(ang) * 80, y: ccPos.y + Math.sin(ang) * 80 };
 		}
 	}
-	else
-		baseVillagePoint = {
-			x: ccPos.x + Math.cos(bestAngle) * midRadius,
-			y: ccPos.y + Math.sin(bestAngle) * midRadius
-		};
 
 	let candidates = [];
 	const pushCandidate = (cx, cz) => {
@@ -2299,104 +2360,48 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 		candidates.push({ x: cx, z: cz });
 	};
 
-	if (housePosList.length === 0) {
-		pushCandidate(baseVillagePoint.x, baseVillagePoint.y);
-		// Fallback em espiral afastada do CC
-		for (let r = 70; r <= 150; r += 16) {
-			for (let i = 0; i < 8; i++) {
-				const a = bestAngle + i * Math.PI / 4;
-				pushCandidate(ccPos.x + Math.cos(a) * r, ccPos.y + Math.sin(a) * r);
-			}
-		}
-	} else {
-		// Tenta preencher perto das casas mais próximas de quem VAI construir (centróide dos
-		// builders; fallback CC), com espiral completa (360°, não só pra fora). A versão
-		// antiga expandia sempre a partir da última casa — o cluster migrava dezenas de
-		// unidades ("casa do outro lado do mapa") e o construtor cruzava a base toda.
-		const ref = builderCentroid || { x: ccPos.x, z: ccPos.y };
-		const sortedHouses = housePosList.slice().sort((a, b) => {
-			const da = (a.x - ref.x) ** 2 + (a.y - ref.z) ** 2;
-			const db = (b.x - ref.x) ** 2 + (b.y - ref.z) ** 2;
-			return da - db;
-		});
-		for (const house of sortedHouses) {
-			// Offset 20 units para evitar sobreposição (casa gaul ~20 world units de footprint)
-			for (let i = 0; i < 8; i++) {
-				const angle = i * Math.PI / 4;
-				pushCandidate(
-					house.x + Math.cos(angle) * 20,
-					house.y + Math.sin(angle) * 20
-				);
-			}
-		}
-		// Espiral afastada do CC como fallback extra (só se nada perto das casas existentes coube)
-		for (let r = 70; r <= 150; r += 16) {
-			for (let i = 0; i < 8; i++) {
-				const a = bestAngle + i * Math.PI / 4;
-				pushCandidate(ccPos.x + Math.cos(a) * r, ccPos.y + Math.sin(a) * r);
-			}
+	// PRIMEIRO os pontos colados no construtor-semente. Antes, quando já existia alguma
+	// casa, os candidatos saíam TODOS de anéis ao redor das casas existentes — ordenados
+	// por proximidade do construtor, mas ainda assim presos ao aglomerado antigo. Com o
+	// aglomerado no CC e o lenhador no armazém a ~130 units, a casa nova continuava
+	// nascendo no CC e ele atravessava a base. O aglomerado agora é preferência
+	// secundária: vale enquanto houver casa perto de quem constrói, nunca como âncora.
+	pushCandidate(baseVillagePoint.x, baseVillagePoint.y);
+	for (let r = 14; r <= 44; r += 10) {
+		for (let i = 0; i < 8; i++) {
+			const a = bestAngle + i * Math.PI / 4;
+			pushCandidate(baseVillagePoint.x + Math.cos(a) * r, baseVillagePoint.y + Math.sin(a) * r);
 		}
 	}
 
-	// Contar coletores por recurso para priorizar builders do recurso mais abundante
-	const gatherersPerRes = {};
-	for (const ent of allEnts) {
-		const cmpUnitAI = Engine.QueryInterface(ent, IID_UnitAI);
-		if (!cmpUnitAI || !cmpUnitAI.orderQueue || cmpUnitAI.orderQueue.length === 0) continue;
-		const ord = cmpUnitAI.orderQueue[0];
-		if (ord.type !== "Gather" && ord.type !== "GatherNearPosition" && ord.type !== "ReturnResource") continue;
-		const resType = (ord.data && ord.data.type) ? ord.data.type.generic :
-		                (ord.data && ord.data.resourceType) ? ord.data.resourceType.generic : null;
-		if (resType) gatherersPerRes[resType] = (gatherersPerRes[resType] || 0) + 1;
-	}
-	let mostAbundantRes = null;
-	let maxGatherers = 0;
-	for (const res in gatherersPerRes) {
-		if (gatherersPerRes[res] > maxGatherers) { maxGatherers = gatherersPerRes[res]; mostAbundantRes = res; }
-	}
-
-	// Ordem de prioridade: idle → coletando recurso mais abundante → resto
-	const seenBuilders = new Set();
-	const buildersByPriority = [];
-	for (const ent of idleBuilders) {
-		buildersByPriority.push(ent);
-		seenBuilders.add(ent);
-	}
-	if (mostAbundantRes) {
-		for (const ent of builders) {
-			if (seenBuilders.has(ent)) continue;
-			const cmpUnitAI = Engine.QueryInterface(ent, IID_UnitAI);
-			const ord = cmpUnitAI && cmpUnitAI.orderQueue && cmpUnitAI.orderQueue.length > 0 ? cmpUnitAI.orderQueue[0] : null;
-			if (!ord) continue;
-			const resType = (ord.data && ord.data.type) ? ord.data.type.generic :
-			                (ord.data && ord.data.resourceType) ? ord.data.resourceType.generic : null;
-			if (resType === mostAbundantRes) { buildersByPriority.push(ent); seenBuilders.add(ent); }
+	// Depois, encostar nas casas existentes que já estão perto de quem vai construir —
+	// mantém o vilarejo agrupado sem custar caminhada. Casas a mais de 60 units do
+	// construtor não entram: encostar nelas é justamente o problema que se quer evitar.
+	const sortedHouses = housePosList.slice().sort((a, b) => {
+		const da = (a.x - builderCentroid.x) ** 2 + (a.y - builderCentroid.z) ** 2;
+		const db = (b.x - builderCentroid.x) ** 2 + (b.y - builderCentroid.z) ** 2;
+		return da - db;
+	});
+	for (const house of sortedHouses) {
+		const hdx = house.x - builderCentroid.x, hdz = house.y - builderCentroid.z;
+		if (hdx*hdx + hdz*hdz > 60*60) break; // lista está ordenada: daqui pra frente só piora
+		// Offset 20 units para evitar sobreposição (casa gaul ~20 world units de footprint)
+		for (let i = 0; i < 8; i++) {
+			const angle = i * Math.PI / 4;
+			pushCandidate(
+				house.x + Math.cos(angle) * 20,
+				house.y + Math.sin(angle) * 20
+			);
 		}
 	}
-	for (const ent of builders) {
-		if (!seenBuilders.has(ent)) buildersByPriority.push(ent);
-	}
 
-	let builderIds = [];
-	let houseTemplate = "structures/" + civ + "_house"; // Fallback default
-
-	for (const bId of buildersByPriority) {
-		const cmpBuilder = Engine.QueryInterface(bId, IID_Builder);
-		if (cmpBuilder) {
-			const buildables = cmpBuilder.GetEntitiesList();
-			for (const tpl of buildables) {
-				if (tpl.indexOf("house") !== -1 && tpl.indexOf("storehouse") === -1 && tpl.indexOf("farmhouse") === -1) {
-					if (builderIds.length === 0) houseTemplate = tpl;
-					builderIds.push(bId);
-					break;
-				}
-			}
+	// Espiral afastada do CC como último recurso (só se nada perto do construtor coube)
+	for (let r = 70; r <= 150; r += 16) {
+		for (let i = 0; i < 8; i++) {
+			const a = bestAngle + i * Math.PI / 4;
+			pushCandidate(ccPos.x + Math.cos(a) * r, ccPos.y + Math.sin(a) * r);
 		}
-		// Mais barracas → pop cresce mais rápido → mais builders por casa para não bater no teto
-		const maxBuildersForHouse = Math.max(2, Math.min(4, productionBuildingCount));
-		if (builderIds.length >= maxBuildersForHouse) break;
 	}
-	if (builderIds.length === 0) return { _skip: "noBuilder2", stuckGhosts: stuckGhosts };
 
 	return {
 		"builderId": builderIds[0],
@@ -2405,7 +2410,12 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 		"candidatePositions": candidates,
 		"stuckGhosts": stuckGhosts,
 		"workersToRedirect": [],
-		"productionBuildingCount": productionBuildingCount
+		"productionBuildingCount": productionBuildingCount,
+		// Posição do construtor-semente: o painel loga a distância até o ponto escolhido,
+		// para que "casa longe do trabalhador" seja um número verificável no log e não
+		// só uma impressão de quem está jogando.
+		"anchorX": seedPos.x,
+		"anchorZ": seedPos.y
 	};
 };
 GuiInterface.prototype.pudim_GetScoutStatus = function(player, data) {

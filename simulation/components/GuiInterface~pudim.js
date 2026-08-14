@@ -902,15 +902,28 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 		const isFemale = cmpId && (cmpId.HasClass("FemaleCitizen") ||
 		    (cmpId.HasClass("Organic") && !cmpId.HasClass("CitizenSoldier") && !cmpId.HasClass("FastMoving")));
 
+		// Vocação por tipo de unidade: aldeão → comida, soldado → madeira, e pedra/metal
+		// como segunda vocação do soldado quando a madeira já está atendida.
+		// É PREFERÊNCIA, não regra dura: o bônus entra no déficit e a ordenação continua
+		// mandando. Se o recurso da vocação não tem déficit (ou não há alvo lá), a unidade
+		// vai para o próximo da lista — que é o "senão tiver em quantidade, podem fazer
+		// outras funções". O boost antigo do soldado era +0,5 igual para madeira, pedra e
+		// metal, então na prática ele não tinha vocação nenhuma: ia para o que estivesse
+		// mais vazio no momento.
 		let localDeficits = { ...deficits };
 		if (isFemale) {
 			// Aldeões preferem comida mas respeitam a cota — boost só quando há déficit real
 			if ((localDeficits.food || 0) > 0) localDeficits.food = localDeficits.food * 2 + 1.5;
 		} else if (cmpId && cmpId.HasClass("CitizenSoldier")) {
-			// Soldados preferem madeira/pedra/metal: leve penalidade para food, boost para outros
-			if (localDeficits.food !== undefined) localDeficits.food -= 0.5;
-			for (const r of activeWeights) {
-				if (r !== "food" && (localDeficits[r] || 0) > 0) localDeficits[r] += 0.5;
+			// Comida é a vocação do aldeão: soldado só vai para lá se sobrar necessidade.
+			if (localDeficits.food !== undefined) localDeficits.food -= 1.5;
+			// Madeira é a vocação primária do soldado — mesmo peso que a comida tem para o
+			// aldeão, para que os dois grupos se separem de fato em vez de disputarem.
+			if ((localDeficits.wood || 0) > 0) localDeficits.wood = localDeficits.wood * 2 + 1.5;
+			// Pedra e metal: vocação secundária. Boost menor, então só vencem a madeira
+			// quando a madeira já está coberta e eles estão claramente em falta.
+			for (const r of ["stone", "metal"]) {
+				if ((localDeficits[r] || 0) > 0) localDeficits[r] += 1;
 			}
 		}
 
@@ -1518,6 +1531,14 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 		}
 	} catch (e) { losAt = null; }
 
+	// Posição atual do próprio scout. Com a leitura de exploração disponível, é ELA que
+	// passa a guiar a escolha entre os tiles inexplorados — ver o score mais abaixo.
+	let scoutX = ccX, scoutZ = ccZ;
+	if (data && data.scoutId) {
+		const spos = Engine.QueryInterface(data.scoutId, IID_Position);
+		if (spos && spos.IsInWorld()) { const sp = spos.GetPosition2D(); scoutX = sp.x; scoutZ = sp.y; }
+	}
+
 	for (let x = 10; x < mapSize - 10; x += step) {
 		for (let z = 10; z < mapSize - 10; z += step) {
 			const owner = cmpTerritoryManager.GetOwner(x, z);
@@ -1567,16 +1588,30 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 			// (0.4 × distCC, até ~400 num mapa de 1024): qualquer tile nunca visto tem de
 			// ganhar de qualquer tile já explorado. Entre os não explorados, ângulo e
 			// distância voltam a decidir, preservando o sentido da varredura.
-			let exploreMod = 0;
+			let score;
+			let exploreMod = 0; // lido depois, fora deste bloco, ao guardar o melhor tile
 			if (mode === "deep" && losAt) {
 				const vis = losAt(x, z);
-				if (vis === "hidden") exploreMod = 1000;       // nunca visto: é o alvo
-				else if (vis === "visible") exploreMod = -300; // alguém já está enxergando
-				// "fogged" (explorado, sem visão agora) fica em 0: vale menos que o
-				// desconhecido, mais que mandar o scout para onde já há olhos.
-			}
+				exploreMod = vis === "hidden" ? 1000 : (vis === "visible" ? -300 : 0);
 
-			const score = angleCos * 100 + distMod + exploreMod;
+				// Com a exploração conhecida, a distância ao CC deixa de ser critério: ela
+				// existia só como PALPITE de "longe = inexplorado". Mantê-la agora fazia o
+				// scout, a cada waypoint, mirar o ponto mais distante da base — e como theta
+				// gira 45° por parada, o alvo saltava para regiões opostas do mapa. Ele
+				// atravessava tudo de volta e de ida pelo mesmo corredor: o "anda nos mesmos
+				// lugares" que sobrou depois do filtro de exploração.
+				// Agora, entre os inexplorados, vence o MAIS PRÓXIMO DO SCOUT. A fronteira
+				// desconhecida é varrida de forma contígua, sem travessias inúteis.
+				const sdx = x - scoutX, sdz = z - scoutZ;
+				const distScout = Math.sqrt(sdx*sdx + sdz*sdz);
+				// angleCos entra com peso pequeno, só para desempatar e manter um sentido de
+				// varredura entre tiles igualmente próximos.
+				score = exploreMod - distScout * 1.0 + angleCos * 10;
+			} else {
+				// Sem leitura de exploração: comportamento anterior, guiado por ângulo e
+				// distância do CC.
+				score = angleCos * 100 + distMod;
+			}
 
 			if (score > bestScore) {
 				bestScore = score;

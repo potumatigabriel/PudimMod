@@ -1343,6 +1343,9 @@ var g_PudimAutoQueueAccum = 0;
 var g_PudimAutoQueueTemplates = {};
 /** Contagem desejada de treino por edifício — baseada no maior count observado */
 var g_PudimAutoQueueDesiredCount = {};
+// Instante da última semeadura por edifício — carência contra semear duas vezes antes de
+// o comando anterior (ou uma ordem do jogador) aparecer na fila.
+var g_PudimQueueSeededAt = {};
 /** Edifícios já avisados por falta de template treinável (evita repetir o log a cada 3s) */
 var g_PudimQueueNoTplLogged = {};
 
@@ -1625,6 +1628,7 @@ function pudim_ProcessAutoQueue()
 		// Reiniciar fila vazia — se vazia E (autoqueue off OU fila zerou por falta de recursos)
 		// "Faz o máximo que dá": se configurou count=3 mas só tem recursos p/ 1, põe 1 na fila
 		// assim que tiver recursos p/ o total, volta a treinar em lote
+		const nowQueue = Date.now();
 		for (const b of buildings) {
 			if (g_PudimAutoQueueUserDisabled.has(b.ent)) continue;
 
@@ -1695,12 +1699,25 @@ function pudim_ProcessAutoQueue()
 				continue;
 			}
 
+			// Carência por edifício: PostNetworkCommand é assíncrono, então a fila pode
+			// continuar lendo VAZIA no ciclo seguinte mesmo já tendo um lote a caminho.
+			// Sem isto, dois ciclos seguidos semeiam e a fila ganha um lote a mais — e o
+			// mesmo vale para uma ordem SUA dada nesse intervalo: o mod não a enxerga ainda
+			// e semeia por cima. Foi assim que 3 aldeões apareceram atrás dos 3 soldados.
+			// 7s cobre dois ciclos de 3s com folga.
+			if (nowQueue - (g_PudimQueueSeededAt[b.ent] || 0) < 7000) continue;
+
 			// Custo real do template: enfileira o máximo que der; se não der pra nem 1,
 			// espera o próximo ciclo (evita comando inválido que pode disparar o bug nativo)
 			const affordable = pudim_ComputeAffordableCount(template, desiredCount, res);
 			if (affordable <= 0) continue;
 			Engine.PostNetworkCommand({ "type": "train", "entities": [b.ent], "template": template, "count": affordable });
-			pudim_Log("INFO", "QUEUE", "fila semeada em " + b.ent + " x" + affordable + " " + template.split("/").pop());
+			g_PudimQueueSeededAt[b.ent] = nowQueue;
+			// qlen registra o tamanho da fila NO MOMENTO da decisão. Se algum dia a fila
+			// voltar a empilhar, este número diz se o mod semeou sobre uma fila que já tinha
+			// itens (leitura errada) ou se cada semeadura viu vazio de verdade (corrida).
+			pudim_Log("INFO", "QUEUE", "fila semeada em " + b.ent + " x" + affordable + " " +
+				template.split("/").pop() + " qlen=" + ((b.trainingQueue && b.trainingQueue.length) || 0));
 		}
 
 		if (atFemaleCap && !g_PudimFemaleCapLogged) {

@@ -4408,7 +4408,11 @@ GuiInterface.prototype.pudim_GetDropsiteFoundationData = function(player, data)
 		// de "a caminho" (quem constrói também tem ordem Repair pro mesmo alvo)
 		currentFoundations.set(ent, { x: p.x, z: p.y, resourceType, numBuilders, isModBuilt,
 			onSite: new Set(cmpFoundation.GetBuilders()) });
-		result.foundations.push({ id: ent, x: p.x, z: p.y, resourceType });
+		// progress distingue os dois motivos de uma fundação sumir: cancelamento do jogador
+		// (havia obra feita) e decaimento por nunca ter recebido construtor (progresso 0).
+		// O painel tratava os dois como cancelamento e bania o local para sempre.
+		result.foundations.push({ id: ent, x: p.x, z: p.y, resourceType,
+			progress: cmpFoundation.GetBuildProgress ? cmpFoundation.GetBuildProgress() : 0 });
 	}
 
 	// Dropsites existentes (qualquer um, incluindo CC) — usado no Passo 2 pra decidir se um

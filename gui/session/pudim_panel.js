@@ -359,10 +359,26 @@ function pudim_MarkCancelled(x, z) {
 	g_PudimCancelledPositions.push({ x: x, z: z });
 	pudim_Log("INFO", "DROP", "construção cancelada pelo jogador em (" + x.toFixed(0) + "," + z.toFixed(0) + ") — não será refeita ali");
 }
+/**
+ * Pontos onde uma fundação DECAIU sem nenhum construtor encostar. Diferente de
+ * g_PudimCancelledPositions, isto expira: não foi decisão do jogador, foi falha do mod em
+ * levar alguém até lá. Bani-los para sempre deixava a floresta sem depósito o resto da
+ * partida. Também usa raio menor (25 vs 40): a intenção é só evitar insistir no mesmo
+ * ponto exato durante a quarentena, não excluir a região inteira.
+ */
+var g_PudimDecayedSpots = [];
+var g_PudimFoundationProgress = {}; // { foundationId: último progresso visto }
+
 function pudim_IsCancelledSpot(x, z) {
 	for (const p of g_PudimCancelledPositions) {
 		const dx = p.x - x, dz = p.z - z;
 		if (dx*dx + dz*dz <= 40*40) return true;
+	}
+	const now = Date.now();
+	g_PudimDecayedSpots = g_PudimDecayedSpots.filter(p => p.until > now);
+	for (const p of g_PudimDecayedSpots) {
+		const dx = p.x - x, dz = p.z - z;
+		if (dx*dx + dz*dz <= 25*25) return true;
 	}
 	return false;
 }
@@ -808,6 +824,12 @@ function pudim_RunAutoWork()
 					// abaixo mandaria o mesmo trabalhador colher e cancelaria a obra — era o
 					// motivo de a ordem antiga (despachar primeiro) parecer funcionar.
 					proactiveBuilders[proactive.builderId] = true;
+					// proactiveBuilders vale só para ESTE ciclo. Sem a proteção persistente, o
+					// ciclo seguinte (500ms depois) mandava o mesmo trabalhador colher, a
+					// fundação ficava sem ninguém e decaía — foi o armazém de (221,428) no log
+					// de 15:52. A proteção solta sozinha assim que ele fica ocioso, então não
+					// prende ninguém depois que a obra acaba.
+					pudim_ProtectBuilder(proactive.builderId, Date.now() + 30000);
 					pudim_Log("SUCCESS", "DROP", logLabel + " proativo em (" + foundX.toFixed(0) + "," + foundZ.toFixed(0) + ") antes da 1a colheita");
 					return; // 1 build por ciclo (respeita cooldown); demais candidatos tentam no próximo
 				}
@@ -1880,24 +1902,44 @@ function pudim_ProcessDropsiteFoundations()
 		});
 		if (!data) return;
 
-		// Fundação que sumiu SEM virar prédio = o jogador cancelou. Registrar a posição para
-		// nunca reconstruir ali (era o loop de "cancelei o armazém e ele voltava").
-		// data.completions traz as que viraram prédio; o que sumiu e não está lá foi cancelado.
+		// Fundação que sumiu sem virar prédio tem DOIS motivos possíveis, e tratá-los igual
+		// custou caro. Se havia obra feita (progress > 0), foi o jogador que cancelou:
+		// decisão explícita, o local fica banido. Se o progresso era ZERO, ela apenas
+		// decaiu — nenhum construtor chegou a encostar — e a culpa é do mod, não do jogador.
+		//
+		// No log de 15:52 os dois armazéns que o mod ergueu sumiram assim, ~38s depois de
+		// colocados, sem combate nenhum. Cada um baniu o próprio ponto PARA SEMPRE, e os
+		// lenhadores seguiram cortando sem depósito por perto até o detector de long-walker
+		// mandá-los para outra floresta — a viagem inteira desperdiçada.
+		//
+		// Decaimento agora é quarentena curta: o mod tenta de novo, de preferência com
+		// construtor que chegue lá.
 		const completedIds = new Set((data.completions || []).map(c => c.id));
 		const stillFoundation = new Set((data.foundations || []).map(f => f.id));
 		for (const oldId in g_PudimDropsiteFoundations) {
 			const idNum = +oldId;
 			if (stillFoundation.has(idNum) || completedIds.has(idNum)) continue;
 			const pos = g_PudimDropsiteFoundationPos[idNum];
-			if (pos) pudim_MarkCancelled(pos.x, pos.z);
+			if (pos) {
+				if ((g_PudimFoundationProgress[idNum] || 0) > 0)
+					pudim_MarkCancelled(pos.x, pos.z);
+				else {
+					g_PudimDecayedSpots.push({ x: pos.x, z: pos.z, until: Date.now() + 90000 });
+					pudim_Log("WARN", "DROP", "fundação em (" + pos.x.toFixed(0) + "," + pos.z.toFixed(0) +
+						") decaiu sem nenhum construtor — quarentena 90s, nao foi o jogador");
+				}
+			}
 			delete g_PudimDropsiteFoundationPos[idNum];
+			delete g_PudimFoundationProgress[idNum];
 		}
 
-		// Atualizar rastreamento de fundações (id + posição, para detectar cancelamento acima)
+		// Atualizar rastreamento de fundações (id, posição e progresso — o progresso é o que
+		// permite classificar o sumiço no ciclo seguinte)
 		g_PudimDropsiteFoundations = {};
 		for (const f of (data.foundations || [])) {
 			g_PudimDropsiteFoundations[f.id] = true;
 			g_PudimDropsiteFoundationPos[f.id] = { x: f.x, z: f.z };
+			g_PudimFoundationProgress[f.id] = f.progress || 0;
 		}
 
 		// Feature 1: Enviar workers ociosos/novos para ajudar na fundação
@@ -2272,6 +2314,12 @@ function pudim_ProcessAdvancedAI()
 							"autorepair": true, "autocontinue": true, "queued": false
 						});
 						pudim_MarkModBuilt(foundX, foundZ);
+						// Sem esta proteção o auto-work reassumia os construtores no ciclo
+						// seguinte e a fundação decaía sem ninguém — foi o armazém de
+						// (484,409) no log de 15:52, colocado com 2 construtores e sumido 40s
+						// depois. Solta sozinha quando eles ficam ociosos.
+						const _dsProt = Date.now() + 30000;
+						for (const b of allBuilders) pudim_ProtectBuilder(b, _dsProt);
 					}
 				}
 			}

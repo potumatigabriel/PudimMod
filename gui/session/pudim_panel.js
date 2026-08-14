@@ -297,6 +297,17 @@ var g_PudimBuilderFoundation = {}; // entId → foundationEntId (currently build
 var g_PudimBuilderLastBuilt = {};  // entId → {template, x, z} (last completed structure)
 var g_PudimBuilderPending = {};    // entId → tick counter (waiting for construct to start)
 
+/**
+ * Memória de função: última coleta observada de cada unidade, entId → "food"|"wood"|"stone"|"metal".
+ * Salva a cada ciclo do auto-work, ANTES de qualquer despacho, e devolvida à simulação como
+ * `builderOrigin`. Enquanto a unidade estiver construindo (ordem Repair) ela continua contando
+ * no balanceamento pelo recurso que coletava — 15 aldeãs erguendo 3 fazendas seguem sendo 15
+ * trabalhadoras de comida. Sem isso o déficit aparente disparava e cada unidade recém-nascida
+ * era despachada para o recurso que os construtores tinham acabado de deixar.
+ * Estado só de GUI, nunca vai para a simulação: não afeta OOS.
+ */
+var g_PudimGathererRes = {};
+
 /** Tracking GUI-side para evitar re-envio de ordens (não vai para simulação) */
 var g_PudimRetreating = {};
 var g_PudimGarrisoned = {};
@@ -608,12 +619,28 @@ function pudim_RunAutoWork()
 			"weights": g_PudimResourceWeights,
 			"repeatBuilders": Object.keys(g_PudimRepeatBuilding).map(Number).filter(ent => g_PudimRepeatBuilding[ent]),
 			"playerOrdered": pudim_GetPlayerOrderedIds(),
-			"protectedIds": pudim_GetProtectedBuilderIds()
+			"protectedIds": pudim_GetProtectedBuilderIds(),
+			"builderOrigin": g_PudimGathererRes
 		});
 	}
 	catch (e)
 	{
 		return;
+	}
+
+	// Memória de função, atualizada ANTES de qualquer despacho deste ciclo: é a leitura do
+	// estado como ele estava quando a chamada foi feita. Quem estiver construindo no
+	// próximo ciclo é contado no recurso que aparece aqui, e não some do balanceamento.
+	// A poda por trackedIds evita que a memória cresça com entidades já mortas.
+	if (result && result.trackedIds) {
+		const alive = {};
+		for (const id of result.trackedIds) {
+			// Quem está coletando agora traz valor novo; quem está construindo mantém o antigo.
+			const res = result.gathererRes ? result.gathererRes[id] : null;
+			const keep = res || g_PudimGathererRes[id];
+			if (keep) alive[id] = keep;
+		}
+		g_PudimGathererRes = alive;
 	}
 
 	// Long walkers: tentar construir dropsite perto do recurso-alvo; redirect só como fallback

@@ -244,6 +244,11 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 	// (ou o jogador) mandá-la construir.
 	const builderOrigin = (data && data.builderOrigin) || {};
 
+	// O painel envia a chave `repeatBuilders` (array). Este ponto lia `data.repeatBuilding`
+	// como objeto — nome que nunca chegou — então o guard era sempre falso e os
+	// trabalhadores do repeat-build eram despachados por cima da própria obra.
+	const repeatBuilders = new Set(((data && data.repeatBuilders) || []).map(Number));
+
 	// Unidades sob ordem MANUAL do jogador (marcadas pelo hook de handleUnitAction).
 	// Enquanto estiverem EXECUTANDO a ordem, nenhum sistema do mod as toca — se o jogador
 	// mandou colher fruta num ponto, é lá que elas ficam. Assim que ficarem ociosas
@@ -606,7 +611,7 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 
 		// ── COMANDO ───────────────────────────────────────────────────────────────
 		// Daqui para baixo é decisão de dar ordem; quem não pode ser tocado sai agora.
-		if (data.repeatBuilding && data.repeatBuilding[ent]) continue;
+		if (repeatBuilders.has(ent)) continue;
 		// Ordem manual do jogador em andamento (ou unidade recém-comandada pelo mod): não tocar
 		if (pudimSkipUnit(ent, cmpUnitAI)) continue;
 

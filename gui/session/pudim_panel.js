@@ -114,7 +114,12 @@ function pudim_LogSnapshot() {
 			" | trop inf" + me.infantry + " cav" + me.cavalry + " cerc" + me.siege +
 			      " dist" + me.ranged + " camp" + me.champion + " sup" + me.support +
 			" | k" + me.kills + " d" + me.deaths +
+			// Rotatividade do último minuto: reordens antes de a unidade alcançar o alvo
+			// anterior (viagem perdida) e redirects de long-walker barrados pela carência.
+			" | chrn" + (g_PudimChurnCount || 0) + " seg" + (g_PudimWalkHeld || 0) +
 			(me.inCombat ? " | COMBATE x" + me.combatSize : ""));
+		g_PudimChurnCount = 0;
+		g_PudimWalkHeld = 0;
 	} catch(e) {}
 }
 
@@ -649,9 +654,20 @@ function pudim_RunAutoWork()
 		// acumular mais rápido do que era drenada em economias grandes
 		const lw = result.longWalkers.slice(0, 8);
 		const nowLW = Date.now();
-		let builtCount = 0, redirectCount = 0;
+		// Limpa janelas vencidas ANTES de decidir: sem isso, entradas expiradas
+		// continuariam bloqueando redirects legítimos.
+		for (const did in g_PudimInTransitUntil)
+			if (nowLW > g_PudimInTransitUntil[did])
+				delete g_PudimInTransitUntil[did];
+		let builtCount = 0, redirectCount = 0, heldCount = 0;
 		for (const w of lw) {
 			if (g_PudimHouseBuilderCooldown[w.id]) continue;
+			// Quem o próprio auto-work acabou de despachar está a caminho por decisão do mod;
+			// desfazer isso no meio do trajeto é o vai-e-vem medido nos replays de 13/08.
+			// Nenhuma checagem do gênero existia aqui: a carência de despacho só era
+			// consultada no filtro de idleWorkers, mais abaixo, e o detector de long-walker
+			// atua sobre unidades NÃO ociosas — exatamente as que estavam em trânsito.
+			if (g_PudimInTransitUntil[w.id]) { heldCount++; continue; }
 
 			// Tenta construir dropsite colado ao recurso-alvo
 			let builtDropsite = false;
@@ -704,6 +720,7 @@ function pudim_RunAutoWork()
 			pudim_Log("SUCCESS", "DROP", "dropsite pré-coleta construído para " + builtCount + " walker(s)");
 		if (redirectCount > 0)
 			pudim_Log("INFO", "WALK", "redirecionando " + redirectCount + " walker(s) sem dropsite disponível");
+		if (heldCount > 0) g_PudimWalkHeld += heldCount;
 	}
 
 	if (!result || !result.idleWorkers || result.idleWorkers.length === 0)
@@ -719,10 +736,18 @@ function pudim_RunAutoWork()
 		if (nowAutoWork > g_PudimHouseBuilderCooldown[bid])
 			delete g_PudimHouseBuilderCooldown[bid];
 	}
-	// Limpa carências vencidas e ignora quem acabou de ser despachado (ver g_PudimDispatchedAt)
+	// Limpa carências vencidas e ignora quem acabou de ser despachado (ver g_PudimDispatchedAt).
+	// O valor guardado é o instante de EXPIRAÇÃO, já dimensionado pela viagem.
 	for (const did in g_PudimDispatchedAt)
-		if (nowAutoWork - g_PudimDispatchedAt[did] > PUDIM_DISPATCH_GRACE)
+		if (nowAutoWork > g_PudimDispatchedAt[did])
 			delete g_PudimDispatchedAt[did];
+	for (const did in g_PudimInTransitUntil)
+		if (nowAutoWork > g_PudimInTransitUntil[did])
+			delete g_PudimInTransitUntil[did];
+	// Além de 30s a entrada não conta mais como rotatividade — pode ser descartada.
+	for (const did in g_PudimLastDispatchTime)
+		if (nowAutoWork - g_PudimLastDispatchTime[did] > 30000)
+			delete g_PudimLastDispatchTime[did];
 
 	const bestResource = result.bestResource;
 
@@ -788,6 +813,10 @@ function pudim_RunAutoWork()
 	// Agrupar trabalhadores por alvo direto (ex: cardume, animal) ou por coordenada genérica
 	let targetGroups = {};
 	let positionGroups = {};
+	// Distância da viagem por unidade, usada para dimensionar a carência de reavaliação.
+	const distById = {};
+	for (const w of idleWorkers)
+		if (w.dist) distById[w.id] = w.dist;
 
 	for (let worker of idleWorkers)
 	{
@@ -834,7 +863,7 @@ function pudim_RunAutoWork()
 			"queued": false,
 			"pushFront": false
 		});
-		pudim_MarkDispatched(grp.ids);
+		pudim_MarkDispatched(grp.ids, distById);
 	}
 
 	// 2. Enviar ordens direcionadas por posição (gather-near-position)
@@ -852,7 +881,7 @@ function pudim_RunAutoWork()
 			"force": false
 		};
 		Engine.PostNetworkCommand(cmd);
-		pudim_MarkDispatched(gp.ids);
+		pudim_MarkDispatched(gp.ids, distById);
 	}
 
 	// Atualizar status
@@ -1037,13 +1066,55 @@ var g_PudimHouseBuilderCooldown = {}; // {entityId: expiryMs} — builders prote
 // ciclos, ele era mandado para OUTRO recurso — no log da partida a unidade 8229 recebeu
 // 12 ordens (5737, 161, 167, 7806, cada uma repetida 3x) sem nunca chegar a coletar.
 // Este carência elimina tanto o reenvio quanto o vai-e-vem entre recursos.
-var g_PudimDispatchedAt = {};        // {entityId: timestamp}
+// Guarda o INSTANTE DE EXPIRAÇÃO, não o de despacho.
+var g_PudimDispatchedAt = {};        // {entityId: expiração da carência CURTA}
 const PUDIM_DISPATCH_GRACE = 6000;   // ms sem reavaliar quem acabou de ser despachado
 
-/** Marca trabalhadores como recém-despachados, protegendo-os de reatribuição. */
-function pudim_MarkDispatched(ids) {
+// Janela de VIAGEM, separada da carência curta acima — e a separação é essencial.
+// g_PudimDispatchedAt filtra `result.idleWorkers`, que por construção só contém unidades
+// OCIOSAS. Dimensionar aquela carência pela viagem faria o oposto do pretendido: se a ordem
+// falhasse (recurso esgotado na chegada), o trabalhador ficaria parado até 45s sem ser
+// reaproveitado. A janela de viagem serve só ao detector de long-walker, que atua sobre
+// unidades NÃO ociosas — as que estão de fato em trânsito.
+var g_PudimInTransitUntil = {};      // {entityId: expiração da janela de viagem}
+// Custo estimado de caminhada. Um aldeão anda ~8 units/s no Alpha 28; 160 ms/unit equivale
+// a ~6,2 units/s, folga proposital para terreno acidentado e desvios de pathfinding.
+// É uma constante de ajuste, não uma medição — se a janela ficar curta ou longa demais,
+// é este número que se mexe.
+const PUDIM_WALK_MS_PER_UNIT = 160;
+const PUDIM_IN_TRANSIT_MAX = 45000;  // teto: viagem longa não pode blindar a unidade para sempre
+
+// Telemetria de rotatividade (só GUI). g_PudimChurnCount = reordens em menos de 30s;
+// g_PudimWalkHeld = redirects de long-walker barrados pela carência. Ambos zerados a cada
+// SNAP, então o log mostra o valor do último minuto e não um acumulado da partida.
+var g_PudimLastDispatchTime = {};    // {entityId: timestamp do último despacho}
+var g_PudimChurnCount = 0;
+var g_PudimWalkHeld = 0;
+
+/**
+ * Marca trabalhadores como recém-despachados, protegendo-os de reatribuição.
+ * Abre também a janela de viagem: com a carência fixa de 6s, uma ida de 150 units (~24s de
+ * caminhada) ficava desprotegida a partir do sexto segundo, e o detector de long-walker
+ * desfazia no meio do trajeto a ordem que o auto-work tinha acabado de dar. Nos replays de
+ * 13/08 isso respondia por ~25% de todas as reordenações (132 e 86 casos em menos de 30s).
+ */
+function pudim_MarkDispatched(ids, distById) {
 	const now = Date.now();
-	for (const id of ids) g_PudimDispatchedAt[id] = now;
+	for (const id of ids) {
+		// Telemetria de rotatividade: reordenar em menos de 30s significa que a unidade
+		// mudou de alvo antes de alcançar o anterior — viagem perdida. Nos replays de
+		// 13/08 isso era ~25% de todas as reordenações; é o número que diz se a carência
+		// proporcional resolveu.
+		if (g_PudimLastDispatchTime[id] && now - g_PudimLastDispatchTime[id] <= 30000)
+			g_PudimChurnCount++;
+		g_PudimLastDispatchTime[id] = now;
+
+		g_PudimDispatchedAt[id] = now + PUDIM_DISPATCH_GRACE;
+
+		const d = (distById && distById[id]) || 0;
+		g_PudimInTransitUntil[id] = now + Math.min(PUDIM_IN_TRANSIT_MAX,
+			PUDIM_DISPATCH_GRACE + Math.round(d * PUDIM_WALK_MS_PER_UNIT));
+	}
 }
 // IDs atualmente protegidos (não expirados) — repassar pra simulação, que não tem acesso
 // direto a esse dict do GUI, pra sistemas de "buscar qualquer builder disponível" não

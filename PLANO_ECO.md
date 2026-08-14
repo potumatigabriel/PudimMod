@@ -154,6 +154,27 @@ Junto veio um guard que nunca funcionou: o painel envia `repeatBuilders` (array)
 e a simulação lia `data.repeatBuilding` (objeto). O nome nunca chegou, então os
 trabalhadores do repeat-build eram despachados por cima da própria obra.
 
+**Rotatividade de despachos** — nos replays de 13/08, 25% das reordenações
+chegavam em menos de 30 s, antes de o trabalhador alcançar o alvo anterior (132 e
+86 casos). O detector de long-walker atua sobre unidades **não ociosas** — ou
+seja, exatamente as que estão em trânsito — e não consultava carência nenhuma: a
+única que existia (`g_PudimDispatchedAt`, 6 s fixos) era aplicada só ao filtro de
+`idleWorkers`. Resultado: auto-work despachava, e no ciclo seguinte (500 ms) o
+long-walker desfazia.
+
+Agora há uma segunda janela, `g_PudimInTransitUntil`, dimensionada pela distância
+da viagem (`6 s + 160 ms/unit`, teto de 45 s), consultada apenas pelo detector de
+long-walker. A separação é essencial: `g_PudimDispatchedAt` filtra `idleWorkers`,
+que por construção só contém unidades **ociosas** — alongar aquela carência faria
+o oposto do pretendido, deixando parado até 45 s quem teve a ordem falhada.
+
+`PUDIM_WALK_MS_PER_UNIT = 160` é constante de ajuste, não medição: ~6,2 units/s
+contra ~8 units/s reais de um aldeão, com folga para terreno e pathfinding. Se a
+janela ficar curta ou longa demais, é esse número que se mexe.
+
+O SNAP passou a registrar `chrn` (reordens em menos de 30 s no último minuto) e
+`seg` (redirects barrados pela janela). São eles que dizem se o ajuste pegou.
+
 ---
 
 ## 4. Ordem sugerida de execução

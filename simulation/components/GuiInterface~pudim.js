@@ -916,7 +916,12 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 			}
 
 			if (target) {
-				assignedWorkers.push({ "id": ent, "x": target.x, "z": target.z, "target": target.id, "type": target.type });
+				// Distância da viagem, para o painel dimensionar a carência de reavaliação:
+				// uma carência fixa de 6s deixava o detector de long-walker desfazer, no meio
+				// do caminho, a mesma ordem que o auto-work tinha acabado de dar.
+				const tdx = target.x - workerPos.x, tdz = target.z - workerPos.y;
+				assignedWorkers.push({ "id": ent, "x": target.x, "z": target.z, "target": target.id, "type": target.type,
+				                       "dist": Math.sqrt(tdx*tdx + tdz*tdz) });
 				if (!assignedEntities[target.id]) assignedEntities[target.id] = 0;
 				assignedEntities[target.id]++;
 				deficits[resType] -= 1;

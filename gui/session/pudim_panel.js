@@ -247,6 +247,11 @@ const PUDIM_CONFIG_ELEMENTS = [
 	"pudim_sendIdleNowBtn",
 	"pudim_repeatHeader", "pudim_repeatDesc", "pudim_repeatStatus", "pudim_stopAllRepeatBtn",
 	"pudim_aiHeader",
+	// A chave-mestra das ajudas de combate ficou de fora desta lista desde que foi criada:
+	// no modo compacto o painel encolhia e ela continuava desenhada, solta sobre o mapa.
+	// Os objetos *Label não precisam entrar aqui — são filhos dos respectivos botões no XML
+	// e somem junto com eles.
+	"pudim_toggleCombatBtn",
 	"pudim_toggleBarterBtn", "pudim_toggleDropsitesBtn", "pudim_toggleRetreatBtn",
 	"pudim_toggleFocusBtn", "pudim_toggleGarrisonBtn", "pudim_toggleDebugBtn",
 	"pudim_togglePanicBtn", "pudim_panicStatus", "pudim_backToWorkBtn2",
@@ -1891,6 +1896,21 @@ function pudim_ProcessFarms()
 				" fwt=" + (d.fwt||0) + " df=" + (d.df||0) + " wp=" + (d.wp||0) +
 				" fmc=" + (d.fmc||0) + " tffs=" + (d.tffs||0) +
 				" reason=" + (d.reason||"?") + " action=" + farmData.action);
+		}
+
+		// ── Fundação de campo em aberto: todo mundo termina ela antes de abrir outra ─────
+		// Uma fazenda comporta 5 trabalhadores. Abrir uma nova a cada ciclo, com o punhado de
+		// gente livre do momento, deixava 3 campos simultâneos com 1 construtor em cada:
+		// pagava a madeira das três de uma vez e nenhuma ficava pronta.
+		if (farmData.action === "assist" && farmData.assistTarget) {
+			const helpers = (farmData.workersToRedirect || []).filter(w => !g_PudimRepeatBuilding[w]);
+			if (helpers.length > 0) {
+				Engine.PostNetworkCommand({ "type": "repair", "entities": helpers,
+					"target": farmData.assistTarget, "autocontinue": true, "queued": false });
+				pudim_Log("INFO", "FARM", "fundacao " + farmData.assistTarget +
+					" recebeu " + helpers.length + " construtor(es) — nenhum campo novo neste ciclo");
+			}
+			return;
 		}
 
 		// ── Soldados em fazendas: trocar por aldeões (soldado → madeira) ─────────────────

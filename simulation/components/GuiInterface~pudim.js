@@ -1649,6 +1649,7 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	let farmCount = 0;
 
 	const farmsteadPositions = [];
+	const fieldFoundations = [];
 	for (const ent of allEnts) {
 		const cmpIdent = Engine.QueryInterface(ent, IID_Identity);
 		if (cmpIdent) {
@@ -1659,7 +1660,12 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 					if (!ccEntity) ccEntity = ent;
 				}
 			}
-			if (cmpIdent.HasClass("Field")) farmCount++;
+			if (cmpIdent.HasClass("Field")) {
+				farmCount++;
+				// Fundação de campo ainda inacabada. Contada à parte porque ela muda a
+				// decisão: enquanto existir uma, não se começa outra.
+				if (Engine.QueryInterface(ent, IID_Foundation)) fieldFoundations.push(ent);
+			}
 			if (cmpIdent.HasClass("Farmstead")) {
 				const pos = Engine.QueryInterface(ent, IID_Position);
 				if (pos && pos.IsInWorld()) {
@@ -1947,6 +1953,20 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	result._dbg.tffs = territoryFruitFreeSlots;
 	if (territoryFruitFreeSlots >= 5) {
 		result._dbg.reason = "fruta_na_base:" + territoryFruitFreeSlots;
+		return result;
+	}
+
+	// Uma fazenda de cada vez. Cada campo comporta 5 trabalhadores, e o ciclo de decisão
+	// roda a cada 30s com os poucos trabalhadores livres do momento — sem esta trava, cada
+	// ciclo abria um campo novo com 1 construtor. O resultado em jogo foram 3 fazendas
+	// simultâneas com 1 trabalhador em cada: o custo em madeira sai todo de uma vez, as três
+	// demoram três vezes mais para ficarem prontas e nenhuma produz enquanto isso.
+	// Havendo fundação em aberto, todo mundo vai terminá-la; a próxima só começa depois.
+	if (fieldFoundations.length > 0) {
+		result.action = "assist";
+		result.assistTarget = fieldFoundations[0];
+		result.workersToRedirect = farFoodWorkers;
+		result._dbg.reason = "fundacao_aberta:" + fieldFoundations.length;
 		return result;
 	}
 

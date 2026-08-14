@@ -1395,19 +1395,27 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 
 	for (let x = 10; x < mapSize - 10; x += step) {
 		for (let z = 10; z < mapSize - 10; z += step) {
-			// Precisa ser borda do território: não pertence ao jogador, mas um vizinho pertence
 			const owner = cmpTerritoryManager.GetOwner(x, z);
 			if (owner === player) continue;
-			let isBorder = false;
-			const neighbors = [ [step,0], [-step,0], [0,step], [0,-step] ];
-			for (const n of neighbors) {
-				const nx = x + n[0], nz = z + n[1];
-				if (nx > 0 && nx < mapSize && nz > 0 && nz < mapSize &&
-				    cmpTerritoryManager.GetOwner(nx, nz) === player) {
-					isBorder = true; break;
+
+			// A exigência de "borda do território" só vale para o modo LOCAL, cuja missão é
+			// girar em torno da nossa própria base. Borda do território É a nossa base, por
+			// definição — aplicá-la ao modo PROFUNDO prendia o scout no mesmo perímetro do
+			// local, que era exatamente a queixa: "o profundo só fica rodeando minha base".
+			// No modo profundo sem base inimiga conhecida a missão é ACHAR o inimigo, então
+			// varremos o mapa inteiro e o distMod (positivo para deep) puxa para longe.
+			if (mode !== "deep") {
+				let isBorder = false;
+				const neighbors = [ [step,0], [-step,0], [0,step], [0,-step] ];
+				for (const n of neighbors) {
+					const nx = x + n[0], nz = z + n[1];
+					if (nx > 0 && nx < mapSize && nz > 0 && nz < mapSize &&
+					    cmpTerritoryManager.GetOwner(nx, nz) === player) {
+						isBorder = true; break;
+					}
 				}
+				if (!isBorder) continue;
 			}
-			if (!isBorder) continue;
 
 			// Pular setores bloqueados (água/obstáculo marcado pelo cliente)
 			const col = Math.floor(x / gridSize);
@@ -1421,7 +1429,11 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 			// angleCos: 1 = alinhado com theta, -1 = oposto (força patrulha em sentido horário)
 			const angleCos = Math.cos(tileAngle - theta);
 			// local: prefere mais próximo; deep: prefere mais longe
-			const distMod = mode === "deep" ? distCC * 0.1 : -distCC * 0.1;
+			// Peso do modo deep bem maior: com 0.1 o termo de distância chegava a ~75 num
+			// mapa grande e perdia para o alinhamento de ângulo (±100), então o scout
+			// escolhia sempre o vizinho na direção da vez em vez de ir longe. Com 0.4 a
+			// distância domina e o ângulo só decide o sentido da varredura.
+			const distMod = mode === "deep" ? distCC * 0.4 : -distCC * 0.1;
 			const score = angleCos * 100 + distMod;
 
 			if (score > bestScore) {

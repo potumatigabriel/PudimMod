@@ -1346,6 +1346,9 @@ var g_PudimAutoQueueDesiredCount = {};
 // Instante da última semeadura por edifício — carência contra semear duas vezes antes de
 // o comando anterior (ou uma ordem do jogador) aparecer na fila.
 var g_PudimQueueSeededAt = {};
+// Template da última semeadura por edifício. Sem ele não há como distinguir um lote do mod
+// de uma ordem do jogador — e foi essa confusão que trocou soldados por aldeões.
+var g_PudimQueueSeededTpl = {};
 /** Edifícios já avisados por falta de template treinável (evita repetir o log a cada 3s) */
 var g_PudimQueueNoTplLogged = {};
 
@@ -1655,17 +1658,32 @@ function pudim_ProcessAutoQueue()
 				if (b.trainingQueue && b.trainingQueue.length === 1) {
 					const cur = b.trainingQueue[0];
 					const curCount = cur.count || 1;
-					if ((cur.progress || 0) <= 0 && curCount < desiredCount) {
-						const tpl = g_PudimAutoQueueTemplates[b.ent] || cur.unitTemplate;
+					// O lote só pode ser trocado se for RECONHECIDAMENTE do mod: mesmo edifício
+					// e mesmo template da última semeadura dele.
+					//
+					// A versão anterior pegava o template de g_PudimAutoQueueTemplates (a
+					// memória do mod, quase sempre o aldeão) com cur.unitTemplate apenas como
+					// fallback. Com o jogador enfileirando soldados, ela cancelava o lote DELE e
+					// reenfileirava aldeões — visto no log: "edifício 150 lote degradado x1
+					// trocado por x3", com todas as semeaduras em support_civilian.
+					//
+					// Agora o tipo de unidade NUNCA muda: reenfileira exatamente cur.unitTemplate,
+					// e só quando esse template é o que o próprio mod semeou. Lote de tipo
+					// diferente é ordem do jogador e não se toca.
+					const seededTpl = g_PudimQueueSeededTpl[b.ent];
+					const isOurs = !!(cur.unitTemplate && seededTpl && cur.unitTemplate === seededTpl);
+					if (isOurs && (cur.progress || 0) <= 0 && curCount < desiredCount) {
+						const tpl = cur.unitTemplate;
 						// Exige poder pagar o lote CHEIO com o estoque atual, sem contar o
 						// reembolso do cancelamento: é conservador de propósito, para nunca
 						// cancelar um lote e não conseguir repor.
-						const affordable = tpl ? pudim_ComputeAffordableCount(tpl, desiredCount, res) : 0;
-						if (tpl && affordable >= desiredCount && cur.id !== undefined) {
+						const affordable = pudim_ComputeAffordableCount(tpl, desiredCount, res);
+						if (affordable >= desiredCount && cur.id !== undefined) {
 							Engine.PostNetworkCommand({ "type": "stop-production", "entity": b.ent, "id": cur.id });
 							Engine.PostNetworkCommand({ "type": "train", "entities": [b.ent], "template": tpl, "count": desiredCount });
+							g_PudimQueueSeededAt[b.ent] = nowQueue;
 							pudim_Log("INFO", "QUEUE", "edifício " + b.ent + " lote degradado x" + curCount +
-								" trocado por x" + desiredCount);
+								" trocado por x" + desiredCount + " " + tpl.split("/").pop());
 						}
 					}
 				}
@@ -1713,6 +1731,9 @@ function pudim_ProcessAutoQueue()
 			if (affordable <= 0) continue;
 			Engine.PostNetworkCommand({ "type": "train", "entities": [b.ent], "template": template, "count": affordable });
 			g_PudimQueueSeededAt[b.ent] = nowQueue;
+			// Guarda O QUE foi semeado: é a única forma de, depois, reconhecer um lote como
+			// do mod sem confundi-lo com uma ordem do jogador no mesmo edifício.
+			g_PudimQueueSeededTpl[b.ent] = template;
 			// qlen registra o tamanho da fila NO MOMENTO da decisão. Se algum dia a fila
 			// voltar a empilhar, este número diz se o mod semeou sobre uma fila que já tinha
 			// itens (leitura errada) ou se cada semeadura viu vazio de verdade (corrida).

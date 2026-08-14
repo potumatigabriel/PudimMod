@@ -981,8 +981,11 @@ function pudim_ToggleRepeatBuild()
 var g_PudimAdvancedAIEnabled = {
 	"barter": Engine.ConfigDB_GetValue("user", "pudim.advanced.barter") !== "false",
 	"dropsites": Engine.ConfigDB_GetValue("user", "pudim.advanced.dropsites") !== "false",
-	"retreat": Engine.ConfigDB_GetValue("user", "pudim.advanced.retreat") !== "false",
-	"focus": Engine.ConfigDB_GetValue("user", "pudim.advanced.focus") !== "false",
+	// retreat e focus nascem DESLIGADOS (=== "true" em vez de !== "false"): são as duas
+	// ajudas que mais brigam com o controle manual em combate, e é assim que o mod é
+	// jogado na prática. Quem quiser liga no painel; a escolha persiste normalmente.
+	"retreat": Engine.ConfigDB_GetValue("user", "pudim.advanced.retreat") === "true",
+	"focus": Engine.ConfigDB_GetValue("user", "pudim.advanced.focus") === "true",
 	"garrison": Engine.ConfigDB_GetValue("user", "pudim.advanced.garrison") !== "false",
 	"panic": Engine.ConfigDB_GetValue("user", "pudim.advanced.panic") !== "false",
 	"countertrain": Engine.ConfigDB_GetValue("user", "pudim.advanced.countertrain") !== "false",
@@ -1052,9 +1055,10 @@ function pudim_CanGarrison(entId) {
 var PUDIM_PANIC_MAX_DURATION = 120000; // 2min: força retorno mesmo se detecção ficar "presa" (ex: inimigo parado perto do CC sem atacar)
 
 
-// Sempre inicia em 3 ("faltando 3") em toda partida — intencionalmente NÃO persiste no
-// ConfigDB: o toggle vale só para a sessão atual.
-var g_PudimAutoHouseThreshold = 3;
+// Sempre inicia em 5 ("faltando 5") em toda partida — intencionalmente NÃO persiste no
+// ConfigDB: o toggle vale só para a sessão atual. Com 3 a casa saía tarde demais e a
+// população travava esperando a obra terminar.
+var g_PudimAutoHouseThreshold = 5;
 var g_LastAutoHouseAttempt = 0;      // última vez que uma casa foi CONSTRUÍDA
 var g_LastAutoHouseCheck = 0;        // última vez que a condição foi VERIFICADA
 var g_PudimLastHouseProdCount = 1;   // CC+barracas na última checagem (cooldown adaptativo)
@@ -1160,7 +1164,7 @@ function pudim_ToggleAutoHouse() {
 	else if (g_PudimAutoHouseThreshold === 5) g_PudimAutoHouseThreshold = 3;
 	else if (g_PudimAutoHouseThreshold === 3) g_PudimAutoHouseThreshold = 0;
 	else g_PudimAutoHouseThreshold = 12;
-	// Sem persistência: toda partida recomeça no padrão 3
+	// Sem persistência: toda partida recomeça no padrão 5
 	pudim_UpdateAutoHouseButton();
 }
 
@@ -1870,7 +1874,15 @@ function pudim_ProcessFarms()
 				} catch(e2) {}
 				if (res && res.success) { foundX = pos.x; foundZ = pos.z; break; }
 			}
-			if (foundX === null) break; // Sem mais posições válidas
+			if (foundX === null) {
+				// Silêncio aqui era o que escondia o problema: a simulação devolvia
+				// action=build a cada ciclo, nenhuma fazenda saía, e o log só mostrava o
+				// déficit crescendo sem dizer por quê.
+				if (farmsBuilt === 0)
+					pudim_Log("WARN", "FARM", "action=build sem posicao valida — " +
+						farmData.candidatePositions.length + " candidatos testados");
+				break; // Sem mais posições válidas
+			}
 
 			Engine.PostNetworkCommand({
 				"type": "construct",

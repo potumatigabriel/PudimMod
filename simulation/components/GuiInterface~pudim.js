@@ -1854,34 +1854,64 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 		return owned / 8;
 	};
 
-	// Seed points: farmsteads e CC — todos normalizados para {x, z}.
-	// Preferir edifícios mais no interior (longe da fronteira inimiga).
+	// Seed points em ORDEM DE PREFERÊNCIA: primeiro o Centro Cívico, depois os celeiros
+	// do mais próximo do CC para o mais distante. Antes os celeiros vinham primeiro e o CC
+	// só era considerado quando NÃO havia nenhum celeiro — o oposto do pretendido: as
+	// fazendas fugiam do centro assim que o primeiro celeiro subia.
 	const allSeeds = [];
-	for (const fs of farmsteadPositions) allSeeds.push({ x: fs.x, z: fs.z });
-	if (allSeeds.length === 0) {
-		// Sem farmsteads: tentar todos os CCs para escolher o mais interior
-		for (const cc of ccPositions) allSeeds.push({ x: cc.x, z: cc.y });
-	}
+	for (const cc of ccPositions) allSeeds.push({ x: cc.x, z: cc.y });
 	if (allSeeds.length === 0) allSeeds.push({ x: cx, z: cz });
 
-	// Atribuir safety e ordenar: mais interior primeiro
-	for (const s of allSeeds) s.safety = computeSafety(s.x, s.z, 80);
-	allSeeds.sort((a, b) => b.safety - a.safety);
+	// Celeiros ordenados pela distância ao CC mais próximo — "o agrícola mais próximo do
+	// centro, e por aí vai".
+	const fsByDist = farmsteadPositions.map(function(fs) {
+		let best = Infinity;
+		for (const s of allSeeds) {
+			const dx = fs.x - s.x, dz = fs.z - s.z;
+			best = Math.min(best, dx*dx + dz*dz);
+		}
+		return { x: fs.x, z: fs.z, dCC: best };
+	}).sort(function(a, b) { return a.dCC - b.dCC; });
+	for (const fs of fsByDist) allSeeds.push({ x: fs.x, z: fs.z });
 
-	// Usar apenas seeds com safety >= 0.5 (interior). Fallback: o mais seguro disponível.
+	// Safety continua sendo calculada, mas agora só EXCLUI seeds na fronteira inimiga —
+	// não reordena. A ordem é a preferência acima; segurança é filtro, não critério.
+	for (const s of allSeeds) s.safety = computeSafety(s.x, s.z, 80);
 	const safeSeeds = allSeeds.filter(s => s.safety >= 0.5);
 	const seedPoints = safeSeeds.length > 0 ? safeSeeds : allSeeds.slice(0, 1);
 
+	// Anéis de 6 até 90 units ao redor de cada seed (celeiro/CC).
+	// O teto anterior era 30, com 8 direções fixas: 40 pontos por seed, dentro de um
+	// círculo que o CC, as casas e as primeiras fazendas já ocupavam. Depois da terceira
+	// fazenda nenhum candidato passava no teste de colisão e o mod parava de construir —
+	// no log de 14/08 o resultado era `fc=3` com `action=build` a cada ciclo e o déficit
+	// subindo (4 → 4 → 7), ou seja, decidia construir e nunca conseguia.
+	// O número de direções acompanha o raio (~12 units entre pontos vizinhos do anel):
+	// com 8 fixas, um anel de 90 deixaria vãos de 70 units e perderia espaço livre óbvio.
+	// A ordenação abaixo continua preferindo perto e seguro, então os anéis largos só
+	// entram em jogo quando os de perto acabaram.
 	const candidates = [];
-	for (const seed of seedPoints) {
-		for (let r = 6; r <= 30; r += 6) {
-			for (let i = 0; i < 8; i++) {
-				const angle = i * Math.PI / 4;
+	// Tetos de custo: cada candidato faz uma consulta espacial. O teto POR SEED existe para
+	// que o primeiro (o CC) não consuma a cota inteira e deixe os celeiros sem candidato.
+	const PUDIM_FARM_CAND_PER_SEED = 250;
+	const PUDIM_FARM_CAND_TOTAL = 600;
+	outerSeeds: for (let si = 0; si < seedPoints.length; si++) {
+		const seed = seedPoints[si];
+		let nSeed = 0;
+		for (let r = 6; r <= 90; r += 6) {
+			const dirs = Math.max(8, Math.round(2 * Math.PI * r / 12));
+			for (let i = 0; i < dirs; i++) {
+				const angle = (i / dirs) * 2 * Math.PI;
 				candidates.push({
 					x: Math.max(15, Math.min(mapSize - 15, seed.x + Math.cos(angle) * r)),
-					z: Math.max(15, Math.min(mapSize - 15, seed.z + Math.sin(angle) * r))
+					z: Math.max(15, Math.min(mapSize - 15, seed.z + Math.sin(angle) * r)),
+					seedIdx: si,
+					rSeed: r
 				});
+				if (++nSeed >= PUDIM_FARM_CAND_PER_SEED) break;
+				if (candidates.length >= PUDIM_FARM_CAND_TOTAL) break outerSeeds;
 			}
+			if (nSeed >= PUDIM_FARM_CAND_PER_SEED) break;
 		}
 	}
 
@@ -1896,21 +1926,17 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 		validCandidates.push(c);
 	}
 
-	// Ordenar: segurança territorial é critério primário (evitar fronteiras);
-	// dentro do mesmo tier de segurança, preferir mais próximo ao seed (eficiência de entrega).
+	// Ordenar seguindo a preferência pedida: esgota o entorno do CC antes de passar ao
+	// celeiro mais próximo do CC, e assim por diante. A segurança territorial passou a ser
+	// desempate DENTRO de cada seed, não critério primário — como critério primário ela
+	// embaralhava a ordem dos seeds e mandava a fazenda para o celeiro distante só porque
+	// o entorno dele pontuava um tier acima.
 	validCandidates.sort((a, b) => {
+		if (a.seedIdx !== b.seedIdx) return a.seedIdx - b.seedIdx;
 		const tierA = Math.round(a.safety * 4); // 0..4
 		const tierB = Math.round(b.safety * 4);
 		if (tierA !== tierB) return tierB - tierA; // mais seguro primeiro
-		// Mesmo tier: mais próximo ao seed
-		let minA = Infinity, minB = Infinity;
-		for (const s of seedPoints) {
-			const dax = a.x - s.x, daz = a.z - s.z;
-			const dbx = b.x - s.x, dbz = b.z - s.z;
-			minA = Math.min(minA, dax*dax + daz*daz);
-			minB = Math.min(minB, dbx*dbx + dbz*dbz);
-		}
-		return minA - minB;
+		return a.rSeed - b.rSeed;                  // e mais colado ao seed
 	});
 
 	result.candidatePositions = validCandidates;

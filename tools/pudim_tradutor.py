@@ -266,7 +266,7 @@ def main():
     print("PudimMod — tradutor de chat")
     print(f"  pasta do jogo : {userdata}")
     print(f"  ponte         : {pasta}")
-    print(f"  idioma destino: {argumentos.to}")
+    print(f"  idioma destino: {argumentos.to} (o jogo pode pedir outro)")
     print(f"  cache         : {len(cache)} frase(s) ja conhecidas")
     print("  Deixe esta janela aberta enquanto joga. Ctrl+C para sair.\n")
 
@@ -276,6 +276,7 @@ def main():
 
     ultima_modificacao = 0
     ultimo_sinal = 0
+    ultimo_destino = None
 
     while True:
         try:
@@ -303,6 +304,14 @@ def main():
                 time.sleep(POLL_SECONDS)
                 continue
 
+            # O idioma vem no pedido, escolhido pelo jogo — quem sabe em que
+            # lingua o 0 A.D. esta rodando e ele, nao este programa. O --to so
+            # vale quando o pedido nao diz nada (mod antigo, ou teste manual).
+            destino = pedido.get("to") or argumentos.to
+            if destino != ultimo_destino:
+                print(f"  idioma de destino: {destino}")
+                ultimo_destino = destino
+
             novidade = False
             for item in pedido["items"]:
                 chave = str(item.get("id", ""))
@@ -311,7 +320,7 @@ def main():
                     continue
 
                 print(f"  > {texto}")
-                traduzido = traduzir(texto, argumentos.to, argumentos.origem)
+                traduzido = traduzir(texto, destino, argumentos.origem)
                 if traduzido is None:
                     continue
 

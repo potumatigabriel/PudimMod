@@ -40,21 +40,6 @@ var g_PudimTrLista = {
 };
 
 /**
- * Como o 0 A.D. separa "Fulano: " do que foi dito.
- * Traduzir o apelido junto dá resultado ruim, então ele fica de fora.
- */
-const PUDIM_TR_LISTA_REMETENTE = /^((?:\[[^\]]*\])*[^:]{1,40}:\s*)/;
-
-function pudim_TrListaPartes(texto)
-{
-	const casou = PUDIM_TR_LISTA_REMETENTE.exec(texto);
-	return {
-		"prefixo": casou ? casou[1] : "",
-		"dito": pudim_TrLimpar(casou ? texto.substr(casou[1].length) : texto)
-	};
-}
-
-/**
  * Reescreve a lista inteira a partir dos originais e do que já foi traduzido.
  *
  * Reescrever tudo em vez de trocar um item só é de propósito: a lista da GUI do
@@ -69,7 +54,7 @@ function pudim_TrListaRedesenhar()
 	// Quem estava esperando e já tem tradução em mãos deixa de esperar.
 	for (const indice in g_PudimTrLista.avisos)
 		if (g_PudimTrLista.avisos[indice] == "esperando" &&
-		    pudim_TrObter(pudim_TrListaPartes(g_PudimTrLista.originais[indice]).dito))
+		    pudim_TrObter(pudim_TrPartes(g_PudimTrLista.originais[indice]).dito))
 			delete g_PudimTrLista.avisos[indice];
 
 	const itens = g_PudimTrLista.originais.map((original, indice) => {
@@ -84,7 +69,7 @@ function pudim_TrListaRedesenhar()
 		if (!g_PudimTrLista.traduzidos[indice])
 			return original;
 
-		const partes = pudim_TrListaPartes(original);
+		const partes = pudim_TrPartes(original);
 		const pronta = pudim_TrObter(partes.dito);
 		if (!pronta)
 			return original;
@@ -119,7 +104,7 @@ function pudim_TrListaClicar()
 		return;
 	}
 
-	const partes = pudim_TrListaPartes(g_PudimTrLista.originais[indice]);
+	const partes = pudim_TrPartes(g_PudimTrLista.originais[indice]);
 	if (!partes.dito)
 		return;
 

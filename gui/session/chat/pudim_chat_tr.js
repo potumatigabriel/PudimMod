@@ -109,23 +109,17 @@ function pudim_TrClicar(linha)
 
 // ─── Decoração das mensagens novas ────────────────────────────────────────────
 
-/**
- * Separa "Jogador: " do que ele falou.
- *
- * Só o que foi dito é traduzido; o nome fica intocado, com a cor do jogador.
- * Traduzir o nome junto dá resultado ridículo — apelido virando substantivo.
- */
-const PUDIM_TR_REMETENTE = /^((?:\[[^\]]*\])*[^:]{1,40}:\s*)/;
-
 function pudim_TrDecorar(chatMessage)
 {
 	const texto = chatMessage.text;
-	const casou = PUDIM_TR_REMETENTE.exec(texto);
+	// Só o que foi dito é traduzido; o nome fica intocado, com a cor do jogador.
+	// A separação mora em gui/common/pudim_translate.js, junto com a da lobby.
+	const partes = pudim_TrPartes(texto);
 
 	const linha = {
-		"pudimPrefixo": casou ? casou[1] : "",
+		"pudimPrefixo": partes.prefixo,
 		"pudimOriginal": texto,
-		"pudimTextoLimpo": pudim_TrLimpar(casou ? texto.substr(casou[1].length) : texto),
+		"pudimTextoLimpo": partes.dito,
 		"pudimTraducao": null,
 		"pudimEstado": "original"
 	};
@@ -252,8 +246,7 @@ function pudim_TrEnfeitarHistorico(texto)
 		return texto;
 
 	return texto.split("\n").map(linha => {
-		const casou = PUDIM_TR_REMETENTE.exec(linha);
-		const dito = pudim_TrLimpar(casou ? linha.substr(casou[1].length) : linha);
+		const dito = pudim_TrPartes(linha).dito;
 		if (!dito)
 			return linha;
 

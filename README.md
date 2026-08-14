@@ -163,6 +163,10 @@ Without it nothing breaks — the message just says the translator is off.
 No API key and no sign-up: it calls the same free endpoint the translate.google.com page uses.
 Translations are cached on disk, so a phrase already seen costs no network round trip.
 
+**The target language follows the game.** Whatever locale 0 A.D. runs in is what you get back —
+play in Spanish and the chat comes back in Spanish, with nothing to configure. The source language
+is never declared: Google detects it on its own.
+
 Set `pudim.chat.autotranslate` to `true` in the user config to translate every incoming message
 automatically instead of clicking one by one.
 
@@ -350,6 +354,9 @@ joga. Sem ele nada quebra — a fala apenas avisa que o tradutor está desligado
 
 Sem chave de API e sem cadastro: usa o mesmo endpoint gratuito que a página translate.google.com usa.
 As traduções ficam em cache no disco, então frase já vista não custa nova ida à rede.
+
+**O idioma de destino acompanha o jogo.** O 0 A.D. rodando em espanhol devolve espanhol, sem nada
+para configurar. O idioma de origem nunca é declarado: o Google identifica sozinho o que foi escrito.
 
 Defina `pudim.chat.autotranslate` como `true` na configuração do usuário para traduzir toda mensagem
 que chega, em vez de clicar uma a uma.

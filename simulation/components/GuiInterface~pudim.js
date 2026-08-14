@@ -1719,7 +1719,12 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	// O sistema de ratio já controla quando construir — este limite é apenas segurança
 	// Teto de fazendas construídas automaticamente. Acima disso o jogador decide se quer
 	// mais — o mod não continua expandindo sozinho indefinidamente.
-	const PUDIM_MAX_FARMS = 9;
+	// Teto proporcional à população. Fixo em 9, ele limitava a comida a 45 trabalhadores
+	// (9 x 5) em qualquer situação — com pesos 3/3 e pop 200 o alvo é ~100, então o déficit
+	// virava permanente e o excedente ia todo para a madeira. Com ~1 campo por 8 de
+	// população: 6 no mínimo (início), 13 em pop 100, 20 em pop 200 (100 vagas de comida).
+	// O custo em madeira segue sendo o freio real; madeira é justamente o que sobra.
+	const PUDIM_MAX_FARMS = Math.max(6, Math.min(20, Math.ceil(cmpPlayer.GetPopulationCount() / 8)));
 	// Capacidade real de um campo, conferida em
 	// simulation/templates/template_structure_resource_field.xml: <MaxGatherers>5</MaxGatherers>
 	const PUDIM_FIELD_CAPACITY = 5;
@@ -1987,7 +1992,21 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 				if (item.productiontype === "unit") trainingCount += (item.count || 1);
 		}
 		result._dbg.trn = trainingCount;
-		effDeficit = Math.min(deficit - trainingCount, 1);
+		// Teto de UMA FAZENDA por ciclo (5 vagas), não de 1 trabalhador.
+		//
+		// O teto de 1 estrangulava a comida e foi a causa do desequilíbrio 10x32 com pesos
+		// 3/3. A capacidade de comida é fruta + fazendas; com a fruta esgotada (nfc=0 no
+		// log), ela só cresce quando um campo novo sobe. Com 1 trabalhador por ciclo, cada
+		// campo saía com um construtor só, demorava a ficar pronto e abria 1 vaga de cada
+		// vez — enquanto o auto-work, rodando a cada 500ms, despejava todo mundo na madeira.
+		// A conta de cota estava certa o tempo todo (alvo 22 de comida, tinha 18); o gargalo
+		// era a velocidade de abrir vaga.
+		//
+		// Cinco é o tamanho de um campo: eles erguem a fundação juntos e ficam colhendo ali,
+		// que é exatamente o "cada fazenda comporta 5 trabalhadores". O desconto por
+		// trainingCount continua valendo, então a regra de esperar quem está nascendo é
+		// preservada — o que muda é o teto quando NÃO há ninguém nascendo.
+		effDeficit = Math.min(deficit - trainingCount, PUDIM_FIELD_CAPACITY);
 	}
 	result._dbg.edf = effDeficit;
 

@@ -1784,8 +1784,17 @@ function pudim_ProcessAutoQueue()
  */
 // {tech: timestamp} — quando o comando de pesquisa foi enviado
 var g_PudimResearchSentAt = {};
-// techs que falharam a entrar na fila após 90s → não tentar de novo na sessão
-var g_PudimResearchBlacklist = [];
+// Techs que falharam a entrar na fila após 90s → { tech: instante em que pode tentar de novo }.
+//
+// Era uma lista PERMANENTE na sessão, e isso custava caro: a razão mais comum de uma
+// pesquisa não entrar na fila é falta de recurso naquele instante, não impossibilidade.
+// No log de 14/08, com a comida oscilando entre 37 e 74, o mod baniu para sempre
+// gather_capacity_basket, gather_capacity_wheelbarrow e gather_farming_plows — as três
+// tecnologias que justamente melhorariam a coleta. Banir a cura da doença.
+// Agora é uma quarentena de 3 minutos: preserva o objetivo original (não ficar reenviando
+// a mesma pesquisa em loop) sem perder a tecnologia quando o estoque se recupera.
+var g_PudimResearchBlacklist = {};
+const PUDIM_RESEARCH_RETRY = 180000;
 
 function pudim_ProcessAutoResearch()
 {
@@ -1795,15 +1804,22 @@ function pudim_ProcessAutoResearch()
 		const sentKeys = Object.keys(g_PudimResearchSentAt);
 		for (const tech of sentKeys) {
 			if (now - g_PudimResearchSentAt[tech] > 90000) {
-				if (g_PudimResearchBlacklist.indexOf(tech) === -1)
-					g_PudimResearchBlacklist.push(tech);
+				g_PudimResearchBlacklist[tech] = now + PUDIM_RESEARCH_RETRY;
 				delete g_PudimResearchSentAt[tech];
-				pudim_Log("WARN", "RESEARCH", "blacklist: " + tech + " (nunca entrou na fila em 90s)");
+				pudim_Log("WARN", "RESEARCH", "quarentena 3min: " + tech + " (nao entrou na fila em 90s)");
 			}
 		}
 
+		// Só as quarentenas ainda ativas vão para a simulação; as vencidas são descartadas
+		// aqui e a tecnologia volta a ser candidata.
+		const blacklistAtiva = [];
+		for (const tech in g_PudimResearchBlacklist) {
+			if (now < g_PudimResearchBlacklist[tech]) blacklistAtiva.push(tech);
+			else delete g_PudimResearchBlacklist[tech];
+		}
+
 		const researchData = Engine.GuiInterfaceCall("pudim_GetAutoResearchData", {
-			blacklist: g_PudimResearchBlacklist,
+			blacklist: blacklistAtiva,
 			sentTechs: sentKeys
 		});
 		if (!researchData) return;

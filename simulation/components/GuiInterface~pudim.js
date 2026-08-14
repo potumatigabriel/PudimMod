@@ -2252,10 +2252,35 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 	const midRadius = avgBuilderDist !== null
 		? Math.max(80, Math.min(avgBuilderDist, bestRadius))
 		: Math.max(80, bestRadius * 0.65);
-	const baseVillagePoint = {
-	    x: ccPos.x + Math.cos(bestAngle) * midRadius,
-	    y: ccPos.y + Math.sin(bestAngle) * midRadius
-	};
+	// Âncora = POSIÇÃO DO CONSTRUTOR, não um ponto no anel ao redor do CC.
+	// O raio já era limitado por avgBuilderDist, mas o ÂNGULO vinha da varredura de
+	// pontuação e podia apontar para o lado oposto ao do trabalhador — com isso a casa
+	// nascia longe assim mesmo e ele atravessava a base inteira (relatado em jogo: soldado
+	// mandado construir "do outro lado do mapa"). Ancorando nele, a distância a percorrer é
+	// mínima por construção. A única restrição mantida é o afastamento de 80 do CC, que é o
+	// footprint do CC mais o da casa e a folga entre eles.
+	// Atenção aos campos: ccPos é GetPosition2D() cru, {x, y} com y = z; builderCentroid é
+	// {x, z}; e baseVillagePoint usa {x, y} com y = z, como o resto desta função espera.
+	let baseVillagePoint;
+	if (builderCentroid)
+	{
+		const bdx = builderCentroid.x - ccPos.x, bdz = builderCentroid.z - ccPos.y;
+		const bd = Math.sqrt(bdx*bdx + bdz*bdz);
+		if (bd >= 80)
+			baseVillagePoint = { x: builderCentroid.x, y: builderCentroid.z };
+		else
+		{
+			// Colado demais no CC: empurra para fora na MESMA direção em que ele está,
+			// para continuar sendo o ponto mais próximo dele que respeita o afastamento.
+			const ang = bd > 0.01 ? Math.atan2(bdz, bdx) : bestAngle;
+			baseVillagePoint = { x: ccPos.x + Math.cos(ang) * 80, y: ccPos.y + Math.sin(ang) * 80 };
+		}
+	}
+	else
+		baseVillagePoint = {
+			x: ccPos.x + Math.cos(bestAngle) * midRadius,
+			y: ccPos.y + Math.sin(bestAngle) * midRadius
+		};
 
 	let candidates = [];
 	const pushCandidate = (cx, cz) => {

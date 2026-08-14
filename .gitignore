@@ -8,3 +8,7 @@ scratch*.txt
 
 # Estado local do Visual Studio (não pertence ao repositório)
 .vs/
+
+# Cache do Python (tools/pudim_tradutor.py)
+__pycache__/
+*.pyc

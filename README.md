@@ -136,6 +136,36 @@ phase, all four resources, gatherers per resource, army composition, kills/death
 are in combat. The log is kept **per match** (not per day) and the **last 10 matches** are retained,
 so a whole game can be read back from start to finish without filling the disk.
 
+## Chat translation
+
+**Click a chat message to translate it. Click again to get the English back.** Works in a match, in
+the multiplayer lobby and in the match setup screen.
+
+It needs a small companion program, and there is no way around that: the 0 A.D. GUI script engine has
+no HTTP at all — no `fetch`, no XHR. The only networking exposed to scripts is the XMPP lobby and
+mod.io, both in C++. So the mod writes the phrase to a file, `tools/pudim_tradutor.py` translates it
+through Google Translate, and writes the answer back:
+
+```
+mod  --writes-->  saves/campaigns/pudim_tr_req.json  --reads-->  pudim_tradutor.py  --HTTP--> Google
+mod  <---reads--  saves/campaigns/pudim_tr_res.json  <--writes-------'
+```
+
+That folder is not a matter of taste: the GUI's `ReadJSONFile`/`WriteJSONFile` only accepts a closed
+list of paths — `gui/`, `simulation/`, `maps/`, `campaigns/`, `saves/campaigns/`,
+`config/matchsettings.json` and `config/matchsettings.mp.json`. Anything else answers *Restricted
+access to …*. Of those, `saves/campaigns/` is the only writable user folder. It does not disturb
+campaigns: the game only lists `*.0adcampaign` there.
+
+To use it, run `tools/PudimTradutor.bat` (needs Python) and leave the window open while you play.
+Without it nothing breaks — the message just says the translator is off.
+
+No API key and no sign-up: it calls the same free endpoint the translate.google.com page uses.
+Translations are cached on disk, so a phrase already seen costs no network round trip.
+
+Set `pudim.chat.autotranslate` to `true` in the user config to translate every incoming message
+automatically instead of clicking one by one.
+
 ## Language
 
 Portuguese or English, detected automatically from the game's language. To force one, set
@@ -293,6 +323,36 @@ Tudo o que o mod decide é registrado e, uma vez por minuto, é acrescentado um 
 fase, os quatro recursos, coletores por recurso, composição do exército, abates/perdas e se você está
 em combate. O log é guardado **por partida** (não por dia) e as **10 últimas partidas** são
 preservadas, então dá para reler um jogo inteiro do começo ao fim sem encher o disco.
+
+## Tradução do chat
+
+**Clique numa fala do chat para traduzi-la. Clique de novo para ver o inglês.** Funciona na partida,
+na lobby multiplayer e na tela de configuração da partida.
+
+Precisa de um programinha auxiliar, e não há como fugir disso: o JS da GUI do 0 A.D. não tem HTTP —
+não existe `fetch` nem XHR. As únicas funções de rede expostas ao script são a lobby (XMPP) e o
+mod.io, ambas em C++. Então o mod grava a frase num arquivo, `tools/pudim_tradutor.py` traduz no
+Google Tradutor e devolve a resposta:
+
+```
+mod  --grava-->  saves/campaigns/pudim_tr_req.json  --lê-->  pudim_tradutor.py  --HTTP--> Google
+mod  <---lê----  saves/campaigns/pudim_tr_res.json  <-grava------'
+```
+
+A pasta não é escolha de gosto: o `ReadJSONFile`/`WriteJSONFile` da GUI só aceita uma lista fechada
+de caminhos — `gui/`, `simulation/`, `maps/`, `campaigns/`, `saves/campaigns/`,
+`config/matchsettings.json` e `config/matchsettings.mp.json`. Qualquer outro responde *Restricted
+access to …*. Dessa lista, `saves/campaigns/` é a única pasta do usuário em que dá para gravar. Não
+atrapalha as campanhas: o jogo lista só `*.0adcampaign` ali.
+
+Para usar, execute `tools/PudimTradutor.bat` (precisa de Python) e deixe a janela aberta enquanto
+joga. Sem ele nada quebra — a fala apenas avisa que o tradutor está desligado.
+
+Sem chave de API e sem cadastro: usa o mesmo endpoint gratuito que a página translate.google.com usa.
+As traduções ficam em cache no disco, então frase já vista não custa nova ida à rede.
+
+Defina `pudim.chat.autotranslate` como `true` na configuração do usuário para traduzir toda mensagem
+que chega, em vez de clicar uma a uma.
 
 ## Idioma
 

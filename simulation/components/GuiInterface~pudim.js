@@ -293,9 +293,18 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 	const playerEnt = cmpPlayerManager.GetPlayerByID(player);
 	const cmpPlayer = Engine.QueryInterface(playerEnt, IID_Player);
 	
-	// Identificar inimigos para evitar florestas perigosas
+	// Identificar inimigos para evitar florestas perigosas.
+	// Gaia (jogador 0) é excluída: dependendo da configuração da partida ela aparece em
+	// GetEnemies(), e aí toda ovelha, veado ou galinha vira "inimigo por perto". Foi o que
+	// deixou os soldados iniciais parados a partida inteira — o log acusava
+	// `inimigo_a_100m` num jogo com k0/d0, sem um único combate. Gaia também poluía
+	// enemyStructures, fazendo florestas perto de qualquer ruína parecerem perigosas.
 	const cmpDiplomacy = Engine.QueryInterface(playerEnt, IID_Diplomacy);
-	const enemies = cmpDiplomacy ? cmpDiplomacy.GetEnemies() : [];
+	const enemiesRaw = cmpDiplomacy ? cmpDiplomacy.GetEnemies() : [];
+	const enemies = enemiesRaw.filter(p => p > 0);
+	// Lista CRUA no log, antes do filtro: é o que confirma se Gaia estava mesmo entrando.
+	// Logar a lista já filtrada não provaria nada — nunca mostraria o 0.
+	result.enemyList = enemiesRaw.join("/") || "vazio";
 	const enemyStructures = [];
 	for (const enemy of enemies) {
 		const ents = cmpRangeManager.GetEntitiesByPlayer(enemy);
@@ -745,8 +754,14 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 			// e é justamente fora do território que ele tem mais chance de topar com um.
 			// Uma consulta por soldado ocioso, com todos os inimigos de uma vez.
 			if (cmpIdentity && cmpIdentity.HasClass("CitizenSoldier") && enemies.length > 0) {
-				const nearEnemies = cmpRangeManager.ExecuteQueryAroundPos(
+				const nearRaw = cmpRangeManager.ExecuteQueryAroundPos(
 					{ x: workerPos.x, y: workerPos.y }, 0, 100, enemies, IID_UnitAI, false);
+				// Bicho não é ameaça: mesmo num inimigo de verdade, animais e barcos de pesca
+				// não justificam manter um lanceiro parado.
+				const nearEnemies = nearRaw.filter(e => {
+					const ei = Engine.QueryInterface(e, IID_Identity);
+					return ei && !ei.HasClass("Animal") && !ei.HasClass("FishingBoat");
+				});
 				if (nearEnemies.length > 0) {
 					// Também é uma unidade ociosa que o mod escolheu não empregar — registrar,
 					// senão ela some do diagnóstico e volta a virar suposição.

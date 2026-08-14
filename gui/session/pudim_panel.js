@@ -910,7 +910,10 @@ function pudim_RunAutoWork()
 			g_PudimUnplacedLogAt = nowUP;
 			const amostra = result.unplaced.slice(0, 4)
 				.map(u => u.kind + "#" + u.id + "[" + u.tried + "]").join(" ");
-			pudim_Log("WARN", "WORK", result.unplaced.length + " sem alvo: " + amostra);
+			// enemyList mostra QUEM o mod considera inimigo. Sem isso, "inimigo_a_100m" num
+			// jogo sem combate ficava sem explicação — era Gaia entrando na lista.
+			pudim_Log("WARN", "WORK", result.unplaced.length + " sem alvo: " + amostra +
+				" | inimigos=" + (result.enemyList || "nenhum"));
 		}
 	}
 

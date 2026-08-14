@@ -1895,6 +1895,9 @@ function pudim_ProcessFarms()
 				" ncap=" + (d.ncap||0) + " tg=" + (d.tg||0) + " cfm=" + (d.cfm||0) +
 				" fwt=" + (d.fwt||0) + " df=" + (d.df||0) + " wp=" + (d.wp||0) +
 				" fmc=" + (d.fmc||0) + " tffs=" + (d.tffs||0) +
+				// trn = unidades em produção; edf = déficit já descontado delas. Juntos
+				// mostram quando a trava de "espera nascer" está segurando o remanejamento.
+				" trn=" + (d.trn||0) + " edf=" + (d.edf||0) +
 				" reason=" + (d.reason||"?") + " action=" + farmData.action);
 		}
 

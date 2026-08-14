@@ -1882,11 +1882,38 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	result._dbg.df = deficit;
 	result._dbg.wp = woodWorkerPool.length;
 
-	if (deficit <= 0 || woodWorkerPool.length === 0) {
-		result._dbg.reason = deficit <= 0 ? "nodeficit" : "nowood2";
+	// ── Trava: abaixo de pop 100, quem está nascendo cobre o déficit ────────────────────
+	// Tirar um trabalhador da madeira custa a viagem inteira (ida, volta e o tempo parado
+	// no caminho). Com produção rodando, esse mesmo lugar seria preenchido de graça pela
+	// próxima unidade — e foi o que se viu em jogo: o mod tirou um da madeira e, logo
+	// depois, mandou o recém-nascido de volta para a madeira. Duas viagens para ficar no
+	// mesmo lugar.
+	// Desconta do déficit o que já está em produção e limita a 1 remanejamento por ciclo.
+	// Não zera de vez para não travar: trainingCount é um lote (3-5), enquanto o déficit
+	// cresce junto com a população — quando a comida satura de verdade, o déficit passa o
+	// que está nascendo e a fazenda sai. Acima de pop 100 um coletor a menos é ruído e o
+	// balanceamento volta ao normal.
+	const popFarm = cmpPlayer.GetPopulationCount();
+	let effDeficit = deficit;
+	if (popFarm < 100) {
+		let trainingCount = 0;
+		for (const ent of allEnts) {
+			const cmpPQ = Engine.QueryInterface(ent, IID_ProductionQueue);
+			if (!cmpPQ) continue;
+			for (const item of cmpPQ.GetQueue())
+				if (item.productiontype === "unit") trainingCount += (item.count || 1);
+		}
+		result._dbg.trn = trainingCount;
+		effDeficit = Math.min(deficit - trainingCount, 1);
+	}
+	result._dbg.edf = effDeficit;
+
+	if (effDeficit <= 0 || woodWorkerPool.length === 0) {
+		result._dbg.reason = woodWorkerPool.length === 0 ? "nowood2"
+			: (deficit > 0 ? "aguarda_nascimento" : "nodeficit");
 		return result;
 	}
-	farFoodWorkers = woodWorkerPool.slice(0, deficit);
+	farFoodWorkers = woodWorkerPool.slice(0, effDeficit);
 
 	// ── Verificar se fazendas existentes têm capacidade livre ────────────────────────────
 	// (GetMaxGatherers de um campo = 5, conferido no template; GetNumGatherers = atual agora)

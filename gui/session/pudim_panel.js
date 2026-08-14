@@ -626,6 +626,10 @@ function pudim_RunAutoWork()
 			"playerOrdered": pudim_GetPlayerOrderedIds(),
 			"protectedIds": pudim_GetProtectedBuilderIds(),
 			"inFlightIds": pudim_GetInFlightBuilderIds(),
+			// g_PudimScouts vive em session~pudim.js, mesmo contexto de GUI. O guard cobre a
+			// ordem de carga dos scripts: se ainda não existir, a lista sai vazia.
+			"scoutIds": (typeof g_PudimScouts !== "undefined" && g_PudimScouts)
+				? Object.keys(g_PudimScouts).map(Number) : [],
 			"builderOrigin": g_PudimGathererRes
 		});
 	}

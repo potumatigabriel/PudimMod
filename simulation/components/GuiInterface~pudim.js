@@ -258,8 +258,15 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 	// Comando recém-postado que a simulação ainda pode não ter aplicado (PostNetworkCommand
 	// é assíncrono). Só esta janela ignora o estado ocioso.
 	const inFlight = new Set(((data && data.inFlightIds) || []).map(Number));
+	// Exploradores têm controlador próprio (pudim_GetScoutBorderTarget) e nunca devem ser
+	// despachados para coleta. Até agora quem os protegia era, por acidente, o teste de
+	// território aplicado a soldados: scout profundo fica fora do território por definição.
+	// Com aquele teste removido — ele prendia soldados comuns parados — a proteção precisa
+	// ser explícita, senão o auto-work passa a arrastar o explorador de volta para a base.
+	const scoutIds = new Set(((data && data.scoutIds) || []).map(Number));
 	const pudimSkipUnit = function(ent, cmpUnitAI) {
 		const busy = !!(cmpUnitAI && !cmpUnitAI.IsIdle());
+		if (scoutIds.has(ent)) return true;
 		if (inFlight.has(ent)) return true;
 		// Proteção de construtor valia por TEMPO ABSOLUTO — até 30s no caso de quem ergueu
 		// um dropsite. Se a obra terminava antes, a unidade ficava parada o resto da janela,
@@ -722,24 +729,25 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 				continue; // nunca vai para lógica de recurso genérico
 			}
 
-			// CitizenSoldier: não mandar trabalhar se fora do território ou com inimigo próximo
-			if (cmpIdentity && cmpIdentity.HasClass("CitizenSoldier")) {
-				if (cmpTerritoryManager &&
-				    cmpTerritoryManager.GetOwner(workerPos.x, workerPos.y) !== player) continue;
-				// Verificar por soldado: mesmo com raid na base, se não há inimigo a 100m
-				// deste soldado específico, ele pode ir trabalhar (ex: javelineiro recém-nascido
-				// no CC enquanto cavalry inimiga ataca do outro lado da base).
-				// Antes: baseUnderAttack bloqueava TODOS os soldados globalmente — em 1v3 vs AIs
-				// com raids constantes, nenhum soldado jamais era mandado trabalhar.
-				if (baseUnderAttack) {
-					let nearEnemy = false;
-					for (const ep of enemies) {
-						const near = cmpRangeManager.ExecuteQueryAroundPos(
-							{ x: workerPos.x, y: workerPos.y }, 0, 100, [ep], IID_UnitAI, false);
-						if (near.length > 0) { nearEnemy = true; break; }
-					}
-					if (nearEnemy) continue; // inimigo próximo: não trabalhar, manter em combate
-				}
+			// CitizenSoldier: o ÚNICO motivo para não trabalhar é inimigo por perto.
+			//
+			// Estar fora do território não é motivo e era tratado como se fosse: um `continue`
+			// seco, sem alternativa nenhuma. O soldado nunca entrava em idleWorkersList e ficava
+			// parado indefinidamente — bastava ter nascido, recuado ou terminado uma escolta a
+			// alguns metros da fronteira. Com território pequeno no início de partida isso pega
+			// muita gente, e era a origem dos soldados ociosos em volta da base.
+			// O alvo de coleta é sempre dentro do território (findNearestResource exige isso),
+			// então a própria ordem traz o soldado de volta — não há risco de mandá-lo cavar
+			// madeira em campo aberto.
+			//
+			// A checagem de inimigo passou a valer SEMPRE, não só sob baseUnderAttack: um
+			// soldado a 100m de inimigo deve ficar em combate mesmo que a base esteja calma,
+			// e é justamente fora do território que ele tem mais chance de topar com um.
+			// Uma consulta por soldado ocioso, com todos os inimigos de uma vez.
+			if (cmpIdentity && cmpIdentity.HasClass("CitizenSoldier") && enemies.length > 0) {
+				const nearEnemies = cmpRangeManager.ExecuteQueryAroundPos(
+					{ x: workerPos.x, y: workerPos.y }, 0, 100, enemies, IID_UnitAI, false);
+				if (nearEnemies.length > 0) continue; // em contato: manter em combate
 			}
 
 			idleWorkersList.push(ent);

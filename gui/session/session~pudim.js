@@ -269,6 +269,7 @@ var g_PudimScouts = {};              // { entityId: "local" | "deep" }
 var g_PudimScoutActivatedAt = {};
 var g_PudimScoutTheta = {};
 var g_PudimScoutRadius = {};    // { entityId: timestamp } — grace period após ativação
+var g_PudimScoutLosLogged = false; // registra uma vez se a leitura de exploração existe
 
 // ─── Scout: Memória de Setores 8×8 ───────────────────────────────────────────
 
@@ -554,6 +555,17 @@ function pudim_ForceScoutTick() {
 			"theta": g_PudimScoutTheta[ent],
 			"enemyBasePos": g_PudimScoutEnemyBase || null
 		});
+
+		// Uma vez por partida: registra se a leitura de exploração está disponível.
+		// Se losOk=false o scout profundo continua escolhendo por ângulo e distância, sem
+		// distinguir explorado de inexplorado — e o log precisa dizer isso, senão a próxima
+		// sessão vai atribuir o comportamento antigo à lógica em vez da API ausente.
+		if (targetData && !g_PudimScoutLosLogged) {
+			g_PudimScoutLosLogged = true;
+			pudim_Log(targetData.losOk ? "INFO" : "WARN", "SCOUT",
+				targetData.losOk ? "leitura de exploracao ativa (evita area ja explorada)"
+				                 : "GetLosVisibilityPosition indisponivel — scout sem filtro de exploracao");
+		}
 
 		if (targetData && targetData.x > 0) {
 			bestCell = { x: targetData.x, z: targetData.z };

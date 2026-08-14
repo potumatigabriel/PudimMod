@@ -1444,6 +1444,25 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 	let bestPos   = { "x": -1, "z": -1 };
 	let bestScore = -Infinity;
 
+	// Estado de exploração do tile. Sem isto o score do modo profundo era só ângulo +
+	// distância do próprio CC: o scout escolhia o tile mais longe na direção da vez, já
+	// tivesse ele sido explorado ou não — daí ele revisitar o que ele mesmo (ou outra
+	// unidade) já tinha aberto. "hidden" = nunca visto, "fogged" = explorado sem visão
+	// agora, "visible" = alguém está enxergando neste instante.
+	// A API é sondada com fallback: não consegui confirmar GetLosVisibilityPosition neste
+	// build, e uma chamada inexistente dentro do componente derrubaria a consulta inteira.
+	// Sem ela o scout apenas volta ao comportamento anterior.
+	let losAt = null;
+	try {
+		if (cmpRangeManager && typeof cmpRangeManager.GetLosVisibilityPosition === "function") {
+			cmpRangeManager.GetLosVisibilityPosition(ccX, ccZ, player); // sonda
+			losAt = function(x, z) {
+				try { return cmpRangeManager.GetLosVisibilityPosition(x, z, player); }
+				catch (e) { return null; }
+			};
+		}
+	} catch (e) { losAt = null; }
+
 	for (let x = 10; x < mapSize - 10; x += step) {
 		for (let z = 10; z < mapSize - 10; z += step) {
 			const owner = cmpTerritoryManager.GetOwner(x, z);
@@ -1485,15 +1504,35 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 			// escolhia sempre o vizinho na direção da vez em vez de ir longe. Com 0.4 a
 			// distância domina e o ângulo só decide o sentido da varredura.
 			const distMod = mode === "deep" ? distCC * 0.4 : -distCC * 0.1;
-			const score = angleCos * 100 + distMod;
+
+			// Só no modo PROFUNDO, cuja missão é descobrir mapa. O modo local roda em volta
+			// da própria base, que é explorada por definição — penalizar isso ali só faria
+			// a patrulha fugir de casa.
+			// O peso é deliberadamente maior que a soma de ângulo (±100) e distância
+			// (0.4 × distCC, até ~400 num mapa de 1024): qualquer tile nunca visto tem de
+			// ganhar de qualquer tile já explorado. Entre os não explorados, ângulo e
+			// distância voltam a decidir, preservando o sentido da varredura.
+			let exploreMod = 0;
+			if (mode === "deep" && losAt) {
+				const vis = losAt(x, z);
+				if (vis === "hidden") exploreMod = 1000;       // nunca visto: é o alvo
+				else if (vis === "visible") exploreMod = -300; // alguém já está enxergando
+				// "fogged" (explorado, sem visão agora) fica em 0: vale menos que o
+				// desconhecido, mais que mandar o scout para onde já há olhos.
+			}
+
+			const score = angleCos * 100 + distMod + exploreMod;
 
 			if (score > bestScore) {
 				bestScore = score;
-				bestPos = { "x": x, "z": z };
+				bestPos = { "x": x, "z": z, "unexplored": exploreMod > 0 };
 			}
 		}
 	}
 
+	// losOk diz se a leitura de exploração existiu neste build ou se caiu no fallback.
+	// Sem esse sinal não há como julgar em jogo se o scout melhorou ou se a API faltou.
+	bestPos.losOk = !!losAt;
 	return bestPos;
 };
 

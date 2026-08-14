@@ -1596,28 +1596,35 @@ function pudim_ProcessAutoQueue()
 			const desiredCount = g_PudimAutoQueueDesiredCount[b.ent] || defaultCount;
 
 			if (!b.queueEmpty) {
-				// Fila não vazia: um lote degradado por escassez (ticket 6278) loopa PARA SEMPRE
-				// no autoqueue nativo — o motor re-enfileira o mesmo tamanho que terminou, então
-				// a fila nunca esvazia e nunca volta sozinha ao lote configurado.
-				// cur.count é quanto FALTA nascer (decresce a cada unidade: this.count-- no motor)
-				// e cada unidade consome 1/N do tempo total do lote, logo o tamanho ORIGINAL
-				// satisfaz N <= count/(1-progress). Se até esse teto ainda é menor que o
-				// desejado, o lote nasceu degradado — completa a diferença com uma segunda
-				// ordem; as duas juntas somam o throughput configurado.
-				// (A janela antiga progress<0.15 durava ~1.5s e o polling é de 3s: quase nunca
-				// era capturada, e o lote de 1 ficava travado — bug relatado em jogo.)
+				// REGRA: a auto-fila mantém NO MÁXIMO UM lote. Um lote degradado por escassez
+				// (ticket 6278) loopa para sempre no autoqueue nativo — o motor re-enfileira o
+				// mesmo tamanho que terminou, então a fila nunca volta sozinha ao lote
+				// configurado. A correção anterior APENDAVA um segundo lote com a diferença;
+				// as duas ordens somavam o throughput certo, mas empilhavam grupos na fila, e
+				// a cada lote concluído a fila voltava a ter 1 e um novo era apendado. O
+				// resultado em jogo era uma fila com dezenas de grupos.
+				//
+				// Agora o lote degradado é SUBSTITUÍDO, não complementado: cancela e reenfileira
+				// no tamanho cheio. Só quando o lote ainda NÃO começou (progress <= 0) — cancelar
+				// um lote em andamento jogaria fora o tempo já investido. Sem progresso o
+				// cancelamento devolve os recursos, então a troca não custa nada.
+				//
+				// Qualquer lote ALÉM deste é do jogador: a auto-fila só semeia fila vazia, e
+				// sempre com uma ordem só. Por isso nada aqui cancela quando length > 1.
 				if (b.trainingQueue && b.trainingQueue.length === 1) {
 					const cur = b.trainingQueue[0];
-					const prog = Math.min(cur.progress || 0, 0.95);
-					const originalBatchMax = Math.floor((cur.count || 1) / (1 - prog));
-					if (originalBatchMax < desiredCount) {
+					const curCount = cur.count || 1;
+					if ((cur.progress || 0) <= 0 && curCount < desiredCount) {
 						const tpl = g_PudimAutoQueueTemplates[b.ent] || cur.unitTemplate;
-						if (tpl) {
-							const shortfall = Math.min(
-								desiredCount - originalBatchMax,
-								pudim_ComputeAffordableCount(tpl, desiredCount, res));
-							if (shortfall > 0)
-								Engine.PostNetworkCommand({ "type": "train", "entities": [b.ent], "template": tpl, "count": shortfall });
+						// Exige poder pagar o lote CHEIO com o estoque atual, sem contar o
+						// reembolso do cancelamento: é conservador de propósito, para nunca
+						// cancelar um lote e não conseguir repor.
+						const affordable = tpl ? pudim_ComputeAffordableCount(tpl, desiredCount, res) : 0;
+						if (tpl && affordable >= desiredCount && cur.id !== undefined) {
+							Engine.PostNetworkCommand({ "type": "stop-production", "entity": b.ent, "id": cur.id });
+							Engine.PostNetworkCommand({ "type": "train", "entities": [b.ent], "template": tpl, "count": desiredCount });
+							pudim_Log("INFO", "QUEUE", "edifício " + b.ent + " lote degradado x" + curCount +
+								" trocado por x" + desiredCount);
 						}
 					}
 				}

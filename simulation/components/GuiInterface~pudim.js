@@ -2774,23 +2774,18 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 		candidates.push({ x: cx, z: cz });
 	};
 
-	// PRIMEIRO os pontos colados no construtor-semente. Antes, quando já existia alguma
-	// casa, os candidatos saíam TODOS de anéis ao redor das casas existentes — ordenados
-	// por proximidade do construtor, mas ainda assim presos ao aglomerado antigo. Com o
-	// aglomerado no CC e o lenhador no armazém a ~130 units, a casa nova continuava
-	// nascendo no CC e ele atravessava a base. O aglomerado agora é preferência
-	// secundária: vale enquanto houver casa perto de quem constrói, nunca como âncora.
-	pushCandidate(baseVillagePoint.x, baseVillagePoint.y);
-	for (let r = 14; r <= 44; r += 10) {
-		for (let i = 0; i < 8; i++) {
-			const a = bestAngle + i * Math.PI / 4;
-			pushCandidate(baseVillagePoint.x + Math.cos(a) * r, baseVillagePoint.y + Math.sin(a) * r);
-		}
-	}
-
-	// Depois, encostar nas casas existentes que já estão perto de quem vai construir —
-	// mantém o vilarejo agrupado sem custar caminhada. Casas a mais de 60 units do
-	// construtor não entram: encostar nelas é justamente o problema que se quer evitar.
+	// ENCOSTAR NUMA CASA EXISTENTE vem primeiro; a posição do construtor é o fallback.
+	//
+	// A ordem estava invertida e o resultado foi base espalhada. Ancorar sempre no
+	// construtor cumpre "casa perto de quem constrói" para CADA casa isoladamente — o log
+	// de 15:52 mostra and= entre 0 e 59, todos curtos — mas o conjunto vira bagunça: as
+	// 11 casas daquela partida ficaram espalhadas por 211x225 units, porque os construtores
+	// estavam espalhados. Cada decisão ótima sozinha, o todo péssimo.
+	//
+	// Encostando na casa existente MAIS PRÓXIMA do construtor, as duas coisas convivem: o
+	// vilarejo cresce agrupado e a caminhada continua curta, porque a referência é sempre a
+	// casa mais perto de quem vai construir. A janela é de 100 units (era 60): abaixo disso
+	// o aglomerado era descartado com frequência e caíamos no espalhamento de novo.
 	const sortedHouses = housePosList.slice().sort((a, b) => {
 		const da = (a.x - builderCentroid.x) ** 2 + (a.y - builderCentroid.z) ** 2;
 		const db = (b.x - builderCentroid.x) ** 2 + (b.y - builderCentroid.z) ** 2;
@@ -2798,7 +2793,7 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 	});
 	for (const house of sortedHouses) {
 		const hdx = house.x - builderCentroid.x, hdz = house.y - builderCentroid.z;
-		if (hdx*hdx + hdz*hdz > 60*60) break; // lista está ordenada: daqui pra frente só piora
+		if (hdx*hdx + hdz*hdz > 100*100) break; // lista ordenada: daqui pra frente só piora
 		// Offset 20 units para evitar sobreposição (casa gaul ~20 world units de footprint)
 		for (let i = 0; i < 8; i++) {
 			const angle = i * Math.PI / 4;
@@ -2806,6 +2801,16 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 				house.x + Math.cos(angle) * 20,
 				house.y + Math.sin(angle) * 20
 			);
+		}
+	}
+
+	// Sem casa por perto (início de partida, ou construtor realmente longe do vilarejo):
+	// aí sim ancora nele. É o que faz a primeira casa nascer num lugar sensato.
+	pushCandidate(baseVillagePoint.x, baseVillagePoint.y);
+	for (let r = 14; r <= 44; r += 10) {
+		for (let i = 0; i < 8; i++) {
+			const a = bestAngle + i * Math.PI / 4;
+			pushCandidate(baseVillagePoint.x + Math.cos(a) * r, baseVillagePoint.y + Math.sin(a) * r);
 		}
 	}
 

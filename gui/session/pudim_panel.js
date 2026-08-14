@@ -900,6 +900,20 @@ function pudim_RunAutoWork()
 		pudim_MarkDispatched(gp.ids, distById);
 	}
 
+	// Trabalhadores ociosos que o mod NÃO conseguiu empregar neste ciclo, com o motivo por
+	// recurso tentado. Throttled a 15s para não poluir. Enquanto sobrar gente parada, esta
+	// linha diz exatamente onde a decisão morreu — sem ela, cada relato custava uma leitura
+	// do código inteira para achar qual `continue` estava barrando.
+	if (result.unplaced && result.unplaced.length > 0) {
+		const nowUP = Date.now();
+		if (nowUP - g_PudimUnplacedLogAt > 15000) {
+			g_PudimUnplacedLogAt = nowUP;
+			const amostra = result.unplaced.slice(0, 4)
+				.map(u => u.kind + "#" + u.id + "[" + u.tried + "]").join(" ");
+			pudim_Log("WARN", "WORK", result.unplaced.length + " sem alvo: " + amostra);
+		}
+	}
+
 	// Atualizar status
 	const resNames = { food: "Comida", wood: "Madeira", stone: "Pedra", metal: "Metal" };
 	const status = Engine.TryGetGUIObjectByName("pudim_autoWorkStatus");
@@ -1354,6 +1368,7 @@ var g_PudimQueueSeededAt = {};
 // Template da última semeadura por edifício. Sem ele não há como distinguir um lote do mod
 // de uma ordem do jogador — e foi essa confusão que trocou soldados por aldeões.
 var g_PudimQueueSeededTpl = {};
+var g_PudimUnplacedLogAt = 0; // throttle do log de trabalhadores sem alvo
 /** Edifícios já avisados por falta de template treinável (evita repetir o log a cada 3s) */
 var g_PudimQueueNoTplLogged = {};
 
@@ -1884,7 +1899,10 @@ function pudim_ProcessDropsiteFoundations()
 function pudim_ProcessFarms()
 {
 	try {
-		const farmData = Engine.GuiInterfaceCall("pudim_GetFarmBuildData", { "weights": g_PudimResourceWeights });
+		// builderOrigin: mesma memória de função usada pelo auto-work. Sem ela, quem está
+		// construindo some do censo de comida deste sistema e o déficit vira fantasma.
+		const farmData = Engine.GuiInterfaceCall("pudim_GetFarmBuildData",
+			{ "weights": g_PudimResourceWeights, "builderOrigin": g_PudimGathererRes });
 		if (!farmData) return;
 
 		// Log de diagnóstico a cada 30s (throttled)

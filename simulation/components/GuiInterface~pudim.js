@@ -237,7 +237,7 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 	// gathererRes diz o que cada unidade coleta AGORA; trackedIds é o conjunto vivo, usado
 	// para podar a memória e não deixá-la crescer com entidades mortas.
 	const result = { "idleWorkers": [], "bestResource": "food", "suggestStorehouse": [], "suggestFarmstead": [], "longWalkers": [],
-	                 "gathererRes": {}, "trackedIds": [] };
+	                 "gathererRes": {}, "trackedIds": [], "unplaced": [] };
 
 	// Função anterior de quem agora está construindo: { entId: "food" | "wood" | ... }.
 	// Vem do painel, que guarda a última coleta observada de cada unidade antes de o mod
@@ -747,7 +747,12 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 			if (cmpIdentity && cmpIdentity.HasClass("CitizenSoldier") && enemies.length > 0) {
 				const nearEnemies = cmpRangeManager.ExecuteQueryAroundPos(
 					{ x: workerPos.x, y: workerPos.y }, 0, 100, enemies, IID_UnitAI, false);
-				if (nearEnemies.length > 0) continue; // em contato: manter em combate
+				if (nearEnemies.length > 0) {
+					// Também é uma unidade ociosa que o mod escolheu não empregar — registrar,
+					// senão ela some do diagnóstico e volta a virar suposição.
+					result.unplaced.push({ id: ent, kind: "soldado", tried: "inimigo_a_100m" });
+					continue; // em contato: manter em combate
+				}
 			}
 
 			idleWorkersList.push(ent);
@@ -950,8 +955,15 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 		// não pode arrastá-la para outro recurso.
 		if (cmpId && cmpId.HasClass("FastMoving")) continue;
 
+		// Diagnóstico de trabalhador que fica sem alvo. Toda vez que apareceu unidade
+		// parada em jogo, a causa estava num `continue` diferente e só deu para achar lendo
+		// o código. Registrar aqui QUAIS recursos foram tentados e por que cada um falhou
+		// transforma "tem gente parada" num dado, em vez de mais uma rodada de suposição.
+		let placed = false;
+		const tried = [];
+
 		for (const resType of sortedRes) {
-			if (canGather.size > 0 && !canGather.has(resType)) continue;
+			if (canGather.size > 0 && !canGather.has(resType)) { tried.push(resType + ":naocoleta"); continue; }
 
 			let target = null;
 			const isSoldier = cmpId && cmpId.HasClass("CitizenSoldier");
@@ -1017,8 +1029,19 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 						if (!dup) result.suggestFarmstead.push({ x: target.x, z: target.z });
 					}
 				}
+				placed = true;
 				break;
 			}
+			tried.push(resType + ":semalvo");
+		}
+
+		// Ninguém quis este trabalhador: ele vai ficar parado até o próximo ciclo. Guardar
+		// o motivo por recurso é o que faltava — sem isso, "tem gente parada" só se
+		// investigava lendo o código, um `continue` de cada vez.
+		if (!placed) {
+			const kind = !cmpId ? "?" :
+				(cmpId.HasClass("CitizenSoldier") ? "soldado" : (isFemale ? "aldeao" : "outro"));
+			result.unplaced.push({ id: ent, kind: kind, tried: tried.join(",") || "nenhum_recurso_ativo" });
 		}
 	}
 
@@ -1813,7 +1836,15 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	const totalW = (weights.food || 0) + (weights.wood || 0) + (weights.stone || 0) + (weights.metal || 0);
 	if (totalW <= 0 || foodW <= 0) { result._dbg.reason = "noweights"; return result; }
 
+	// Memória de função vinda do painel (a mesma de pudim_GetIdleWorkersAndBestResource):
+	// { entId: "food" | "wood" | ... } com a última coleta observada antes de a unidade
+	// virar construtora.
+	const builderOriginFarm = (data && data.builderOrigin) || {};
+
 	let totalGatherers = 0, currentFarmWorkers = 0;
+	// Construtores que já pertencem à comida e voltarão para ela ao terminar a obra.
+	// Entram como cobertura (abatidos do déficit), não como demanda.
+	let pendingFoodWorkers = 0;
 	const woodWorkerPool = [];
 	for (const ent of allEnts) {
 		const cmpUAI = Engine.QueryInterface(ent, IID_UnitAI);
@@ -1825,6 +1856,38 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 		const q2 = cmpUAI.orderQueue;
 		if (!q2 || q2.length === 0) continue;
 		const ord2 = q2[0];
+
+		// Quem está CONSTRUINDO também é trabalhador, e do recurso a que pertence.
+		// Este censo é separado do de pudim_GetIdleWorkersAndBestResource e ficou de fora
+		// da correção anterior: aqui a ordem "Repair" era descartada de vez, então os 5
+		// trabalhadores erguendo o celeiro sumiam da conta de comida. O déficit aparente
+		// disparava e o mod tirava gente da madeira para cobrir um buraco que não existia.
+		//
+		// Quem ergue celeiro ou campo é trabalhador de comida por definição: é para lá que
+		// ele vai assim que a obra terminar. Para as demais obras vale a memória de função
+		// (builderOrigin), o mesmo mecanismo já usado no outro censo.
+		//
+		// Construtor NUNCA entra em woodWorkerPool: puxá-lo da obra para uma fazenda seria
+		// justamente o desperdício que se quer evitar.
+		if (ord2.type === "Repair") {
+			const bt = ord2.data && ord2.data.target;
+			const btId = bt ? Engine.QueryInterface(bt, IID_Identity) : null;
+			if (btId && btId.HasClass("Field")) {
+				totalGatherers++;
+				currentFarmWorkers++; // vai coletar NESTE campo assim que terminar
+			} else if (btId && (btId.HasClass("Farmstead") || btId.HasClass("DropsiteFood"))) {
+				totalGatherers++;
+				// Lado da comida, mas ainda não é gente de campo. Precisa entrar como
+				// COBERTURA, não só no total: contá-lo apenas em totalGatherers aumentaria
+				// desiredFoodWorkers e, com isso, o próprio déficit — o inverso do que se
+				// quer. Ele é subtraído do déficit mais abaixo.
+				pendingFoodWorkers++;
+			} else if (builderOriginFarm[ent]) {
+				totalGatherers++;     // outra obra: conta pelo recurso de origem
+			}
+			continue;
+		}
+
 		if (ord2.type !== "Gather") continue;
 		totalGatherers++;
 		const tgt2 = ord2.data && ord2.data.target;
@@ -1872,8 +1935,13 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	const farmWorkerCap = PUDIM_MAX_FARMS * PUDIM_FIELD_CAPACITY;
 	const farmWorkerTarget = Math.min(farmWorkerCap,
 		Math.max(0, desiredFoodWorkers - naturalFoodCapacity));
-	const deficit = farmWorkerTarget - currentFarmWorkers;
+	// pendingFoodWorkers: quem está erguendo celeiro. Já é gente da comida e volta para lá
+	// ao terminar — abater do déficit é o que impede o mod de ver um buraco que não existe
+	// e ir buscar reforço na madeira. Foi exatamente o caso relatado: 5 trabalhadores no
+	// edifício agrícola e o mod tirando gente da madeira para "cobrir" a comida.
+	const deficit = farmWorkerTarget - currentFarmWorkers - pendingFoodWorkers;
 
+	result._dbg.pfw = pendingFoodWorkers;
 	result._dbg.nfc = naturalFoodCount;
 	result._dbg.ncap = naturalFoodCapacity;
 	result._dbg.tg = totalGatherers;

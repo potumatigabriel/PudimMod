@@ -237,7 +237,10 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 	// gathererRes diz o que cada unidade coleta AGORA; trackedIds é o conjunto vivo, usado
 	// para podar a memória e não deixá-la crescer com entidades mortas.
 	const result = { "idleWorkers": [], "bestResource": "food", "suggestStorehouse": [], "suggestFarmstead": [], "longWalkers": [],
-	                 "gathererRes": {}, "trackedIds": [], "unplaced": [] };
+	                 "gathererRes": {}, "trackedIds": [], "unplaced": [],
+	                 // Retrato do balanceamento: alvo por recurso, quanto há de fato, e
+	                 // quantos ficaram sem vaga no recurso mais carente.
+	                 "_bal": { quota: {}, current: {}, foodBlocked: 0, idle: 0 } };
 
 	// Função anterior de quem agora está construindo: { entId: "food" | "wood" | ... }.
 	// Vem do painel, que guarda a última coleta observada de cada unidade antes de o mod
@@ -815,6 +818,7 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 	for (const ent of idleWorkersList) {
 		toRedirect.push({ "id": ent, "isIdle": true });
 	}
+	result._bal.idle = idleWorkersList.length;
 
 	let deficits = { "food": 0, "wood": 0, "stone": 0, "metal": 0 };
 
@@ -836,6 +840,8 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 			const currentCount = activeGatherers[type].length;
 			const diff = targetQuota - currentCount; // Positivo: precisa de gente. Negativo: excesso.
 			deficits[type] = diff;
+			result._bal.quota[type] = Math.round(targetQuota);
+			result._bal.current[type] = currentCount;
 			
 			// Rebalancear ativos SOMENTE com excesso extremo (limiar depende da população).
 			// Preferir sempre aguardar novos trabalhadores nascidos da produção.
@@ -992,6 +998,12 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 				} else {
 					target = findFoodResource(workerPos, assignedEntities);
 				}
+				// Contador decisivo para o desequilíbrio comida/madeira: quantos QUERIAM
+				// comida (era o maior déficit) e não acharam vaga. Se este número for alto
+				// enquanto a madeira cresce, o problema é capacidade de comida — fazenda de
+				// menos —, não a conta de cotas. Sem ele, "10 na comida e 32 na madeira" não
+				// distingue as duas causas.
+				if (!target && resType === sortedRes[0]) result._bal.foodBlocked++;
 			} else {
 				// Busca ampla a partir do worker; a fórmula de score (distDropsite * 3) garante
 				// que o trabalhador vá para a árvore mais próxima de um dropsite existente,

@@ -900,6 +900,24 @@ function pudim_RunAutoWork()
 		pudim_MarkDispatched(gp.ids, distById);
 	}
 
+	// Retrato do balanceamento a cada 20s: alvo x atual por recurso, ociosos, e quantos
+	// queriam o recurso mais carente e não acharam vaga (semvaga). É esse último número que
+	// separa as duas causas possíveis de "10 na comida e 32 na madeira": conta de cota
+	// errada, ou falta de onde colocar gente na comida.
+	if (result._bal) {
+		const nowBal = Date.now();
+		if (nowBal - g_PudimBalLogAt > 20000) {
+			g_PudimBalLogAt = nowBal;
+			const q = result._bal.quota || {}, c = result._bal.current || {};
+			const partes = [];
+			for (const r of ["food", "wood", "stone", "metal"])
+				if (q[r] !== undefined) partes.push(r.charAt(0).toUpperCase() + (c[r] || 0) + "/" + q[r]);
+			pudim_Log("DEBUG", "BALANCE", "atual/alvo " + partes.join(" ") +
+				" | ociosos=" + (result._bal.idle || 0) +
+				" | semvaga=" + (result._bal.foodBlocked || 0));
+		}
+	}
+
 	// Trabalhadores ociosos que o mod NÃO conseguiu empregar neste ciclo, com o motivo por
 	// recurso tentado. Throttled a 15s para não poluir. Enquanto sobrar gente parada, esta
 	// linha diz exatamente onde a decisão morreu — sem ela, cada relato custava uma leitura
@@ -1372,6 +1390,7 @@ var g_PudimQueueSeededAt = {};
 // de uma ordem do jogador — e foi essa confusão que trocou soldados por aldeões.
 var g_PudimQueueSeededTpl = {};
 var g_PudimUnplacedLogAt = 0; // throttle do log de trabalhadores sem alvo
+var g_PudimBalLogAt = 0;      // throttle do retrato de balanceamento
 /** Edifícios já avisados por falta de template treinável (evita repetir o log a cada 3s) */
 var g_PudimQueueNoTplLogged = {};
 

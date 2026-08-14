@@ -131,16 +131,6 @@ const PUDIM_STRINGS = {
 	                      "Acha a base inimiga e a contorna a distância segura."],
 	"scout.deep.note":   ["Flees from enemy troops and blacklists risky areas.",
 	                      "Foge de tropas inimigas e marca áreas arriscadas."],
-	// Tradução do chat (gui/session/chat/pudim_chat_tr.js)
-	"chat.tr.click":     ["Click to translate this message.", "Clique para traduzir esta fala."],
-	"chat.tr.original":  ["Original:", "Original:"],
-	"chat.tr.back":      ["Click to see the original text.", "Clique para ver o texto original."],
-	"chat.tr.working":   ["translating…", "traduzindo…"],
-	"chat.tr.sent":      ["Request sent to the translator.", "Pedido enviado ao tradutor."],
-	"chat.tr.offline":   ["The translator is not running.", "O tradutor não está rodando."],
-	"chat.tr.offlineHow":["Run tools/PudimTradutor.bat in the mod folder, then click again.",
-	                      "Execute tools/PudimTradutor.bat na pasta do mod e clique de novo."],
-
 	"state.on":          ["ON", "ATIVADO"],
 	"state.off":         ["OFF", "DESATIVADO"]
 };

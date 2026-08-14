@@ -233,7 +233,16 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 	// capturar só o primeiro deixava os outros esperando o sistema de long-walker (mais lento,
 	// limiar maior) — daí "primeiro coletou, só depois construiu". Agora acumula candidatos
 	// distintos (deduplicados por proximidade) e todos são tentados no mesmo ciclo.
-	const result = { "idleWorkers": [], "bestResource": "food", "suggestStorehouse": [], "suggestFarmstead": [], "longWalkers": [] };
+	// gathererRes/trackedIds alimentam a memória de função do painel (g_PudimGathererRes):
+	// gathererRes diz o que cada unidade coleta AGORA; trackedIds é o conjunto vivo, usado
+	// para podar a memória e não deixá-la crescer com entidades mortas.
+	const result = { "idleWorkers": [], "bestResource": "food", "suggestStorehouse": [], "suggestFarmstead": [], "longWalkers": [],
+	                 "gathererRes": {}, "trackedIds": [] };
+
+	// Função anterior de quem agora está construindo: { entId: "food" | "wood" | ... }.
+	// Vem do painel, que guarda a última coleta observada de cada unidade antes de o mod
+	// (ou o jogador) mandá-la construir.
+	const builderOrigin = (data && data.builderOrigin) || {};
 
 	// Unidades sob ordem MANUAL do jogador (marcadas pelo hook de handleUnitAction).
 	// Enquanto estiverem EXECUTANDO a ordem, nenhum sistema do mod as toca — se o jogador
@@ -556,14 +565,50 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 
 		const cmpGatherer = Engine.QueryInterface(ent, IID_ResourceGatherer);
 		const cmpUnitAI = Engine.QueryInterface(ent, IID_UnitAI);
-		if (!cmpGatherer || !cmpUnitAI || Engine.QueryInterface(ent, IID_Foundation) || Engine.QueryInterface(ent, IID_Mirage) || cmpUnitAI.isGarrisoned || (data.repeatBuilding && data.repeatBuilding[ent]))
+		if (!cmpGatherer || !cmpUnitAI || Engine.QueryInterface(ent, IID_Foundation) || Engine.QueryInterface(ent, IID_Mirage) || cmpUnitAI.isGarrisoned)
 			continue;
-		// Ordem manual do jogador em andamento (ou unidade recém-comandada pelo mod): não tocar
-		if (pudimSkipUnit(ent, cmpUnitAI)) continue;
 
 		const cmpPos = Engine.QueryInterface(ent, IID_Position);
 		if (!cmpPos || !cmpPos.IsInWorld()) continue;
 		const workerPos = cmpPos.GetPosition2D();
+
+		// ── CENSO ─────────────────────────────────────────────────────────────────
+		// Contar vem ANTES de decidir se a unidade pode ser comandada. Os filtros
+		// abaixo (ordem manual do jogador, repeat-build, construtor) existem para não
+		// TOCAR na unidade — não para fingir que ela não existe. Somados, eles faziam
+		// sumir do censo justamente quem estava ocupado: mandar 15 aldeãs erguer 3
+		// fazendas zerava a comida na conta, o déficit aparente disparava, e cada
+		// unidade recém-nascida era despachada para a comida. Quando as fazendas
+		// ficavam prontas, sobrava gente demais lá e o balanceamento desandava.
+		// Elas continuam sendo 15 trabalhadores de comida enquanto constroem.
+		result.trackedIds.push(ent);
+		const ordC = (cmpUnitAI.orderQueue && cmpUnitAI.orderQueue.length > 0) ? cmpUnitAI.orderQueue[0] : null;
+		if (ordC) {
+			// Worker em trânsito para uma entidade-recurso específica (controle de capacidade).
+			// Corrige superlotação: GetNumGatherers() retorna 0 para quem ainda está andando.
+			if (ordC.type === "Gather" && ordC.data && ordC.data.target !== undefined && ordC.data.target !== null)
+				inTransitByTarget[ordC.data.target] = (inTransitByTarget[ordC.data.target] || 0) + 1;
+
+			let resType = null;
+			if (ordC.type === "Gather" || ordC.type === "GatherNearPosition" || ordC.type === "ReturnResource") {
+				if (ordC.data && ordC.data.type) resType = ordC.data.type.generic;
+				else if (ordC.data && ordC.data.resourceType) resType = ordC.data.resourceType.generic;
+				// Memória para o painel: é este valor que será devolvido como origem
+				// quando a unidade virar construtora no ciclo seguinte.
+				if (resType) result.gathererRes[ent] = resType;
+			} else if (ordC.type === "Repair") {
+				// Construindo: mantém a função anterior, lembrada pelo painel.
+				const origin = builderOrigin[ent];
+				if (origin) resType = origin;
+			}
+			if (resType && activeGatherers[resType] !== undefined) activeGatherers[resType].push(ent);
+		}
+
+		// ── COMANDO ───────────────────────────────────────────────────────────────
+		// Daqui para baixo é decisão de dar ordem; quem não pode ser tocado sai agora.
+		if (data.repeatBuilding && data.repeatBuilding[ent]) continue;
+		// Ordem manual do jogador em andamento (ou unidade recém-comandada pelo mod): não tocar
+		if (pudimSkipUnit(ent, cmpUnitAI)) continue;
 
 		if (cmpUnitAI.IsIdle()) {
 			const cmpIdentity = Engine.QueryInterface(ent, IID_Identity);
@@ -658,18 +703,6 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 			}
 
 			idleWorkersList.push(ent);
-			} else {
-			// CORRETO: usar orderQueue[0], não cmpUnitAI.order (API inexistente no Alpha 28)
-			const ord0 = (cmpUnitAI.orderQueue && cmpUnitAI.orderQueue.length > 0) ? cmpUnitAI.orderQueue[0] : null;
-			// Contar worker em trânsito para entidade-recurso específica (para controle de capacidade)
-			if (ord0 && ord0.type === "Gather" && ord0.data && ord0.data.target !== undefined && ord0.data.target !== null)
-				inTransitByTarget[ord0.data.target] = (inTransitByTarget[ord0.data.target] || 0) + 1;
-			if (ord0 && (ord0.type === "Gather" || ord0.type === "GatherNearPosition" || ord0.type === "ReturnResource")) {
-				let resType = null;
-				if (ord0.data && ord0.data.type) resType = ord0.data.type.generic;
-				else if (ord0.data && ord0.data.resourceType) resType = ord0.data.resourceType.generic;
-				if (resType && activeGatherers[resType] !== undefined) activeGatherers[resType].push(ent);
-			}
 		}
 	}
 
@@ -695,14 +728,12 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 	// NOVO ALGORITMO DE DISTRIBUIÇÃO (Cota Percentual de Trabalhadores)
 	let activeWeights = [];
 	let totalWeight = 0;
-	// Construtores (ordem Repair) NÃO entram na conta. Eles não coletam nada agora, então
-	// incluí-los inflava as cotas de todos os recursos: com 10 coletando e 2 construindo, as
-	// cotas somavam 12 para 10 braços disponíveis, criando déficit aparente permanente e
-	// empurrando gente para o recurso que parecesse mais vazio.
-	// Isso mordia junto com outro efeito no início de partida: os 2 trabalhadores que saem
-	// da comida para erguer o armazém somem de activeGatherers.wood enquanto constroem, e a
-	// madeira passa a parecer sem ninguém — então todo ocioso era despachado para lá.
-	// Quando o construtor termina e fica ocioso, ele volta a ser contado normalmente.
+	// Construtores entram na conta pelo recurso que coletavam ANTES (ver censo acima), e
+	// portanto contam nos dois lados: em activeGatherers[origem] e no total. A tentativa
+	// anterior de tirá-los inteiramente resolvia a incoerência de somá-los ao total sem
+	// somá-los a nenhum recurso, mas criava o problema oposto: o recurso de onde eles
+	// saíram passava a parecer vazio, e todo ocioso era despachado para lá. Contando dos
+	// dois lados, as cotas fecham e ninguém desaparece do censo enquanto constrói.
 	let totalWorkers = idleWorkersList.length;
 	for (const type of ["food", "wood", "stone", "metal"]) {
 		if (weights[type] > 0) {

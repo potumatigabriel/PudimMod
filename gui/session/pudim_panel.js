@@ -625,6 +625,7 @@ function pudim_RunAutoWork()
 			"repeatBuilders": Object.keys(g_PudimRepeatBuilding).map(Number).filter(ent => g_PudimRepeatBuilding[ent]),
 			"playerOrdered": pudim_GetPlayerOrderedIds(),
 			"protectedIds": pudim_GetProtectedBuilderIds(),
+			"inFlightIds": pudim_GetInFlightBuilderIds(),
 			"builderOrigin": g_PudimGathererRes
 		});
 	}
@@ -695,7 +696,7 @@ function pudim_RunAutoWork()
 									"angle": 0, "actorSeed": 0, "autorepair": true, "autocontinue": true, "queued": false });
 								pudim_MarkModBuilt(fx, fz);
 								g_PudimLastDropsiteTimeByRes[ck] = nowLW;
-								g_PudimHouseBuilderCooldown[pd.builderId] = nowLW + 30000;
+								pudim_ProtectBuilder(pd.builderId, nowLW + 30000);
 								builtDropsite = true;
 								builtCount++;
 							}
@@ -712,7 +713,7 @@ function pudim_RunAutoWork()
 					"target": w.redirectTarget, "autorepair": true, "autocontinue": true,
 					"queued": false, "pushFront": false });
 				// 15s protegido contra re-redirecionamento por outros sistemas durante a caminhada
-				g_PudimHouseBuilderCooldown[w.id] = nowLW + 15000;
+				pudim_ProtectBuilder(w.id, nowLW + 15000);
 				redirectCount++;
 			}
 		}
@@ -807,8 +808,14 @@ function pudim_RunAutoWork()
 	pudim_tryProactiveBuild("suggestStorehouse", "pudim_GetProactiveStorehouseData", "wood", "armazem", 20000);
 	pudim_tryProactiveBuild("suggestFarmstead", "pudim_GetProactiveFarmsteadData", "food", "farmstead", 25000);
 
+	// O filtro por g_PudimHouseBuilderCooldown saiu daqui: ele barrava por tempo absoluto
+	// (até 30s) e, junto com a mesma trava do lado da simulação, era o que deixava
+	// construtores parados depois de terminar a obra. A simulação já só reporta como ocioso
+	// quem realmente está — resta barrar o comando ainda em voo.
+	const inFlightNow = {};
+	for (const id of pudim_GetInFlightBuilderIds()) inFlightNow[id] = true;
 	const idleWorkers = result.idleWorkers.filter(w =>
-		!g_PudimHouseBuilderCooldown[w.id] && !g_PudimDispatchedAt[w.id] && !proactiveBuilders[w.id]);
+		!inFlightNow[w.id] && !g_PudimDispatchedAt[w.id] && !proactiveBuilders[w.id]);
 
 	// Agrupar trabalhadores por alvo direto (ex: cardume, animal) ou por coordenada genérica
 	let targetGroups = {};
@@ -1062,7 +1069,33 @@ var g_PudimAutoHouseThreshold = 5;
 var g_LastAutoHouseAttempt = 0;      // última vez que uma casa foi CONSTRUÍDA
 var g_LastAutoHouseCheck = 0;        // última vez que a condição foi VERIFICADA
 var g_PudimLastHouseProdCount = 1;   // CC+barracas na última checagem (cooldown adaptativo)
-var g_PudimHouseBuilderCooldown = {}; // {entityId: expiryMs} — builders protegidos de reassign por 5s após construct
+var g_PudimHouseBuilderCooldown = {}; // {entityId: expiryMs} — builders protegidos de reassign após construct
+var g_PudimBuilderCmdAt = {};         // {entityId: instante do comando} — janela de "comando em voo"
+// Janela em que o comando ainda não foi aplicado pela simulação. PostNetworkCommand é
+// assíncrono: por 1-2 turnos a unidade ainda LÊ como ociosa, e despachá-la nesse intervalo
+// sobrescreveria o Repair que acabou de sair. Passado isso, ociosa quer dizer ociosa.
+const PUDIM_CMD_IN_FLIGHT = 2500;
+
+/**
+ * Protege um construtor de reatribuição até `expiryMs` e marca o instante do comando.
+ * Todo ponto que protege um builder passa por aqui — sem o instante do comando não há como
+ * separar "o comando ainda não chegou" de "a obra acabou e a unidade está parada".
+ */
+function pudim_ProtectBuilder(id, expiryMs) {
+	g_PudimHouseBuilderCooldown[id] = expiryMs;
+	g_PudimBuilderCmdAt[id] = Date.now();
+}
+
+/** IDs cujo comando ainda pode não ter sido aplicado pela simulação. */
+function pudim_GetInFlightBuilderIds() {
+	const now = Date.now();
+	const ids = [];
+	for (const id in g_PudimBuilderCmdAt) {
+		if (now - g_PudimBuilderCmdAt[id] <= PUDIM_CMD_IN_FLIGHT) ids.push(+id);
+		else if (now - g_PudimBuilderCmdAt[id] > 120000) delete g_PudimBuilderCmdAt[id];
+	}
+	return ids;
+}
 
 // Trabalhadores que ACABARAM de receber ordem de coleta. PostNetworkCommand é assíncrono:
 // a ordem só aparece no orderQueue alguns ticks depois, então no ciclo seguinte o
@@ -1795,7 +1828,7 @@ function pudim_ProcessDropsiteFoundations()
 				});
 				// 15s protegido: sem isso, long-walker/rebalance/farm podiam re-redirecionar o
 				// mesmo worker no meio da caminhada — ping-pong entre sistemas ("passeio")
-				g_PudimHouseBuilderCooldown[w.workerId] = redirExpiry;
+				pudim_ProtectBuilder(w.workerId, redirExpiry);
 			}
 		}
 	} catch(e) {}
@@ -1814,7 +1847,8 @@ function pudim_ProcessFarms()
 			pudim_Log("DEBUG", "FARM", "fc=" + (d.fc||0) + " nfc=" + (d.nfc||0) +
 				" ncap=" + (d.ncap||0) + " tg=" + (d.tg||0) + " cfm=" + (d.cfm||0) +
 				" fwt=" + (d.fwt||0) + " df=" + (d.df||0) + " wp=" + (d.wp||0) +
-				" fmc=" + (d.fmc||0) + " reason=" + (d.reason||"?") + " action=" + farmData.action);
+				" fmc=" + (d.fmc||0) + " tffs=" + (d.tffs||0) +
+				" reason=" + (d.reason||"?") + " action=" + farmData.action);
 		}
 
 		// ── Soldados em fazendas: trocar por aldeões (soldado → madeira) ─────────────────
@@ -2019,7 +2053,7 @@ function pudim_ProcessAdvancedAI()
 					// auto-work veria eles como idle e sobrescreveria o Repair order
 					const houseExpiry = nowTimer + 5000;
 					for (const bid of houseBuilderIds)
-						g_PudimHouseBuilderCooldown[bid] = houseExpiry;
+						pudim_ProtectBuilder(bid, houseExpiry);
 				}
 			}
 		} catch (e) { pudim_Log("ERROR", "CASAS", "excecao: " + e); }
@@ -2380,7 +2414,7 @@ function pudim_ProcessRepeatBuildings()
 				"queued": false
 			});
 			// Protege o worker por 10s para o auto-work não sobrescrever com gather antes de chegar na fundação.
-			g_PudimHouseBuilderCooldown[ent] = Date.now() + 10000;
+			pudim_ProtectBuilder(ent, Date.now() + 10000);
 			// Clear lastBuilt — will be repopulated once building starts.
 			delete g_PudimBuilderLastBuilt[ent];
 			g_PudimBuilderPending[ent] = 1;
@@ -2492,7 +2526,7 @@ function pudim_ExecuteInitialBalance()
 				const femaleExpiry = Date.now() + 15000;
 				for (const id of newFemales) {
 					g_PudimInitialFemaleSeen.add(id);
-					g_PudimHouseBuilderCooldown[id] = femaleExpiry;
+					pudim_ProtectBuilder(id, femaleExpiry);
 				}
 			}
 			// Contagem estabilizou entre duas checagens (1s) -> ninguém novo apareceu, concluído
@@ -2525,7 +2559,7 @@ function pudim_ExecuteInitialBalance()
 				// Protege soldados por 20s para auto-work não os mandar de volta para frutas
 				const soldierExpiry = Date.now() + 20000;
 				for (const s of newSoldiers) {
-					g_PudimHouseBuilderCooldown[s] = soldierExpiry;
+					pudim_ProtectBuilder(s, soldierExpiry);
 					g_PudimInitialSoldierSeen.add(s);
 				}
 			}
@@ -2550,7 +2584,7 @@ function pudim_ExecuteInitialBalance()
 				"pushFront": false
 			});
 			// Protege cavalaria por 20s para auto-work não a redirecionar para frutas
-			g_PudimHouseBuilderCooldown[data.cavalry] = Date.now() + 20000;
+			pudim_ProtectBuilder(data.cavalry, Date.now() + 20000);
 			g_PudimInitialCavalryDispatched = true;
 		}
 		else if (g_SimState && g_SimState.timeElapsed > 1500)

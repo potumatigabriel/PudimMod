@@ -255,10 +255,20 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 	// (tarefa concluída), voltam a ser gerenciadas normalmente.
 	const playerOrdered = new Set(((data && data.playerOrdered) || []).map(Number));
 	const protectedIds = new Set(((data && data.protectedIds) || []).map(Number));
+	// Comando recém-postado que a simulação ainda pode não ter aplicado (PostNetworkCommand
+	// é assíncrono). Só esta janela ignora o estado ocioso.
+	const inFlight = new Set(((data && data.inFlightIds) || []).map(Number));
 	const pudimSkipUnit = function(ent, cmpUnitAI) {
-		if (protectedIds.has(ent)) return true;
+		const busy = !!(cmpUnitAI && !cmpUnitAI.IsIdle());
+		if (inFlight.has(ent)) return true;
+		// Proteção de construtor valia por TEMPO ABSOLUTO — até 30s no caso de quem ergueu
+		// um dropsite. Se a obra terminava antes, a unidade ficava parada o resto da janela,
+		// invisível para o auto-work: era a origem dos trabalhadores ociosos no meio da base.
+		// Agora ela protege apenas quem está OCUPADO, mesma regra já usada para ordem manual:
+		// ficou ocioso, acabou (ou falhou) a obra, e a unidade volta a ser despachada.
+		if (protectedIds.has(ent)) return busy;
 		if (!playerOrdered.has(ent)) return false;
-		return !!(cmpUnitAI && !cmpUnitAI.IsIdle()); // ainda cumprindo a ordem do jogador
+		return busy; // ainda cumprindo a ordem do jogador
 	};
 
 	// Workers em trânsito (ordem "Gather" com target específico) para cada entidade-recurso.
@@ -511,16 +521,41 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 		// também a caminhada do trabalhador, e um limiar sobre a soma rejeitaria frutas coladas
 		// no celeiro só porque o trabalhador estava longe delas — exatamente o oposto do
 		// pretendido. Madeira/pedra/metal não entram: têm posição fixa e não há alternativa.
-		if (type === "food" && bestDistToDropsite > 100) return null;
+		//
+		// Devolver `null` aqui criava um impasse: sem atribuição, o sistema de celeiro proativo
+		// (que só é acionado por uma fruta ATRIBUÍDA) nunca era chamado, o celeiro nunca subia,
+		// a fruta continuava longe de dropsite para sempre — e o sistema de fazendas, vendo
+		// capacidade natural zero, partia para os campos com bagas ainda de pé dentro da base.
+		// Agora o alvo é devolvido marcado com `tooFar`: o chamador não despacha o trabalhador,
+		// mas registra o celeiro. Construído o celeiro, a fruta passa a valer e é colhida antes
+		// de qualquer fazenda.
+		if (type === "food" && bestDistToDropsite > 100) {
+			const farObj = safeResources.find(r => r.id === bestRes);
+			return { "id": bestRes, "x": farObj.pos.x, "z": farObj.pos.y, "type": farObj.type, "tooFar": true };
+		}
 
 		const bestObj = safeResources.find(r => r.id === bestRes);
 		return { "id": bestRes, "x": bestObj.pos.x, "z": bestObj.pos.y, "type": bestObj.type };
 	};
 
+	// Frutas dentro da base que existem, mas estão longe de qualquer dropsite de comida.
+	// Não viram ordem de coleta (a viagem de volta não compensa), viram pedido de celeiro:
+	// erguido o celeiro, elas passam a valer e são colhidas ANTES de qualquer fazenda.
+	const farFruit = [];
+	const notePudimFarFruit = (t) => {
+		if (!t || !t.tooFar) return;
+		const dup = farFruit.some(c => {
+			const dx = c.x - t.x, dz = c.z - t.z;
+			return dx*dx + dz*dz <= 60*60;
+		});
+		if (!dup) farFruit.push({ x: t.x, z: t.z });
+	};
+
 	const findFoodResource = (workerPos, assignedEntities) => {
 		// 1. Prioridade: frutas naturais (bagas/arbustos) próximas de dropsite — nunca caça ou pesca
 		const fruitTarget = findNearestResource(workerPos, "food", 250, assignedEntities, true, "fruit");
-		if (fruitTarget) return fruitTarget;
+		if (fruitTarget && fruitTarget.tooFar) notePudimFarFruit(fruitTarget);
+		else if (fruitTarget) return fruitTarget;
 
 		// 2. Fallback: fazendas (campos agrícolas do jogador) — apenas com capacidade livre
 		const nearbyFields = cmpRangeManager.ExecuteQueryAroundPos(workerPos, 0, 300, [player], IID_ResourceSupply, false);
@@ -905,6 +940,7 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 					// com pudim_GetFarmBuildData que os recoloca em madeira indefinidamente.
 					// Soldados só coletam frutas/bagas silvestres.
 					target = findNearestResource(workerPos, "food", 250, assignedEntities, true, "fruit");
+					if (target && target.tooFar) { notePudimFarFruit(target); target = null; }
 				} else {
 					target = findFoodResource(workerPos, assignedEntities);
 				}
@@ -967,6 +1003,17 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 
 	if (assignedWorkers.length > 0) {
 		result.idleWorkers = assignedWorkers;
+	}
+
+	// Frutas da base que só faltam um celeiro para valerem entram NA FRENTE das demais
+	// sugestões: enquanto houver baga de pé dentro do território, ela vem antes da fazenda.
+	// O painel constrói uma por ciclo e percorre a lista em ordem.
+	if (farFruit.length > 0) {
+		const rest = result.suggestFarmstead.filter(c => !farFruit.some(f => {
+			const dx = f.x - c.x, dz = f.z - c.z;
+			return dx*dx + dz*dz <= 60*60;
+		}));
+		result.suggestFarmstead = farFruit.concat(rest);
 	}
 
 	// ── Detectar workers caminhando longe sem coleta (long walkers) ──
@@ -1646,6 +1693,7 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	// naturalFoodCapacity = Σ GetMaxGatherers() de cada arbusto acessível com recursos.
 	let naturalFoodCount = 0;
 	let naturalFoodCapacity = 0;
+	let territoryFruitFreeSlots = 0;
 	const centerSearch = ccPositions.length > 0 ? ccPositions[0] : {x: mapSize/2, y: mapSize/2};
 	const allNaturalFood = cmpRangeManager.ExecuteQueryAroundPos(centerSearch, 0, 300, [0], IID_ResourceSupply, false);
 	for (const f of allNaturalFood) {
@@ -1692,6 +1740,16 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 				const ddx = fPos.x - fs.x, ddz = fPos.y - fs.z;
 				minDropDist = Math.min(minDropDist, Math.sqrt(ddx*ddx + ddz*ddz));
 			}
+			// Vagas livres em fruta DENTRO do território, sem o filtro de distância acima.
+			// É a medida de "ainda tem baga de pé na base": enquanto houver, a fazenda espera.
+			// Contada aqui, antes do `continue`, justamente para incluir a fruta que hoje está
+			// longe de dropsite — essa não é ignorada, é o que dispara o celeiro proativo.
+			{
+				const maxG = rs.GetMaxGatherers ? rs.GetMaxGatherers() : 0;
+				const curG = rs.GetNumGatherers ? rs.GetNumGatherers() : 0;
+				if (maxG > curG) territoryFruitFreeSlots += (maxG - curG);
+			}
+
 			if (minDropDist > 100) continue;
 
 			naturalFoodCapacity += rs.GetMaxGatherers();
@@ -1834,8 +1892,23 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 		}
 	}
 
+	// Fruta antes de fazenda: enquanto houver baga de pé dentro do território com vaga
+	// livre, o campo espera. Antes essa checagem não existia — a capacidade natural
+	// desconsiderava toda fruta a mais de 100m de um dropsite, então com bagas ainda
+	// inteiras na base o sistema via "capacidade zero" e partia direto para os campos.
+	// Essas mesmas bagas agora viram pedido de celeiro (ver farFruit em
+	// pudim_GetIdleWorkersAndBestResource); erguido o celeiro, elas entram na capacidade
+	// natural e a conta de déficit volta a decidir sozinha.
+	// O piso de 5 vagas evita travar a economia para sempre por causa de meia moita: abaixo
+	// disso a fruta restante não sustenta ninguém e a fazenda segue normalmente.
+	result._dbg.tffs = territoryFruitFreeSlots;
+	if (territoryFruitFreeSlots >= 5) {
+		result._dbg.reason = "fruta_na_base:" + territoryFruitFreeSlots;
+		return result;
+	}
+
 	result.action = "build";
-	
+
 	let bId = null;
 	if (farFoodWorkers.length > 0) {
 		bId = farFoodWorkers[0];

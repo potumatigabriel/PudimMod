@@ -1766,6 +1766,49 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 		}
 	}
 
+	// Direções AMIGAS vistas do centro do mapa: uma por Centro Cívico nosso ou de aliado.
+	// Mapas de escaramuça posicionam os jogadores em torno do centro, então o lado oposto
+	// ao nosso é onde o inimigo provavelmente está. Sem isso o scout profundo escolhia o
+	// tile inexplorado mais PERTO dele, e como fundo de base costuma ser o pedaço menos
+	// aberto do mapa, ele passava a partida vasculhando atrás de casa — a queixa de 19/08.
+	// Diplomacy.GetAllies() já inclui o próprio jogador (IsAlly(self) é verdadeiro), então
+	// a lista cobre nossa base e as aliadas de uma vez.
+	const midX = mapSize / 2, midZ = mapSize / 2;
+	const friendDirs = [];
+	{
+		const playerEntSc = Engine.QueryInterface(SYSTEM_ENTITY, IID_PlayerManager).GetPlayerByID(player);
+		const cmpDiploSc = Engine.QueryInterface(playerEntSc, IID_Diplomacy);
+		const friendly = cmpDiploSc ? cmpDiploSc.GetAllies() : [player];
+		for (const pid of friendly) {
+			if (pid <= 0) continue; // gaia não tem base
+			for (const ent of cmpRangeManager.GetEntitiesByPlayer(pid)) {
+				const idf = Engine.QueryInterface(ent, IID_Identity);
+				if (!idf || !idf.HasClass("CivCentre")) continue;
+				const pf = Engine.QueryInterface(ent, IID_Position);
+				if (!pf || !pf.IsInWorld()) continue;
+				const q = pf.GetPosition2D();
+				const vx = q.x - midX, vz = q.y - midZ;
+				const len = Math.sqrt(vx*vx + vz*vz);
+				if (len > 1) friendDirs.push({ x: vx / len, z: vz / len });
+			}
+		}
+	}
+	// Alinhamento do tile com o lado amigo mais próximo: +1 = mesma direção da nossa base
+	// (fundo de quintal), -1 = lado oposto do mapa. Vale só como filtro, não como score,
+	// para o scout continuar varrendo de forma contígua dentro do lado escolhido.
+	const pudimFriendAlign = function(x, z) {
+		if (friendDirs.length === 0) return 0;
+		const vx = x - midX, vz = z - midZ;
+		const len = Math.sqrt(vx*vx + vz*vz);
+		if (len < 1) return 0; // centro do mapa não pertence a lado nenhum
+		let best = -1;
+		for (const d of friendDirs) {
+			const dot = (vx / len) * d.x + (vz / len) * d.z;
+			if (dot > best) best = dot;
+		}
+		return best;
+	};
+
 	const mode        = (data && data.mode) || "local";
 	const gridSize    = (data && data.gridSize && data.gridSize > 0) ? data.gridSize : 64;
 	const blocked     = (data && data.blockedSectors) ? data.blockedSectors : {};
@@ -1855,6 +1898,34 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 	// Trilho paralelo dos tiles nunca vistos (ver a escolha final, depois da varredura)
 	let bestNewPos   = null;
 	let bestNewScore = -Infinity;
+	// E um terceiro trilho: inexplorado no lado do mapa OPOSTO ao nosso, que é onde o
+	// inimigo provavelmente está. Tem precedência sobre o inexplorado genérico.
+	let bestFarPos   = null;
+	let bestFarScore = -Infinity;
+	// 0.2 e não 0: a faixa em torno do meridiano do centro é território de ninguém e vale
+	// explorar. Só o cone claramente voltado para casa (ou para um aliado) fica de fora.
+	const PUDIM_SCOUT_HOME_CONE = 0.2;
+
+	// Raio da base, para o modo LOCAL ("Explorar Base"): a estrutura nossa mais distante do
+	// CC, com margem. Piso de 100m para o começo de jogo, quando só existe o próprio CC.
+	let baseRadius = 100;
+	for (const ent of myEnts) {
+		const idb = Engine.QueryInterface(ent, IID_Identity);
+		if (!idb || !idb.HasClass("Structure")) continue;
+		const pb = Engine.QueryInterface(ent, IID_Position);
+		if (!pb || !pb.IsInWorld()) continue;
+		const qb = pb.GetPosition2D();
+		const dxb = qb.x - ccX, dzb = qb.y - ccZ;
+		const db = Math.sqrt(dxb*dxb + dzb*dzb) + 40;
+		if (db > baseRadius) baseRadius = db;
+	}
+	// Raio-alvo em espiral: uma volta de theta (2π) percorre da borda interna à externa.
+	// theta avança 45° por waypoint no cliente, então são 8 paradas por volta e o raio sobe
+	// um oitavo a cada uma — espiral de Arquimedes sem precisar guardar estado nenhum aqui.
+	// Antes o modo local exigia tile de BORDA do território e pulava todo o terreno nosso:
+	// o scout andava só no aro externo e o miolo da base ficava cego.
+	const thetaNorm = ((theta % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+	const spiralR = 0.25 * baseRadius + 0.75 * baseRadius * (thetaNorm / (2 * Math.PI));
 
 	// Posição atual do próprio scout. Com a leitura de exploração disponível, é ELA que
 	// passa a guiar a escolha entre os tiles inexplorados — ver o score mais abaixo.
@@ -1867,25 +1938,19 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 	for (let x = 10; x < mapSize - 10; x += step) {
 		for (let z = 10; z < mapSize - 10; z += step) {
 			const owner = cmpTerritoryManager.GetOwner(x, z);
-			if (owner === player) continue;
+			const dxIn = x - ccX, dzIn = z - ccZ;
+			const distCCIn = Math.sqrt(dxIn*dxIn + dzIn*dzIn);
 
-			// A exigência de "borda do território" só vale para o modo LOCAL, cuja missão é
-			// girar em torno da nossa própria base. Borda do território É a nossa base, por
-			// definição — aplicá-la ao modo PROFUNDO prendia o scout no mesmo perímetro do
-			// local, que era exatamente a queixa: "o profundo só fica rodeando minha base".
-			// No modo profundo sem base inimiga conhecida a missão é ACHAR o inimigo, então
-			// varremos o mapa inteiro e o distMod (positivo para deep) puxa para longe.
-			if (mode !== "deep") {
-				let isBorder = false;
-				const neighbors = [ [step,0], [-step,0], [0,step], [0,-step] ];
-				for (const n of neighbors) {
-					const nx = x + n[0], nz = z + n[1];
-					if (nx > 0 && nx < mapSize && nz > 0 && nz < mapSize &&
-					    cmpTerritoryManager.GetOwner(nx, nz) === player) {
-						isBorder = true; break;
-					}
-				}
-				if (!isBorder) continue;
+			if (mode === "deep") {
+				// Profundo: a missão é ACHAR o inimigo, então nosso próprio território não
+				// interessa e o resto do mapa está todo liberado.
+				if (owner === player) continue;
+			} else {
+				// Local ("Explorar Base"): cobrir a base INTEIRA, inclusive o terreno nosso.
+				// A regra anterior era "tile fora do nosso território e vizinho dele" — o
+				// scout andava só no aro externo e o miolo ficava cego, que é o ponto cego
+				// relatado. Agora o critério é geométrico: tudo dentro do raio da base.
+				if (distCCIn > baseRadius) continue;
 			}
 
 			// Pular setores bloqueados (água/obstáculo marcado pelo cliente)
@@ -1932,6 +1997,18 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 				// angleCos entra com peso pequeno, só para desempatar e manter um sentido de
 				// varredura entre tiles igualmente próximos.
 				score = exploreMod - distScout * 1.0 + angleCos * 10;
+			} else if (mode !== "deep" && losAt) {
+				// Local ("Explorar Base"): espiral cobrindo a base inteira, priorizando o
+				// que ninguém está enxergando agora.
+				//   hidden  = ponto cego de verdade, nunca visto — prioridade máxima;
+				//   fogged  = conhecido mas sem vigia no momento — é o trabalho da patrulha;
+				//   visible = alguém já está olhando; ir ali não acrescenta nada.
+				// A distância ao CC deixa de ser "quanto mais perto melhor" e passa a ser
+				// aderência ao raio da espiral daquele waypoint: assim a patrulha percorre
+				// anéis crescentes em vez de ficar colada no CC.
+				const visL = losAt(x, z);
+				exploreMod = visL === "hidden" ? 1000 : (visL === "fogged" ? 300 : 0);
+				score = exploreMod + angleCos * 100 - Math.abs(distCC - spiralR) * 2;
 			} else {
 				// Sem leitura de exploração: comportamento anterior, guiado por ângulo e
 				// distância do CC.
@@ -1946,7 +2023,14 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 				// inexplorado — só é usado quando não sobrou nenhum inexplorado.
 				if (score > bestNewScore) {
 					bestNewScore = score;
-					bestNewPos = { "x": x, "z": z, "unexplored": true };
+					// exploreMod 1000 = nunca visto; 300 = conhecido mas sem vigia agora
+					// (só o modo local produz esse caso).
+					bestNewPos = { "x": x, "z": z, "unexplored": exploreMod >= 1000 };
+				}
+				if (mode === "deep" && pudimFriendAlign(x, z) < PUDIM_SCOUT_HOME_CONE &&
+				    score > bestFarScore) {
+					bestFarScore = score;
+					bestFarPos = { "x": x, "z": z, "unexplored": true, "farSide": true };
 				}
 			} else if (score > bestScore) {
 				bestScore = score;
@@ -1955,10 +2039,14 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 		}
 	}
 
-	// Havendo qualquer tile nunca visto, é ele — mapa desconhecido vale mais que qualquer
-	// heurística de ângulo ou distância. É o que faltava para o scout parar de refazer o que
-	// ele (ou um aliado) já tinha aberto.
-	if (bestNewPos) bestPos = bestNewPos;
+	// Ordem de preferência, da mais forte para a mais fraca:
+	//   1. nunca visto E no lado oposto ao nosso — é onde o inimigo deve estar;
+	//   2. nunca visto em qualquer lugar — mapa desconhecido ainda vale mais que qualquer
+	//      heurística de ângulo ou distância, e é o que fez o scout parar de refazer o que
+	//      ele (ou um aliado) já tinha aberto;
+	//   3. já explorado — só quando não sobrou nada por descobrir.
+	if (bestFarPos) bestPos = bestFarPos;
+	else if (bestNewPos) bestPos = bestNewPos;
 
 	// losOk diz se a leitura de exploração existiu neste build ou se caiu no fallback.
 	// Sem esse sinal não há como julgar em jogo se o scout melhorou ou se a API faltou.

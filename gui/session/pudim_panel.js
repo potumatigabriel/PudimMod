@@ -286,8 +286,13 @@ function pudim_ApplyCompactMode()
 /** Controla se o auto-trabalho está ativo */
 var g_PudimAutoWorkEnabled = true;
 
-/** Pesos de prioridade de coleta de recursos */
-var g_PudimResourceWeights = { food: 3, wood: 3, stone: 0, metal: 0 };
+/**
+ * Pesos de prioridade de coleta de recursos, como o jogo deve comecar.
+ * Madeira acima de comida (4x3) e o padrao pedido em 19/08: a fase 1 gasta madeira em
+ * casas, armazens e fazendas mais rapido do que gasta comida, e as fazendas so passam a
+ * render depois de pagas em madeira.
+ */
+var g_PudimResourceWeights = { food: 3, wood: 4, stone: 0, metal: 0 };
 
 /** Intervalo do timer de Auto-Trabalho (ms) */
 var PUDIM_AUTOWORK_INTERVAL = 500;
@@ -414,7 +419,7 @@ function pudim_Init()
 	const autoWorkSaved = Engine.ConfigDB_GetValue("user", "pudim.autowork.enabled");
 	g_PudimAutoWorkEnabled = autoWorkSaved !== "false";
 
-	// Pesos de recurso: sempre iniciam no padrão (food=3, wood=3, stone=0, metal=0)
+	// Pesos de recurso: sempre iniciam no padrão (food=3, wood=4, stone=0, metal=0)
 	// Não persistir entre sessões — g_PudimResourceWeights já tem os defaults corretos.
 
 	let savedWorkInterval = Engine.ConfigDB_GetValue("user", "pudim.autowork.interval");

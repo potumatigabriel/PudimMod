@@ -7,6 +7,9 @@
   <object name="pudim_logBtn" type="button" size="100%-76 6 100%-32 28" style="StoneButton" tooltip="Abre o painel de debug"><action on="Press">pudim_ToggleLog();</action><translatableAttribute id="caption">Log</translatableAttribute></object>
   <object name="pudim_closeBtn" type="button" size="100%-30 6 100%-4 28" style="StoneButton" tooltip="Fechar painel PudimMod"><action on="Press">pudim_TogglePanel();</action><translatableAttribute id="caption">X</translatableAttribute></object>
 
+  <!-- Fundo que pisca na cor do estado do combate (verde/amarelo/vermelho).
+       Declarado ANTES dos textos para ficar atras deles; ghost para nao roubar clique. -->
+  <object name="pudim_combatFlash" type="image" size="4 28 100%-4 234" sprite="color: 0 0 0 0" ghost="true"/>
   <object type="text" size="8 30 100%-8 52" font="sans-bold-14" textcolor="255 255 255 255" style="ModernLabelText" ghost="true"><translatableAttribute id="caption">Estimador de Combate</translatableAttribute></object>
   <object name="pudim_allyCount" type="text" size="8 56 50% 74" font="sans-bold-13" textcolor="80 220 80 255" ghost="true"><translatableAttribute id="caption">Aliados: --</translatableAttribute></object>
   <object name="pudim_enemyCount" type="text" size="50% 56 100%-8 74" font="sans-bold-13" textcolor="220 80 80 255" ghost="true"><translatableAttribute id="caption">Inimigos: --</translatableAttribute></object>
@@ -20,7 +23,8 @@
   <object name="pudim_winChanceBg" type="image" size="8 178 100%-8 196" sprite="color: 30 30 40 220"/>
   <object name="pudim_winChanceBar" type="image" size="8 178 50% 196" sprite="color: 30 180 60 200"/>
   <object name="pudim_winChancePct" type="text" size="8 178 100%-8 196" font="sans-bold-13" text_align="center" text_valign="center" textcolor="255 255 255 255" ghost="true"><translatableAttribute id="caption">--%</translatableAttribute></object>
-  <object name="pudim_combatRefreshBtn" type="button" size="8 202 100%-8 226" style="StoneButton" tooltip="Recalcula a estimativa de combate"><action on="Press">pudim_RefreshCombat();</action><translatableAttribute id="caption">Atualizar Estimativa</translatableAttribute></object>
+  <object name="pudim_counterHint" type="text" size="8 197 100%-8 211" font="sans-11" text_align="center" textcolor="200 200 200 255" ghost="true"><translatableAttribute id="caption"></translatableAttribute></object>
+  <object name="pudim_combatRefreshBtn" type="button" size="8 212 100%-8 234" style="StoneButton" tooltip="Recalcula a estimativa de combate"><action on="Press">pudim_RefreshCombat();</action><translatableAttribute id="caption">Atualizar Estimativa</translatableAttribute></object>
 
   <!-- SEÇÃO DE CONFIGURAÇÃO — oculta no modo compacto -->
   <object name="pudim_autoWorkHeader" type="text" size="8 236 100%-8 258" font="sans-bold-14" textcolor="255 255 255 255" style="ModernLabelText" ghost="true"><translatableAttribute id="caption">Auto-Trabalho</translatableAttribute></object>

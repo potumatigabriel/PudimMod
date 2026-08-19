@@ -21,6 +21,98 @@ var g_PudimEnemyStructuresLastUpdate = 0;
  * @param {number[]} data.ents - IDs das entidades selecionadas (unidades aliadas).
  * @returns {Object} Dados de estimativa de combate para aliados e inimigos.
  */
+
+// ─── Motor de combate: DPS efetivo real ───────────────────────────────────────
+// A conta e a MESMA do motor (simulation/helpers/Attack.js):
+//     dano_efetivo = Sum_tipo( dano_tipo * 0.9^resistencia_tipo ) * multiplicador_bonus
+// Cada ponto de resistencia corta 10% daquele tipo de dano; o bonus de classe
+// (ex.: lanceiro Multiplier 2.5 contra Cavalry) multiplica no fim.
+//
+// Os valores ja vem com as tecnologias aplicadas: GetAttackEffectsData e
+// GetResistanceOfForm passam por ApplyValueModificationsToEntity internamente.
+
+/** Perfil de resistencia de uma entidade: { Hack, Pierce, Crush } (0 se ausente) */
+function pudim_ResistProfile(ent) {
+	const out = { Hack: 0, Pierce: 0, Crush: 0 };
+	const cmpRes = Engine.QueryInterface(ent, IID_Resistance);
+	if (!cmpRes) return out;
+	let eff = null;
+	try { eff = cmpRes.GetEffectiveResistanceAgainst("Damage"); } catch(e) { return out; }
+	const d = eff && eff.Damage;
+	if (!d) return out;
+	for (const t in d) if (out[t] !== undefined) out[t] = +d[t] || 0;
+	return out;
+}
+
+/**
+ * DPS efetivo de `ent` contra um alvo medio descrito por `foe`.
+ * @param {Object} foe - { resist: {Hack,Pierce,Crush}, classCount: {classe: n}, total: n }
+ * @returns {number} dano por segundo ja mitigado e com bonus ponderado
+ */
+function pudim_EffectiveDPS(ent, foe) {
+	const cmpAttack = Engine.QueryInterface(ent, IID_Attack);
+	if (!cmpAttack || !foe || foe.total <= 0) return 0;
+
+	let types = [];
+	try { types = cmpAttack.GetAttackTypes() || []; } catch(e) { return 0; }
+
+	let best = 0;
+	for (const type of types) {
+		// Captura e abate nao sao dano de batalha campal
+		if (type === "Capture" || type === "Slaughter") continue;
+
+		let eff = null;
+		try { eff = cmpAttack.GetAttackEffectsData(type); } catch(e) { continue; }
+		if (!eff || !eff.Damage) continue;
+
+		// 1) dano por golpe ja mitigado pela resistencia media do inimigo
+		let perHit = 0;
+		for (const dt in eff.Damage) {
+			const dmg = +eff.Damage[dt] || 0;
+			if (dmg <= 0) continue;
+			perHit += dmg * Math.pow(0.9, foe.resist[dt] || 0);
+		}
+		if (perHit <= 0) continue;
+
+		// 2) bonus de classe, ponderado pela FRACAO do inimigo que casa com o bonus.
+		//    Ex.: 2.5x contra Cavalry valendo so para 40% do exercito inimigo -> 1.6x medio.
+		if (eff.Bonuses) {
+			let weighted = 0;
+			for (const cls in foe.classCount) {
+				const n = foe.classCount[cls];
+				if (!n) continue;
+				let mult = 1;
+				for (const key in eff.Bonuses) {
+					const b = eff.Bonuses[key];
+					if (!b || !b.Classes) continue;
+					const list = ("" + b.Classes).split(/\s+/);
+					if (list.indexOf(cls) !== -1) mult *= (+b.Multiplier || 1);
+				}
+				weighted += mult * n;
+			}
+			// classCount conta CADA unidade uma vez (usamos classes mutuamente exclusivas)
+			perHit *= (weighted / foe.total);
+		}
+
+		// 3) converter em dano por segundo
+		let repeat = 1000;
+		try { repeat = cmpAttack.GetRepeatTime(type) || 1000; } catch(e) {}
+		const dps = perHit / (repeat / 1000);
+		if (dps > best) best = dps;
+	}
+	return best;
+}
+
+/** Classe mutuamente exclusiva da unidade, para ponderar bonus sem contar em dobro */
+function pudim_UnitBucket(cmpId) {
+	if (!cmpId) return "Infantry";
+	if (cmpId.HasClass("Siege")) return "Siege";
+	if (cmpId.HasClass("Cavalry") || cmpId.HasClass("FastMoving")) return "Cavalry";
+	if (cmpId.HasClass("Ship")) return "Ship";
+	if (cmpId.HasClass("Support")) return "Support";
+	return "Infantry";
+}
+
 GuiInterface.prototype.pudim_GetCombatEstimation = function(player, data)
 {
 	const result = {
@@ -132,9 +224,11 @@ GuiInterface.prototype.pudim_GetCombatEstimation = function(player, data)
 		{
 			try
 			{
-				const resistData = cmpResistance.GetArmor ? cmpResistance.GetArmor() : null;
-				if (resistData)
-					armor = (resistData.hack || 0) + (resistData.pierce || 0) + (resistData.crush || 0);
+				// GetArmor() NAO existe no motor; a API correta e
+				// GetEffectiveResistanceAgainst("Damage") -> { Damage: {Hack,Pierce,Crush} }.
+				// Enquanto se chamava o metodo inexistente, esta armadura era sempre 0.
+				const r = pudim_ResistProfile(ent);
+				armor = r.Hack + r.Pierce + r.Crush;
 			}
 			catch (e)
 			{
@@ -157,14 +251,18 @@ GuiInterface.prototype.pudim_GetCombatEstimation = function(player, data)
 
 	// Coletar estatísticas dos aliados selecionados
 	const allyPositions = [];
+	const allyEntList = [];   // usados no calculo de DPS efetivo mais abaixo
+	const enemyEntList = [];
 	for (const ent of data.ents)
 	{
 		const cmpOwnership = Engine.QueryInterface(ent, IID_Ownership);
 		if (!cmpOwnership || cmpOwnership.GetOwner() !== player)
 			continue;
 		const detail = collectStats(ent, result.allies);
-		if (detail)
+		if (detail) {
 			result.allyDetails.push(detail);
+			allyEntList.push(ent);
+		}
 
 		const cmpPos = Engine.QueryInterface(ent, IID_Position);
 		if (cmpPos && cmpPos.IsInWorld())
@@ -198,19 +296,93 @@ GuiInterface.prototype.pudim_GetCombatEstimation = function(player, data)
 				continue;
 
 			const detail = collectStats(ent, result.enemies);
-			if (detail)
+			if (detail) {
 				result.enemyDetails.push(detail);
+				enemyEntList.push(ent);
+			}
 		}
 	}
 
-	// Estimar probabilidade de vitória (heurística simples)
-	const allyScore = result.allies.totalHP * Math.max(result.allies.totalAttack, 1) / (1 + result.allies.totalArmor / 10);
-	const enemyScore = result.enemies.totalHP * Math.max(result.enemies.totalAttack, 1) / (1 + result.enemies.totalArmor / 10);
+	// ── Estimativa por TEMPO-PARA-MATAR ────────────────────────────────────────
+	// A heuristica antiga era HP * ataque / (1 + armadura/10), com tres defeitos:
+	//   - a armadura era SEMPRE 0: chamava cmpResistance.GetArmor(), metodo que nao
+	//     existe no motor (a API e GetEffectiveResistanceAgainst/GetFullResistance) e o
+	//     try/catch engolia o erro;
+	//   - "ataque" era o maior tipo de dano BRUTO, sem dividir por RepeatTime, entao quem
+	//     bate 20 a cada 2s parecia o dobro de quem bate 15 a cada 1s;
+	//   - bonus de classe eram ignorados (lanceiro 2.5x contra cavalaria nao aparecia).
+	// Agora usamos a formula real do motor e comparamos quem elimina o outro primeiro.
 
-	if (allyScore + enemyScore > 0)
-		result.winChance = Math.round(100 * allyScore / (allyScore + enemyScore));
+	const buildFoe = (ents) => {
+		const foe = { resist: { Hack: 0, Pierce: 0, Crush: 0 }, classCount: {}, total: 0 };
+		for (const e of ents) {
+			const r = pudim_ResistProfile(e);
+			foe.resist.Hack += r.Hack; foe.resist.Pierce += r.Pierce; foe.resist.Crush += r.Crush;
+			const b = pudim_UnitBucket(Engine.QueryInterface(e, IID_Identity));
+			foe.classCount[b] = (foe.classCount[b] || 0) + 1;
+			foe.total++;
+		}
+		if (foe.total > 0) { // resistencia MEDIA do grupo
+			foe.resist.Hack /= foe.total;
+			foe.resist.Pierce /= foe.total;
+			foe.resist.Crush /= foe.total;
+		}
+		return foe;
+	};
+
+	const allyFoe = buildFoe(enemyEntList);   // como o inimigo se defende
+	const enemyFoe = buildFoe(allyEntList);   // como nos nos defendemos
+
+	let allyDPS = 0, enemyDPS = 0;
+	for (const e of allyEntList) allyDPS += pudim_EffectiveDPS(e, allyFoe);
+	for (const e of enemyEntList) enemyDPS += pudim_EffectiveDPS(e, enemyFoe);
+
+	result.allies.totalAttack = Math.round(allyDPS * 10) / 10;
+	result.enemies.totalAttack = Math.round(enemyDPS * 10) / 10;
+
+	// Tempo para cada lado zerar o outro. Menor tempo = vence.
+	const tKillEnemy = allyDPS > 0 ? result.enemies.totalHP / allyDPS : Infinity;
+	const tKillUs    = enemyDPS > 0 ? result.allies.totalHP / enemyDPS : Infinity;
+	result.timeToKillEnemy = isFinite(tKillEnemy) ? Math.round(tKillEnemy) : -1;
+	result.timeToKillUs    = isFinite(tKillUs) ? Math.round(tKillUs) : -1;
+
+	if (!isFinite(tKillEnemy) && !isFinite(tKillUs))
+		result.winChance = 50;                       // ninguem causa dano
+	else if (!isFinite(tKillUs))
+		result.winChance = 95;                       // eles nao nos ferem
+	else if (!isFinite(tKillEnemy))
+		result.winChance = 5;                        // nao os ferimos
 	else
-		result.winChance = 50;
+		// Quanto menor o nosso tempo em relacao ao deles, maior a chance.
+		result.winChance = Math.max(1, Math.min(99, Math.round(100 * tKillUs / (tKillUs + tKillEnemy))));
+
+	// Contra disponivel: bonus que ja temos e que rende contra a composicao deles
+	result.counters = [];
+	for (const e of allyEntList) {
+		const cmpAtk = Engine.QueryInterface(e, IID_Attack);
+		const cmpIdE = Engine.QueryInterface(e, IID_Identity);
+		if (!cmpAtk || !cmpIdE) continue;
+		let types = [];
+		try { types = cmpAtk.GetAttackTypes() || []; } catch(err) { continue; }
+		for (const t of types) {
+			let eff = null;
+			try { eff = cmpAtk.GetAttackEffectsData(t); } catch(err) { continue; }
+			if (!eff || !eff.Bonuses) continue;
+			for (const key in eff.Bonuses) {
+				const b = eff.Bonuses[key];
+				if (!b || !b.Classes || (+b.Multiplier || 1) <= 1.2) continue;
+				for (const cls of ("" + b.Classes).split(/\s+/)) {
+					if (!allyFoe.classCount[cls]) continue;
+					const nome = cmpIdE.GetGenericName ? cmpIdE.GetGenericName() : "Unidade";
+					if (!result.counters.some(c => c.unit === nome && c.vs === cls))
+						result.counters.push({ unit: nome, vs: cls, mult: +b.Multiplier,
+						                       targets: allyFoe.classCount[cls] });
+				}
+			}
+		}
+	}
+	result.counters.sort((a, b) => (b.mult * b.targets) - (a.mult * a.targets));
+	result.counters = result.counters.slice(0, 3);
 
 	return result;
 };

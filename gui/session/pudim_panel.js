@@ -513,6 +513,52 @@ function pudim_TogglePanel()
 /**
  * Atualiza a estimativa de combate consultando a simulação.
  */
+// ─── Realidade da batalha: HP perdido nos ultimos 5s ──────────────────────────
+// Mortes sao um sinal ruim numa janela curta: em 5s costuma haver ZERO mortes (sem
+// sinal) e a primeira morte faz a razao saltar de 0 para infinito. HP perdido e
+// continuo — atualiza a cada golpe — entao avisa ENQUANTO a tropa apanha, que e
+// quando ainda da tempo de recuar.
+var g_PudimHpSamples = [];              // [{ t, ally, enemy }]
+const PUDIM_HP_WINDOW = 5000;           // janela de leitura: 5s
+const PUDIM_COLOR_HOLD = 2000;          // trava antes de trocar de cor: 2s
+var g_PudimCombatColor = "yellow";
+var g_PudimCombatColorSince = 0;
+var g_PudimCombatColorPending = null;
+
+/**
+ * Compara o HP atual com o de ~5s atras e devolve quem esta sangrando mais.
+ * @returns {number|null} 0..1 (fracao da perda que foi NOSSA) ou null sem dados
+ */
+function pudim_BattleReality(now, allyHP, enemyHP) {
+	g_PudimHpSamples.push({ t: now, ally: allyHP, enemy: enemyHP });
+	while (g_PudimHpSamples.length > 1 && now - g_PudimHpSamples[0].t > PUDIM_HP_WINDOW)
+		g_PudimHpSamples.shift();
+	if (g_PudimHpSamples.length < 2) return null;
+
+	const old = g_PudimHpSamples[0];
+	// So conta PERDA (delta negativo); reforco chegando nao vira "vitoria"
+	const lostAlly = Math.max(0, old.ally - allyHP);
+	const lostEnemy = Math.max(0, old.enemy - enemyHP);
+	const total = lostAlly + lostEnemy;
+	if (total < 1) return null;           // ninguem apanhou: sem realidade a reportar
+	return lostAlly / total;              // 0 = so ele sangra, 1 = so nos sangramos
+}
+
+/** Aplica a trava de 2s: a cor so muda apos se confirmar, para nao tremer */
+function pudim_StableColor(now, wanted) {
+	if (wanted === g_PudimCombatColor) { g_PudimCombatColorPending = null; return wanted; }
+	if (g_PudimCombatColorPending !== wanted) {
+		g_PudimCombatColorPending = wanted;
+		g_PudimCombatColorSince = now;
+		return g_PudimCombatColor;
+	}
+	if (now - g_PudimCombatColorSince >= PUDIM_COLOR_HOLD) {
+		g_PudimCombatColor = wanted;
+		g_PudimCombatColorPending = null;
+	}
+	return g_PudimCombatColor;
+}
+
 function pudim_RefreshCombat()
 {
 	if (!g_PudimPanelOpen)
@@ -572,10 +618,42 @@ function pudim_UpdateCombatDisplay(data)
 	// Barra de probabilidade
 	pudim_SetCaption("pudim_winChancePct", winChance + "%");
 
+	// Tempo para cada lado eliminar o outro (a base da estimativa)
+	if (data.timeToKillEnemy >= 0 || data.timeToKillUs >= 0) {
+		const tE = data.timeToKillEnemy >= 0 ? data.timeToKillEnemy + "s" : "--";
+		const tU = data.timeToKillUs >= 0 ? data.timeToKillUs + "s" : "--";
+		pudim_SetCaption("pudim_winChancePct", winChance + "%   [color=\"170 170 170\"]mata em " +
+			tE + " / morre em " + tU + "[/color]");
+	} else {
+		pudim_SetCaption("pudim_winChancePct", winChance + "%");
+	}
+
+	// Contras disponiveis contra a composicao inimiga
+	if (data.counters && data.counters.length > 0) {
+		const c = data.counters[0];
+		pudim_SetCaption("pudim_counterHint", "[color=\"120 230 120\"]" + c.unit + " x " +
+			c.vs + ": " + c.mult + "x[/color] (" + c.targets + " alvos)");
+	} else {
+		pudim_SetCaption("pudim_counterHint", "");
+	}
+
+	const now = Date.now();
+	// A REALIDADE (HP perdido nos ultimos 5s) tem prioridade sobre a teoria: se o calculo
+	// diz que ganhamos mas estamos sangrando 3:1, o vermelho acende do mesmo jeito.
+	const reality = pudim_BattleReality(now, allies.totalHP, enemies.totalHP);
+	let wanted;
+	if (reality !== null) {
+		if (reality >= 0.62) wanted = "red";        // 62%+ da perda e nossa
+		else if (reality <= 0.42) wanted = "green";
+		else wanted = "yellow";
+	} else {
+		wanted = winChance >= 60 ? "green" : (winChance >= 40 ? "yellow" : "red");
+	}
+	const color = pudim_StableColor(now, wanted);
+
 	const bar = Engine.TryGetGUIObjectByName("pudim_winChanceBar");
 	if (bar)
 	{
-		// Ajustar tamanho da barra
 		const bgObj = Engine.TryGetGUIObjectByName("pudim_winChanceBg");
 		if (bgObj)
 		{
@@ -584,14 +662,24 @@ function pudim_UpdateCombatDisplay(data)
 			const barWidth = Math.round(totalWidth * winChance / 100);
 			bar.size = "8 178 " + (8 + barWidth) + " 196";
 		}
+		bar.sprite = color === "green" ? "color: 30 180 60 200"
+		           : color === "yellow" ? "color: 200 160 20 200"
+		           : "color: 200 40 40 200";
+	}
 
-		// Cor baseada na probabilidade
-		if (winChance >= 60)
-			bar.sprite = "color: 30 180 60 200";
-		else if (winChance >= 40)
-			bar.sprite = "color: 200 160 20 200";
-		else
-			bar.sprite = "color: 200 40 40 200";
+	// Fundo do estimador piscando na cor do estado (translucido, so durante combate)
+	const flash = Engine.TryGetGUIObjectByName("pudim_combatFlash");
+	if (flash) {
+		const emCombate = (enemies.count || 0) > 0 && (allies.count || 0) > 0;
+		if (!emCombate) {
+			flash.sprite = "color: 0 0 0 0";
+		} else {
+			const on = (Math.floor(now / 450) % 2 === 0);
+			const a = on ? 70 : 24;
+			flash.sprite = color === "green" ? "color: 30 150 50 " + a
+			             : color === "yellow" ? "color: 190 160 30 " + a
+			             : "color: 190 30 30 " + a;
+		}
 	}
 }
 

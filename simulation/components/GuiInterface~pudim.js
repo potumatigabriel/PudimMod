@@ -4445,22 +4445,35 @@ GuiInterface.prototype.pudim_GetSmartDropsiteData = function(player, data)
 		return result;
 	}
 	// Celeiro: anchorDensity aqui conta TRABALHADORES próximos (não arbustos — ver seleção de
-	// âncora acima), então não serve pra medir se vale os 100 de madeira. Conta arbustos de
-	// fruta de verdade a 30m da âncora; exige pelo menos 2 (1 isolado esgota rápido e o
-	// celeiro fica ocioso, mas exigir 4 como madeira seria demais pro tamanho normal de um
-	// grupo de bagas).
+	// âncora acima), então não serve pra medir se vale os 100 de madeira.
+	//
+	// A regra era "pelo menos 2 arbustos a 30m". Ela recusava o celeiro justamente onde ele
+	// era mais necessário: no log de 19/08 o mod bateu em `too_few_fruit_1` três ciclos
+	// seguidos com 5, 2 e 4 trabalhadores de comida longe de qualquer dropsite — todos
+	// colhendo de um arbusto isolado e atravessando a base para entregar.
+	//
+	// Contar arbusto é a medida errada. O que decide se os 100 de madeira se pagam é quanta
+	// comida ainda existe ao alcance: 1 arbusto CHEIO são 200 de comida (Max do
+	// gaia/fruit/berry_01.xml), o dobro do custo do celeiro — vale. 3 arbustos quase
+	// esgotados podem somar 40 — não vale, e a regra antiga aprovava. GetCurrentAmount()
+	// dá o valor real, já descontado o que foi colhido.
 	if (bestGroupKey === "food") {
 		const realFruitNearby = cmpRangeManager.ExecuteQueryAroundPos(
 			{ x: anchorX, y: anchorZ }, 0, 30, [0], IID_ResourceSupply, false);
-		let fruitCount = 0;
+		let fruitCount = 0, fruitAmount = 0;
 		for (const res of realFruitNearby) {
 			const rs = Engine.QueryInterface(res, IID_ResourceSupply);
 			if (!rs || !rs.IsAvailable()) continue;
 			const rt = rs.GetType();
-			if (rt && rt.generic === "food" && rt.specific === "fruit") fruitCount++;
+			if (!rt || rt.generic !== "food" || rt.specific !== "fruit") continue;
+			fruitCount++;
+			fruitAmount += rs.GetCurrentAmount ? rs.GetCurrentAmount() : 0;
 		}
-		if (fruitCount < 2) {
-			result._dbg.skip = "too_few_fruit_" + fruitCount;
+		result._dbg.fruitN = fruitCount;
+		result._dbg.fruitAmt = fruitAmount;
+		// 200 = um arbusto cheio = 2x o custo do celeiro em madeira.
+		if (fruitAmount < 200) {
+			result._dbg.skip = "pouca_fruta_" + fruitCount + "arb_" + fruitAmount;
 			return result;
 		}
 	}

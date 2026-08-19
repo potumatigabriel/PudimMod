@@ -793,6 +793,40 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 				dropsites.push({ "id": ent, "pos": cmpPos.GetPosition2D(), "types": cmpDropsite.GetTypes() || [], "isCC": dsIsCC });
 			}
 		}
+		// Fundação de dropsite conta como dropsite para efeito de decisão. O filtro
+		// special/filter/foundation.xml é `<Entity filtered="">`: só os componentes listados
+		// sobrevivem, e ResourceDropsite NÃO está lá — então a query acima é cega a obras em
+		// andamento, enquanto pudim_GetSmartDropsiteData (que monta a lista pelas classes de
+		// Identity, preservadas por `<Identity merge="">`) as enxerga. Essa assimetria era o
+		// bug relatado: o mod erguia o armazém na floresta B e, durante os ~30s de obra,
+		// o despachante continuava pontuando B como "sem dropsite" e mandando gente para a
+		// floresta A. Types vêm do template final via TemplateManager (o nome corrente é
+		// "foundation|structures/<civ>/<x>", ver Commands.js: "foundation|" + cmd.template).
+		else if (cmpTemplateManager) {
+			const cmpFnd = Engine.QueryInterface(ent, IID_Foundation);
+			if (cmpFnd) {
+				const cmpPos = Engine.QueryInterface(ent, IID_Position);
+				if (cmpPos && cmpPos.IsInWorld()) {
+					let tplName = null;
+					try { tplName = cmpTemplateManager.GetCurrentTemplateName(ent); } catch(e) {}
+					if (tplName && tplName.indexOf("foundation|") === 0) {
+						let tpl = null;
+						try { tpl = cmpTemplateManager.GetTemplate(tplName.slice(11)); } catch(e) {}
+						const rawTypes = tpl && tpl.ResourceDropsite && tpl.ResourceDropsite.Types;
+						if (rawTypes) {
+							const cmpDsIdent = Engine.QueryInterface(ent, IID_Identity);
+							dropsites.push({
+								"id": ent,
+								"pos": cmpPos.GetPosition2D(),
+								"types": rawTypes.split(/\s+/).filter(t => t),
+								"isCC": !!(cmpDsIdent && cmpDsIdent.HasClass("CivCentre")),
+								"pending": true
+							});
+						}
+					}
+				}
+			}
+		}
 
 		const cmpGatherer = Engine.QueryInterface(ent, IID_ResourceGatherer);
 		const cmpUnitAI = Engine.QueryInterface(ent, IID_UnitAI);

@@ -810,6 +810,9 @@ function pudim_RunAutoWork()
 								pudim_MarkModBuilt(fx, fz);
 								g_PudimLastDropsiteTimeByRes[ck] = nowLW;
 								pudim_ProtectBuilder(pd.builderId, nowLW + 30000);
+								// O dropsite nasceu por causa DESTE recurso-alvo: ao terminar,
+								// o construtor colhe ali mesmo em vez de voltar ao despacho.
+								pudim_SetRally([pd.builderId], w.targetResX, w.targetResZ, w.targetResType);
 								builtDropsite = true;
 								builtCount++;
 							}
@@ -918,6 +921,8 @@ function pudim_RunAutoWork()
 					// de 15:52. A proteção solta sozinha assim que ele fica ocioso, então não
 					// prende ninguém depois que a obra acaba.
 					pudim_ProtectBuilder(proactive.builderId, Date.now() + 30000);
+					// cand é o cluster que motivou a obra: o construtor colhe lá ao terminar.
+					pudim_SetRally([proactive.builderId], cand.x, cand.z, resKey);
 					pudim_Log("SUCCESS", "DROP", logLabel + " proativo em (" + foundX.toFixed(0) + "," + foundZ.toFixed(0) + ") antes da 1a colheita");
 					return; // 1 build por ciclo (respeita cooldown); demais candidatos tentam no próximo
 				}
@@ -933,8 +938,17 @@ function pudim_RunAutoWork()
 	// quem realmente está — resta barrar o comando ainda em voo.
 	const inFlightNow = {};
 	for (const id of pudim_GetInFlightBuilderIds()) inFlightNow[id] = true;
-	const idleWorkers = result.idleWorkers.filter(w =>
+	const idleCandidates = result.idleWorkers.filter(w =>
 		!inFlightNow[w.id] && !g_PudimDispatchedAt[w.id] && !proactiveBuilders[w.id]);
+
+	// Rally antes do despacho genérico: quem acabou de erguer um armazém/celeiro do mod vai
+	// colher NA floresta daquele dropsite, não no recurso de melhor score global. Sem esta
+	// precedência o despacho genérico reclamava o construtor no mesmo tique e a obra recém
+	// terminada ficava sem ninguém entregando nela.
+	const ralliedNow = pudim_ApplyRally(idleCandidates);
+	const ralliedIds = Object.keys(ralliedNow).map(Number);
+	if (ralliedIds.length > 0) pudim_MarkDispatched(ralliedIds, {});
+	const idleWorkers = idleCandidates.filter(w => !ralliedNow[w.id]);
 
 	// Agrupar trabalhadores por alvo direto (ex: cardume, animal) ou por coordenada genérica
 	let targetGroups = {};
@@ -1524,6 +1538,71 @@ var g_PudimDropsiteFoundationPos = {}; // entityId → { x, z }
 
 /** Acumulador de tempo para sistema de fundações de dropsite */
 var g_PudimFoundationAccum = 0;
+
+/**
+ * Rally pós-obra: para onde o construtor de um dropsite do mod deve ir colher quando a obra
+ * acabar. id → { x, z, res, specific, until }.
+ *
+ * Sem isto, o construtor terminava o armazém e caía no despacho genérico, que o mandava
+ * para o recurso de melhor score global — frequentemente a floresta de onde ele tinha vindo,
+ * do outro lado da base. O armazém ficava pronto e sem ninguém entregando nele. É o relato
+ * de 19/08: "mandou os trabalhadores na floresta sem armazém, daí fez armazém em outra
+ * floresta e não mandou os trabalhadores pra essa nova floresta".
+ */
+var g_PudimDropsiteRally = {};
+/** Janela de validade do rally. Acima disso a âncora provavelmente já não faz sentido. */
+const PUDIM_RALLY_WINDOW = 180000;
+
+/**
+ * Subtipo real por recurso, exigido por UnitAI: o estado FINDINGNEWTARGET da ordem
+ * GatherNearPosition filtra o próximo alvo com `type.specific == resourceType.specific`
+ * (UnitAI.js). Mandar só { generic } deixa specific === undefined, nada casa e a unidade
+ * para depois do primeiro alvo. Nomes conferidos em simulation/data/resources/*.json.
+ */
+const PUDIM_RES_SPECIFIC = { "wood": "tree", "food": "fruit", "stone": "rock", "metal": "ore" };
+
+/** Registra que estes construtores devem colher na âncora assim que ficarem ociosos. */
+function pudim_SetRally(ids, x, z, res) {
+	if (x === undefined || x === null || z === undefined || z === null || !res) return;
+	const until = Date.now() + PUDIM_RALLY_WINDOW;
+	const spec = PUDIM_RES_SPECIFIC[res] || "";
+	for (const id of ids) g_PudimDropsiteRally[id] = { x: x, z: z, res: res, specific: spec, until: until };
+}
+
+/**
+ * Tira dos ociosos quem tem rally pendente e manda colher na âncora do dropsite que acabou
+ * de erguer, em vez de devolvê-los ao despacho genérico. Retorna { id: true } dos resolvidos.
+ */
+function pudim_ApplyRally(idleList) {
+	const now = Date.now();
+	for (const id in g_PudimDropsiteRally)
+		if (now > g_PudimDropsiteRally[id].until) delete g_PudimDropsiteRally[id];
+
+	const groups = {}, taken = {};
+	for (const w of idleList) {
+		const r = g_PudimDropsiteRally[w.id];
+		if (!r) continue;
+		const k = Math.round(r.x) + "," + Math.round(r.z) + "," + r.res;
+		if (!groups[k]) groups[k] = { x: r.x, z: r.z, res: r.res, specific: r.specific, ids: [] };
+		groups[k].ids.push(w.id);
+		taken[w.id] = true;
+		delete g_PudimDropsiteRally[w.id];
+	}
+	for (const k in groups) {
+		const g = groups[k];
+		Engine.PostNetworkCommand({
+			"type": "gather-near-position",
+			"entities": g.ids,
+			"resourceType": { "generic": g.res, "specific": g.specific },
+			"resourceTemplate": "",
+			"x": g.x, "z": g.z,
+			"queued": false
+		});
+		pudim_Log("INFO", "DROP", "rally " + g.ids.length + " worker(s) p/ " + g.res +
+			" em (" + g.x.toFixed(0) + "," + g.z.toFixed(0) + ") apos a obra");
+	}
+	return taken;
+}
 
 /** Rastreamento de unidades em kite para evitar re-envio imediato */
 var g_PudimKiting = {}; // entId -> timestamp do último kite
@@ -2127,7 +2206,7 @@ function pudim_ProcessFarms()
 				"entities": [ev.soldierId],
 				"x": ev.soldierX,
 				"z": ev.soldierZ,
-				"resourceType": { "generic": "wood" },
+				"resourceType": { "generic": "wood", "specific": PUDIM_RES_SPECIFIC["wood"] },
 				"resourceTemplate": "",
 				"queued": false
 			});
@@ -2424,6 +2503,14 @@ function pudim_ProcessAdvancedAI()
 						// depois. Solta sozinha quando eles ficam ociosos.
 						const _dsProt = Date.now() + 30000;
 						for (const b of allBuilders) pudim_ProtectBuilder(b, _dsProt);
+						// Todo mundo que veio erguer este armazém fica colhendo AQUI quando a
+						// obra acabar. A âncora é a mata que justificou a obra (anchorX/Z do
+						// lado da simulação); se ela não vier, a própria posição do prédio
+						// serve — está, por construção, colada ao recurso.
+						pudim_SetRally(allBuilders,
+							dropsiteData.anchorX !== undefined ? dropsiteData.anchorX : foundX,
+							dropsiteData.anchorZ !== undefined ? dropsiteData.anchorZ : foundZ,
+							resKey);
 					}
 				}
 			}
@@ -2444,7 +2531,10 @@ function pudim_ProcessAdvancedAI()
 							"entities": redirectEnts,
 							"x": dropsiteData.redirectX,
 							"z": dropsiteData.redirectZ,
-							"resourceType": { "generic": resKey },
+							// specific é obrigatório: FINDINGNEWTARGET (UnitAI.js) escolhe o
+							// próximo alvo com `type.specific == resourceType.specific`. Sem
+							// ele o coletor esvaziava uma árvore e parava.
+							"resourceType": { "generic": resKey, "specific": PUDIM_RES_SPECIFIC[resKey] || "" },
 							"resourceTemplate": "",
 							"queued": false
 						});
@@ -2477,7 +2567,7 @@ function pudim_ProcessAdvancedAI()
 				Engine.PostNetworkCommand({
 					"type": "gather-near-position",
 					"entities": batch,
-					"resourceType": { "generic": redirect.resource, "specific": redirect.resource === "wood" ? "tree" : redirect.resource },
+					"resourceType": { "generic": redirect.resource, "specific": PUDIM_RES_SPECIFIC[redirect.resource] || "" },
 					"resourceTemplate": "",
 					"x": redirect.x, "z": redirect.z,
 					"queued": false, "force": false

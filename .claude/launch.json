@@ -2,6 +2,12 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "adotarfront",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "set ASPNETCORE_ENVIRONMENT=Production&& set ASPNETCORE_URLS=http://localhost:5221&& dotnet run --no-build --no-launch-profile --project D:\\inetpub\\wwwroot\\AdotarFront"],
+      "port": 5221
+    }
+    ,{
       "name": "mascote",
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "7788", "--directory", "C:\\Users\\gabri\\AppData\\Local\\Temp\\claude\\D--OneDrive-Documentos-My-Games-0ad-mods-PudimMod\\fd264a79-3cc7-4ec6-9be1-a51df8d88fb9\\scratchpad"],

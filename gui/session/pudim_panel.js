@@ -1836,6 +1836,9 @@ var g_PudimResearchSentAt = {};
 // a mesma pesquisa em loop) sem perder a tecnologia quando o estoque se recupera.
 var g_PudimResearchBlacklist = {};
 const PUDIM_RESEARCH_RETRY = 180000;
+/** Ultima tentativa de envio por tech (anti-rajada; ver pudim_ProcessAutoResearch) */
+var g_PudimResearchLastTry = {};
+const PUDIM_RESEARCH_RESEND_MIN = 30000;
 
 function pudim_ProcessAutoResearch()
 {
@@ -1872,13 +1875,26 @@ function pudim_ProcessAutoResearch()
 
 		if (!researchData.research || researchData.research.length === 0) return;
 		for (const item of researchData.research) {
+			// Nao repetir a mesma tech em rajada: se ja tentamos ha menos de
+			// PUDIM_RESEARCH_RESEND_MIN, espera. Sem isto o ciclo de 15s reenviava a mesma
+			// pesquisa dezenas de vezes enquanto ela nao entrasse na fila.
+			const lastTry = g_PudimResearchLastTry[item.tech] || 0;
+			if (now - lastTry < PUDIM_RESEARCH_RESEND_MIN) continue;
 			Engine.PostNetworkCommand({
 				"type": "research",
 				"template": item.tech,
 				"entity": item.building,
 				"metadata": null
 			});
-			g_PudimResearchSentAt[item.tech] = now;
+			// NAO sobrescrever se ja existe: este carimbo marca a PRIMEIRA tentativa e e o
+			// que alimenta o detector de 90s que poe a tech em quarentena. Como a auto-
+			// pesquisa roda a cada 15s, regravar aqui renovava o relogio a cada ciclo e a
+			// quarentena NUNCA disparava: no replay 2026-08-18_0007 o mod enviou
+			// gather_capacity_carts 98 vezes (451 comandos de research no total) porque a
+			// tech nunca entrava na fila e era reenviada indefinidamente.
+			if (!g_PudimResearchSentAt[item.tech])
+				g_PudimResearchSentAt[item.tech] = now;
+			g_PudimResearchLastTry[item.tech] = now;
 			pudim_Log("INFO", "RESEARCH", "pesquisando " + item.tech + " (score=" + item.score + ")");
 		}
 	} catch(e) {}

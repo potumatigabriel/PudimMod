@@ -192,7 +192,16 @@ function pudim_UpdateAllyBar() {
             nameObj.caption = prefix + nick + "  [color=\"" + phaseColor + "\"]" + phaseLabel + "[/color]";
             nameObj.textcolor = colorStr;
         }
-        if (popObj) popObj.caption = d.popCount + "/" + d.popLimit;
+        if (popObj) {
+            // Mesmo formato da barra superior do jogo: usados/teto-atual (maximo).
+            // O teto atual (GetPopulationLimit) e o espaco disponivel para crescer, dado
+            // pelas casas ja construidas; o valor entre parenteses e o maximo da partida.
+            const free = Math.max(0, (d.popLimit || 0) - (d.popCount || 0));
+            const freeColor = free <= 2 ? "255 120 120" : (free <= 6 ? "255 220 120" : "150 220 150");
+            popObj.caption = d.popCount + "/" + d.popLimit +
+                " [color=\"" + freeColor + "\"]+" + free + "[/color]" +
+                " [color=\"150 150 150\"](" + (d.popMax || d.popLimit) + ")[/color]";
+        }
 
         const g = d.gatherers || {};
         const rf = Math.floor((d.res || {}).food || 0);

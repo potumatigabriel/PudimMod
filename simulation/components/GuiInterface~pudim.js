@@ -2316,6 +2316,7 @@ GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
                 "isSelf": i === player,
                 "popCount": cmpAlly.GetPopulationCount(),
                 "popLimit": cmpAlly.GetPopulationLimit(),
+                "popMax": cmpAlly.GetMaxPopulation(),
                 "res": cmpAlly.GetResourceCounts(),
                 "phase": 1,
                 "isResearchingPhase": false,
@@ -2330,15 +2331,19 @@ GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
             
             const cmpStatisticsTracker = QueryPlayerIDInterface(i, IID_StatisticsTracker);
             if (cmpStatisticsTracker) {
-                let tkills = 0, tdeaths = 0;
-                if (cmpStatisticsTracker.enemyUnitsKilled) {
-                    for (let key in cmpStatisticsTracker.enemyUnitsKilled) tkills += cmpStatisticsTracker.enemyUnitsKilled[key];
-                }
-                if (cmpStatisticsTracker.unitsLost) {
-                    for (let key in cmpStatisticsTracker.unitsLost) tdeaths += cmpStatisticsTracker.unitsLost[key];
-                }
-                stats.kills = tkills;
-                stats.deaths = tdeaths;
+                // enemyUnitsKilled/unitsLost sao objetos com UMA CHAVE POR CLASSE de unidade
+                // (Infantry, Cavalry, Melee, Ranged, ...) mais um campo "total" que o motor
+                // inicializa em 0 e NUNCA incrementa para estes dois contadores
+                // (StatisticsTracker.js: so unitsTrained.total e buildingsConstructed.total
+                // sao incrementados). Somar todas as chaves contava a mesma morte varias
+                // vezes - uma por classe da unidade - e era por isso que o K/D aparecia
+                // inflado na barra de aliados.
+                // A classe "Unit" existe exatamente uma vez por unidade: e a que a propria
+                // tela de resumo do jogo usa (gui/summary/counters.js).
+                const ku = cmpStatisticsTracker.enemyUnitsKilled;
+                const lu = cmpStatisticsTracker.unitsLost;
+                stats.kills  = (ku && typeof ku.Unit === "number") ? ku.Unit : 0;
+                stats.deaths = (lu && typeof lu.Unit === "number") ? lu.Unit : 0;
             }
             
             const cmpTechMgr = QueryPlayerIDInterface(i, IID_TechnologyManager);

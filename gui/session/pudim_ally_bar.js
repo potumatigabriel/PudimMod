@@ -31,10 +31,14 @@ function pudim_LightenPlayerColor(c) {
         g = Math.min(255, Math.round(g * k));
         b = Math.min(255, Math.round(b * k));
     }
-    // Piso de luminância: mistura com branco se ainda estiver escuro demais
+    // Piso de luminância: mistura com branco se ainda estiver escuro demais.
+    // Misturar com branco na fração m da luminância L para: L + m*(255 - L).
+    // Logo, para atingir o alvo T: m = (T - L) / (255 - L). O denominador tem de ser
+    // (255 - L), não 255 — com 255 a mistura fica curta e o azul escuro do P1
+    // (10,10,190) parava em luminância 119, abaixo do piso (pego por teste).
     const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
     if (lum < 130) {
-        const m = (130 - lum) / 255;
+        const m = (130 - lum) / (255 - lum);
         r = Math.min(255, Math.round(r + (255 - r) * m));
         g = Math.min(255, Math.round(g + (255 - g) * m));
         b = Math.min(255, Math.round(b + (255 - b) * m));

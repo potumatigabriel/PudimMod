@@ -2017,23 +2017,38 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	}
 	
 	result._dbg.fc = farmCount;
-	// Limite dinâmico: ~1 fazenda por 5 workers, até 40 total (pop cap 200)
-	// O sistema de ratio já controla quando construir — este limite é apenas segurança
-	// Teto de fazendas construídas automaticamente. Acima disso o jogador decide se quer
-	// mais — o mod não continua expandindo sozinho indefinidamente.
-	// Teto proporcional à população. Fixo em 9, ele limitava a comida a 45 trabalhadores
-	// (9 x 5) em qualquer situação — com pesos 3/3 e pop 200 o alvo é ~100, então o déficit
-	// virava permanente e o excedente ia todo para a madeira. Com ~1 campo por 8 de
-	// população: 6 no mínimo (início), 13 em pop 100, 20 em pop 200 (100 vagas de comida).
-	// O custo em madeira segue sendo o freio real; madeira é justamente o que sobra.
-	const PUDIM_MAX_FARMS = Math.max(6, Math.min(20, Math.ceil(cmpPlayer.GetPopulationCount() / 8)));
+	// Teto FIXO de fazendas erguidas pelo mod. Acima disso quem decide é o jogador.
+	// Já foi proporcional à população (até 20 campos): resolvia o déficit permanente de
+	// comida com pop alta, mas em jogo virou 15 campos e 66 trabalhadores em comida com
+	// 7904 de comida parada no banco — 600 de madeira e a mão de obra toda enterrados em
+	// produção que ninguém consumia. Voltou para 9 por decisão do jogador em 19/08.
+	// 9 campos x 5 coletores = teto de 45 trabalhadores vindos de fazenda.
+	const PUDIM_MAX_FARMS = 9;
 	// Capacidade real de um campo, conferida em
 	// simulation/templates/template_structure_resource_field.xml: <MaxGatherers>5</MaxGatherers>
 	const PUDIM_FIELD_CAPACITY = 5;
 	if (farmCount >= PUDIM_MAX_FARMS || ccPositions.length === 0) { result._dbg.reason = "limit"; return result; }
 
-	const hasWoodForFarm = cmpPlayer.GetResourceCounts().wood >= 100;
+	const resCounts = cmpPlayer.GetResourceCounts();
+	const hasWoodForFarm = resCounts.wood >= 100;
 	if (!hasWoodForFarm) { result._dbg.reason = "nowood"; return result; }
+
+	// Freio por ESTOQUE: a proporção de coleta distribui por peso, não por necessidade, e
+	// por isso pedia campo novo mesmo com o celeiro transbordando. Comida se gasta em
+	// unidade; se o estoque já cobre encher toda a população restante com folga larga, não
+	// há o que fazer com mais comida — construir campo aí é queimar madeira e mão de obra.
+	// 40 por vaga de população cobre com folga o custo em comida de qualquer unidade de
+	// cidadão (50) somado ao que ela consome até render; os 1000 fixos são o colchão para
+	// quando a população já está no teto e ainda assim convém manter alguma reserva.
+	const popNow = cmpPlayer.GetPopulationCount();
+	const popCap = cmpPlayer.GetMaxPopulation();
+	const foodComfort = 40 * Math.max(0, popCap - popNow) + 1000;
+	result._dbg.food = Math.round(resCounts.food);
+	result._dbg.fcomf = Math.round(foodComfort);
+	if (resCounts.food > foodComfort) {
+		result._dbg.reason = "estoque_alto_" + Math.round(resCounts.food) + ">" + Math.round(foodComfort);
+		return result;
+	}
 	
 	let currentFoodGatherersCount = 0;
 	let farFoodWorkers = [];
@@ -2249,11 +2264,10 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	const effectiveTotal = totalGatherers + soldierWoodCount;
 	// Quantos workers de comida o ratio exige no total
 	const desiredFoodWorkers = Math.min(Math.ceil(effectiveTotal * foodW / totalW), totalGatherers);
-	// Fruta cobre até naturalFoodCapacity workers — fazendas cobrem o excedente
-	// 9 fazendas x 5 coletores = teto de 45 trabalhadores em comida vinda de fazenda.
-	// Sem esse limite o alvo podia pedir mais gente do que as fazendas comportam, gerando
-	// déficit permanente: o mod tentaria construir para sempre e os workers excedentes
-	// ficariam sem vaga.
+	// Fruta cobre até naturalFoodCapacity workers — fazendas cobrem o excedente.
+	// PUDIM_MAX_FARMS x PUDIM_FIELD_CAPACITY = 45 vagas de fazenda. Sem esse limite o alvo
+	// pedia mais gente do que os campos comportam: o mod tentaria construir para sempre e
+	// os excedentes ficariam sem vaga (era o `semvaga` alto no log de BALANCE).
 	const farmWorkerCap = PUDIM_MAX_FARMS * PUDIM_FIELD_CAPACITY;
 	const farmWorkerTarget = Math.min(farmWorkerCap,
 		Math.max(0, desiredFoodWorkers - naturalFoodCapacity));

@@ -1540,8 +1540,48 @@ GuiInterface.prototype.pudim_GetPanicData = function(player, data)
 	if (anchorPositions.length === 0) return result;
 	result.noCivCentre = ccPositions.length === 0;
 
+	const cmpTerritoryManagerPanic = Engine.QueryInterface(SYSTEM_ENTITY, IID_TerritoryManager);
+
+	/**
+	 * Um inimigo só conta como ameaça se demonstrar intenção hostil. Presença não basta.
+	 *
+	 * A regra antiga era "combatente inimigo a ≤220m de uma âncora da base" — 220m cobre
+	 * bem mais que o próprio território na maioria dos mapas, então tropa passando de
+	 * largo, indo brigar com um vizinho, disparava pânico total. No log de 19/08 foi
+	 * "PÂNICO iniciado! 25 inimigo(s), aliados=5" numa partida em que ninguém nos atacou.
+	 *
+	 * Vale como ameaça quem:
+	 *   (a) está com ordem de Attack sobre algo meu ou de aliado — hostilidade explícita; ou
+	 *   (b) está DENTRO do meu território — invasão, mesmo sem ter batido ainda.
+	 * Passar perto por fora da fronteira não conta.
+	 */
+	const pudimIsHostile = function(e) {
+		const cmpEnemyAI = Engine.QueryInterface(e, IID_UnitAI);
+		if (cmpEnemyAI) {
+			const orders = cmpEnemyAI.GetOrders();
+			const o = orders && orders.length > 0 ? orders[0] : null;
+			if (o && o.type === "Attack" && o.data && o.data.target) {
+				const cmpTgtOwn = Engine.QueryInterface(o.data.target, IID_Ownership);
+				if (cmpTgtOwn) {
+					const tgtOwner = cmpTgtOwn.GetOwner();
+					// Só ordem de ataque contra mim ou contra um aliado meu conta; inimigo
+					// atacando outro inimigo do outro lado do mapa não é problema nosso.
+					// Diplomacia vem de IID_Diplomacy (na Alpha 28 saiu do componente Player).
+					if (tgtOwner === player || (tgtOwner > 0 && cmpDiplomacy.IsAlly(tgtOwner)))
+						return true;
+				}
+			}
+		}
+		if (!cmpTerritoryManagerPanic) return false;
+		const ep = Engine.QueryInterface(e, IID_Position);
+		if (!ep || !ep.IsInWorld()) return false;
+		const p = ep.GetPosition2D();
+		return cmpTerritoryManagerPanic.GetOwner(p.x, p.y) === player;
+	};
+
 	// Inimigos combatentes dentro de 220m de qualquer âncora da base (CC ou, se o CC caiu,
-	// outra estrutura / a própria tropa — ver bloco acima)
+	// outra estrutura / a própria tropa — ver bloco acima). O raio agora é só o pré-filtro
+	// barato; quem decide é pudimIsHostile.
 	const enemyNear = [];
 	const seenEnemies = new Set();
 	for (const ccPos of anchorPositions) {
@@ -1551,7 +1591,7 @@ GuiInterface.prototype.pudim_GetPanicData = function(player, data)
 			const id = Engine.QueryInterface(e, IID_Identity);
 			if (id && (id.HasClass("CitizenSoldier") || id.HasClass("FastMoving") || id.HasClass("Hero"))) {
 				const pos = Engine.QueryInterface(e, IID_Position);
-				if (pos && pos.IsInWorld()) { seenEnemies.add(e); enemyNear.push(e); }
+				if (pos && pos.IsInWorld() && pudimIsHostile(e)) { seenEnemies.add(e); enemyNear.push(e); }
 			}
 		}
 	}
@@ -1733,49 +1773,16 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 	const theta       = (data && typeof data.theta === "number") ? data.theta : 0;
 	const step        = 20;
 
-	// Modo deep com base inimiga conhecida: orbitar ao redor dela a distância segura
-	const enemyBasePos = (data && data.enemyBasePos) ? data.enemyBasePos : null;
-	if (mode === "deep" && enemyBasePos) {
-		const ORBIT_DIST = 120;
-		// Passo derivado do raio de chegada REAL, não fixo.
-		// O cliente considera "chegou" a menos de sqrt(0.3)×gridSize ≈ 0.55×gridSize, e
-		// gridSize é mapSize/8 — ou seja, escala com o mapa. Um passo fixo de 0.7 rad dá
-		// corda de ~82m: serve num mapa de 1024 (chegada ~70m) e falha num de 1536, onde a
-		// chegada é ~105m e engole a corda — o scout "chega" no ponto seguinte sem sair do
-		// lugar e queima a órbita inteira parado. Com 30% de folga sobre o raio de chegada,
-		// cada parada fica sempre longe o bastante para exigir deslocamento de verdade.
-		const arrivalRadius = 0.5477 * gridSize;
-		const sinHalf = Math.min(0.95, (arrivalRadius * 1.3) / (2 * ORBIT_DIST));
-		const ORBIT_STEP = 2 * Math.asin(sinHalf);
-		// Varredura PROGRESSIVA a partir de theta: devolve o primeiro ponto livre à frente.
-		// Antes usava argmax de cos(a - theta); com o anel quase todo bloqueado sobravam
-		// poucos pontos e o scout ricocheteava entre eles para sempre (loop de 3 pontos
-		// observado em jogo). Avançar sempre no mesmo sentido garante contorno de verdade.
-		for (let k = 1; k <= 32; ++k) {
-			const a = theta + k * ORBIT_STEP;
-			const cx = enemyBasePos.x + Math.cos(a) * ORBIT_DIST;
-			const cz = enemyBasePos.z + Math.sin(a) * ORBIT_DIST;
-			if (cx < 15 || cx > mapSize - 15 || cz < 15 || cz > mapSize - 15) continue;
-			const col = Math.floor(cx / gridSize);
-			const row = Math.floor(cz / gridSize);
-			if (blocked[col + "," + row]) continue;
-			// orbitAngle volta ao cliente para ele avançar theta e nunca reescolher este ponto
-			return { "x": cx, "z": cz, "orbitAngle": a };
-		}
-		// Volta inteira bloqueada: cair na varredura normal de fronteira
-	}
-
-	let bestPos   = { "x": -1, "z": -1 };
-	let bestScore = -Infinity;
-
-	// Estado de exploração do tile. Sem isto o score do modo profundo era só ângulo +
-	// distância do próprio CC: o scout escolhia o tile mais longe na direção da vez, já
-	// tivesse ele sido explorado ou não — daí ele revisitar o que ele mesmo (ou outra
-	// unidade) já tinha aberto. "hidden" = nunca visto, "fogged" = explorado sem visão
-	// agora, "visible" = alguém está enxergando neste instante.
-	// A API é sondada com fallback: não consegui confirmar GetLosVisibilityPosition neste
-	// build, e uma chamada inexistente dentro do componente derrubaria a consulta inteira.
-	// Sem ela o scout apenas volta ao comportamento anterior.
+	// Estado de exploração do tile. Sem isto o modo profundo escolhia por ângulo e distância
+	// do CC, tivesse o tile sido explorado ou não — daí revisitar o que ele mesmo (ou um
+	// aliado) já tinha aberto. "hidden" = nunca visto, "fogged" = explorado sem visão agora,
+	// "visible" = alguém está enxergando neste instante.
+	//
+	// A API está confirmada: ICmpRangeManager.cpp registra
+	// DEFINE_INTERFACE_METHOD("GetLosVisibilityPosition", GetLosVisibilityPosition_wrapper),
+	// que devolve exatamente essas três strings. A implementação usa GetSharedLosMask(player),
+	// então o que um ALIADO explorou já conta como explorado para nós — que é o pedido.
+	// O try/catch fica como seguro barato: uma chamada ausente derrubaria a consulta inteira.
 	let losAt = null;
 	try {
 		if (cmpRangeManager && typeof cmpRangeManager.GetLosVisibilityPosition === "function") {
@@ -1786,6 +1793,68 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 			};
 		}
 	} catch (e) { losAt = null; }
+
+	// Modo deep com base inimiga conhecida: orbitar ao redor dela a distância segura
+	const enemyBasePos = (data && data.enemyBasePos) ? data.enemyBasePos : null;
+	if (mode === "deep" && enemyBasePos) {
+		// 120m é a distância tática: fora do alcance de torre e de tropa parada na base.
+		// O piso precisa subir em mapa gigante: o raio de chegada escala com o mapa
+		// (0.5477 × mapSize/8) e num mapa de 2048 chega a 140m — maior que a corda máxima
+		// de um anel de 120m com o passo limitado a 1.2 rad (2·120·sin(0.6) = 136m). O
+		// scout "chegava" no ponto seguinte sem sair do lugar e queimava a órbita parado.
+		// Com 1.15 × raio de chegada a corda máxima (1.129 × R) fica sempre acima dele, e
+		// afastar-se mais da base inimiga só torna a órbita mais segura.
+		const arrivalR0 = 0.5477 * gridSize;
+		const ORBIT_DIST = Math.max(120, arrivalR0 * 1.15);
+		// Passo derivado do raio de chegada REAL, não fixo.
+		// O cliente considera "chegou" a menos de sqrt(0.3)×gridSize ≈ 0.55×gridSize, e
+		// gridSize é mapSize/8 — ou seja, escala com o mapa. Um passo fixo de 0.7 rad dá
+		// corda de ~82m: serve num mapa de 1024 (chegada ~70m) e falha num de 1536, onde a
+		// chegada é ~105m e engole a corda — o scout "chega" no ponto seguinte sem sair do
+		// lugar e queima a órbita inteira parado. Com 30% de folga sobre o raio de chegada,
+		// cada parada fica sempre longe o bastante para exigir deslocamento de verdade.
+		const arrivalRadius = arrivalR0;
+		// Passo angular por COMPRIMENTO DE ARCO (s = d / R), não pela corda exata.
+		// A versão anterior resolvia a corda com Math.asin, e o motor recusa asin dentro da
+		// simulação: "Math.asin() does not yet have a synchronization safe implementation" —
+		// erro vermelho em tela a cada waypoint e risco de dessincronizar em multiplayer.
+		// Como corda = 2R·sin(s/2) ≤ R·s, usar o arco subestima a corda em ~2% no passo
+		// típico (s≈0.7); o fator 1.2 cobre a diferença com folga e a conta usa só divisão.
+		const ORBIT_STEP = Math.min(1.2, (arrivalRadius * 1.3 * 1.2) / ORBIT_DIST);
+		// Varredura PROGRESSIVA a partir de theta: devolve o primeiro ponto livre à frente.
+		// Antes usava argmax de cos(a - theta); com o anel quase todo bloqueado sobravam
+		// poucos pontos e o scout ricocheteava entre eles para sempre (loop de 3 pontos
+		// observado em jogo). Avançar sempre no mesmo sentido garante contorno de verdade.
+		//
+		// Duas passadas: a primeira só aceita ponto do anel AINDA NÃO EXPLORADO (por nós ou
+		// por aliado, via GetSharedLosMask). Sem ela a órbita era puro ângulo e o scout
+		// refazia arcos que ele mesmo já tinha aberto — a queixa "fica re-explorando o que
+		// já ta explorado". A segunda passada aceita qualquer ponto livre, para que uma
+		// órbita inteiramente conhecida ainda dê a volta em vez de travar.
+		for (let pass = 0; pass < 2; ++pass) {
+			const soPontosNovos = (pass === 0 && !!losAt);
+			for (let k = 1; k <= 32; ++k) {
+				const a = theta + k * ORBIT_STEP;
+				const cx = enemyBasePos.x + Math.cos(a) * ORBIT_DIST;
+				const cz = enemyBasePos.z + Math.sin(a) * ORBIT_DIST;
+				if (cx < 15 || cx > mapSize - 15 || cz < 15 || cz > mapSize - 15) continue;
+				const col = Math.floor(cx / gridSize);
+				const row = Math.floor(cz / gridSize);
+				if (blocked[col + "," + row]) continue;
+				if (soPontosNovos && losAt(cx, cz) !== "hidden") continue;
+				// orbitAngle volta ao cliente para ele avançar theta e nunca reescolher este ponto
+				return { "x": cx, "z": cz, "orbitAngle": a, "unexplored": soPontosNovos, "losOk": !!losAt };
+			}
+			if (!losAt) break; // sem leitura de exploração as duas passadas seriam idênticas
+		}
+		// Volta inteira bloqueada: cair na varredura normal de fronteira
+	}
+
+	let bestPos   = { "x": -1, "z": -1 };
+	let bestScore = -Infinity;
+	// Trilho paralelo dos tiles nunca vistos (ver a escolha final, depois da varredura)
+	let bestNewPos   = null;
+	let bestNewScore = -Infinity;
 
 	// Posição atual do próprio scout. Com a leitura de exploração disponível, é ELA que
 	// passa a guiar a escolha entre os tiles inexplorados — ver o score mais abaixo.
@@ -1869,12 +1938,27 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 				score = angleCos * 100 + distMod;
 			}
 
-			if (score > bestScore) {
+			if (exploreMod > 0) {
+				// Trilho separado só para tiles NUNCA vistos. O bônus de +1000 sozinho não
+				// garantia a preferência: distScout entra com peso 1.0 e passa de 1000 num
+				// mapa grande, então um tile já explorado colado no scout podia ganhar de um
+				// inexplorado do outro lado. Com dois trilhos, explorado nunca vence
+				// inexplorado — só é usado quando não sobrou nenhum inexplorado.
+				if (score > bestNewScore) {
+					bestNewScore = score;
+					bestNewPos = { "x": x, "z": z, "unexplored": true };
+				}
+			} else if (score > bestScore) {
 				bestScore = score;
-				bestPos = { "x": x, "z": z, "unexplored": exploreMod > 0 };
+				bestPos = { "x": x, "z": z, "unexplored": false };
 			}
 		}
 	}
+
+	// Havendo qualquer tile nunca visto, é ele — mapa desconhecido vale mais que qualquer
+	// heurística de ângulo ou distância. É o que faltava para o scout parar de refazer o que
+	// ele (ou um aliado) já tinha aberto.
+	if (bestNewPos) bestPos = bestNewPos;
 
 	// losOk diz se a leitura de exploração existiu neste build ou se caiu no fallback.
 	// Sem esse sinal não há como julgar em jogo se o scout melhorou ou se a API faltou.

@@ -2992,7 +2992,7 @@ function pudim_ReturnPanicUnitsToWork(manual)
 				+ (g_PudimNoCivCentre ? "sem CC" : "cerco: " + g_PudimSheltersUnderSiege + " abrigo(s)")
 				+ ") — use 'Voltar ao Trabalho' para soltar manualmente");
 		}
-		return;
+		return false; // nada foi solto — quem chamou precisa saber
 	}
 	g_PudimHoldGarrisonLogged = false;
 
@@ -3066,6 +3066,7 @@ function pudim_ReturnPanicUnitsToWork(manual)
 
 	const statusEl = Engine.TryGetGUIObjectByName("pudim_panicStatus");
 	if (statusEl) statusEl.caption = "Situação: Calma";
+	return true;
 }
 
 
@@ -3115,8 +3116,16 @@ function pudim_ProcessPanic()
 		// continuar ativa (ex: inimigo parado sem atacar perto do CC mantém "underAttack"=true pra sempre).
 		if (g_PudimPanicMode && g_PudimPanicModeStartTime > 0 &&
 		    (now - g_PudimPanicModeStartTime > PUDIM_PANIC_MAX_DURATION)) {
-			pudim_Log("WARN", "PANIC", "timeout de segurança (" + Math.round(PUDIM_PANIC_MAX_DURATION / 1000) + "s) — forçando retorno ao trabalho");
-			pudim_ReturnPanicUnitsToWork();
+			if (pudim_ReturnPanicUnitsToWork()) {
+				pudim_Log("WARN", "PANIC", "timeout de segurança (" + Math.round(PUDIM_PANIC_MAX_DURATION / 1000) + "s) — forçando retorno ao trabalho");
+				return;
+			}
+			// A trava de "sem CC / abrigo cercado" recusou a soltura, e ela NÃO limpa
+			// g_PudimPanicModeStartTime. Sem rearmar a janela aqui, a condição continuava
+			// verdadeira em todo tique e o timeout redisparava a cada 1,5s: foram 119 linhas
+			// de PANIC no log de 19/08, uma por tique até o fim da partida. Rearmando, a
+			// próxima tentativa fica para daqui a PUDIM_PANIC_MAX_DURATION.
+			g_PudimPanicModeStartTime = now;
 			return;
 		}
 

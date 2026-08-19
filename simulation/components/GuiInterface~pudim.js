@@ -4143,6 +4143,9 @@ GuiInterface.prototype.pudim_GetSmartDropsiteData = function(player, data)
 // Auto-research: detecta tecnologias disponíveis e agenda pesquisa quando há recursos sobrando.
 // Usa IID_Researcher.GetTechnologiesList() para obter as techs REAIS do building, sem hardcode.
 // Retorna: { research: [{ building: entityId, tech: techName, score: number }] }
+/** População mínima para o mod investir em tecnologia de combate (forja) */
+const PUDIM_FORGE_MIN_POP = 150;
+
 GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 {
 	const result = { research: [] };
@@ -4204,12 +4207,39 @@ GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 		return out;
 	};
 
+	/**
+	 * true se a tech e de COMBATE (ataque/resistencia/saude de unidades), pelo que ela
+	 * realmente modifica. Classificar por nome nao funcionava: as techs da forja se chamam
+	 * soldier_attack_melee_01, soldier_resistance_hack_01, etc. - nenhuma casa com os
+	 * padroes "attack_infantry"/"armor_infantry" que o codigo procurava, entao caiam no
+	 * score 0 e a forja NUNCA era pesquisada sozinha.
+	 */
+	const isCombatTech = (tech) => {
+		let tpl = null;
+		try { tpl = TechnologyTemplates.Get(tech); } catch(e) { return false; }
+		if (!tpl || !tpl.modifications) return false;
+		for (const mod of tpl.modifications) {
+			const v = mod && mod.value;
+			if (typeof v !== "string") continue;
+			if (v.indexOf("Attack/") === 0 || v.indexOf("Resistance/") === 0 ||
+			    v.indexOf("Health/") === 0)
+				return true;
+		}
+		return false;
+	};
+
+	// Techs de combate (forja) so a partir de POP > 150: antes disso o investimento rende
+	// mais na economia, e com exercito pequeno o bonus multiplica pouca unidade.
+	const popNow = cmpPlayer.GetPopulationCount();
+	const combatAllowed = popNow > PUDIM_FORGE_MIN_POP;
+
 	/** true se a tech é permitida na fase atual */
 	const allowedInPhase = (tech) => {
 		const n = tech.toLowerCase();
-		// Combate e saúde: só na Fase 3
+		// Combate e saúde: liberados quando a população passa de 150
+		if (isCombatTech(tech)) return combatAllowed;
 		if (n.indexOf("attack_") !== -1 || n.indexOf("armor_") !== -1 || n.indexOf("health_") !== -1)
-			return isPhase3;
+			return combatAllowed;
 
 		const resSet = techResources(tech);
 		if (resSet.size === 0) return isPhase3; // não é de coleta: trata como não-prioritária
@@ -4265,8 +4295,13 @@ GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 		if (n.indexOf("mining") !== -1 || n.indexOf("silver") !== -1) return 84;
 		if (n.indexOf("gather_") !== -1) return 76;
 		if (n.indexOf("health_") !== -1) return 30;
-		if (n.indexOf("attack_infantry") !== -1 || n.indexOf("armor_infantry") !== -1) return 20;
-		if (n.indexOf("attack_cavalry") !== -1 || n.indexOf("armor_cavalry") !== -1) return 15;
+		// Techs de combate (forja): reconhecidas pelo que modificam, nao pelo nome.
+		// Ataque rende mais que resistencia; ambas so chegam aqui na Fase 3.
+		if (isCombatTech(tech)) {
+			if (n.indexOf("attack") !== -1) return 60;
+			if (n.indexOf("resistance") !== -1 || n.indexOf("armor") !== -1) return 55;
+			return 50;
+		}
 		return 0; // qualquer outra tech: não pesquisar automaticamente
 	};
 
@@ -4346,9 +4381,17 @@ GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 		result.research.push({ building: ent, tech: bestTech, score: bestScore });
 	}
 
-	// Ordenar por score e limitar a 3 pesquisas simultâneas
+	// Ordenar por score e limitar as pesquisas simultâneas.
+	// O teto fixo de 3 cortava a segunda forja: com armazém + celeiro + forja ja se
+	// gastavam os 3 slots. Com recursos folgados o teto sobe, de modo que cada forja possa
+	// tocar um upgrade ao mesmo tempo (pedido do jogador) sem travar a economia quando o
+	// banco esta apertado.
+	const richer = total > 2500 ||
+		(res.food > 1200 && res.wood > 1200) ||
+		(res.metal > 800 && res.stone > 800);
+	const maxParallelResearch = richer ? 8 : 3;
 	result.research.sort((a, b) => b.score - a.score);
-	result.research = result.research.slice(0, 3);
+	result.research = result.research.slice(0, maxParallelResearch);
 	return result;
 };
 

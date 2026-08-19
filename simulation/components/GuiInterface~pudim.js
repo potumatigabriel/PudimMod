@@ -4104,6 +4104,18 @@ GuiInterface.prototype.pudim_GetSmartDropsiteData = function(player, data)
 			const step = Math.ceil(rawSeeds.length / MAX_SEEDS);
 			seedPositions = rawSeeds.filter((_, i) => i % step === 0);
 		}
+		// Centro de onde os trabalhadores REALMENTE estao coletando. Sem isto a ancora
+		// era escolhida so pela densidade e o armazem ia parar na maior floresta do
+		// territorio, longe da turma: em jogo (log 20260819-145022) o deposito nasceu em
+		// (809,170) com densidade 44 enquanto a equipe cortava em outro canto, e cada
+		// entrega virava uma caminhada.
+		let wcX = null, wcZ = null;
+		if (activePos && activePos.length > 0) {
+			wcX = activePos.reduce((a, q) => a + q.x, 0) / activePos.length;
+			wcZ = activePos.reduce((a, q) => a + q.z, 0) / activePos.length;
+		}
+
+		let bestScore = -1;
 		for (const sp of seedPositions) {
 			const pos2D = { x: sp.x, y: sp.z };
 			const nearby = cmpRangeManager.ExecuteQueryAroundPos(pos2D, 0, 50, [0], IID_ResourceSupply, false);
@@ -4116,10 +4128,23 @@ GuiInterface.prototype.pudim_GetSmartDropsiteData = function(player, data)
 				if (targetSpecific && rt.specific !== targetSpecific) continue;
 				cnt++;
 			}
-			if (cnt > anchorDensity) { anchorDensity = cnt; anchorX = sp.x; anchorZ = sp.z; }
+			// Densidade PONDERADA pela distancia ate os coletores: a entrega e ida e volta,
+			// entao arvore longe rende menos por minuto do que arvore perto. A 50m o peso
+			// cai pela metade, a 150m para um quarto — assim uma mata media ao lado da
+			// equipe ganha de uma mata enorme do outro lado do territorio.
+			let score = cnt;
+			if (wcX !== null) {
+				const dx = sp.x - wcX, dz = sp.z - wcZ;
+				score = cnt / (1 + Math.sqrt(dx * dx + dz * dz) / 50);
+			}
+			if (score > bestScore) { bestScore = score; anchorDensity = cnt; anchorX = sp.x; anchorZ = sp.z; }
 		}
 		result._dbg.density = anchorDensity;
 		result._dbg.treesCnt = seedPositions.length;
+		if (wcX !== null) {
+			const adx = anchorX - wcX, adz = anchorZ - wcZ;
+			result._dbg.anchorToWorkers = Math.round(Math.sqrt(adx * adx + adz * adz));
+		}
 	}
 
 	// Limiar de dropsite: para madeira usa 85% da dist âncora→CC (CC é alternativa viable).

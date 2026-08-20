@@ -4,7 +4,11 @@ A quality-of-life mod for **0 A.D. Alpha 28 (Boiorix)**. It cuts micromanagement
 economy and adds tactical tooling — without ever desyncing a multiplayer match.
 
 Everything runs in the GUI layer and every action goes out as a standard network command, so all
-clients stay in lockstep.
+clients stay in lockstep. **Players and spectators without the mod can join your match**: nothing the
+mod ships under `simulation/` changes how the game simulates, and `tools/test_mp_safety.js` enforces
+that as a contract rather than a promise — it fails the build if a file there ever gains executable
+code, component state, a non-vanilla network command, or a Math function the engine has not made
+deterministic.
 
 > **No dependencies beyond 0 A.D. itself.** PudimMod ships its own `pudim_patchApplyN`
 > helper for patching vanilla functions, so it does not need AutoCiv — and because the
@@ -104,9 +108,15 @@ is computed, not guessed: filling a load takes `capacity / rate` and the round t
 fruit, 64 m for wood, 129 m for stone and metal**. It reads the unit's own components, so gathering
 and speed upgrades move the threshold on their own.
 
-**Auto-queue** keeps the training queue full at the civic centre and barracks, learns the batch size
-you configured, and works around the engine bug that silently shrinks a batch when resources run
-short. Female citizens stop at 50, after which production switches to soldiers.
+**Auto-queue** keeps the training queue full at the civic centre and barracks and works around the
+engine bug that silently shrinks a batch when resources run short.
+
+**It never changes the unit type you picked.** Whatever you put in a building's queue is what gets
+refilled there — no villager preference, and the 50-female cap does not override it either. The mod
+only chooses the type in a building where you never chose anything. Batch size follows you too: put
+5, get 5 back. Only the *quantity* adapts to your stock (fewer when short, back to full when the
+bank recovers) — never the type. It also stops re-enabling auto-queue at the population cap or with
+no resources, where the engine refuses and prints an error across your screen.
 
 **Auto-houses** builds houses before the population cap blocks training, with a cooldown that adapts
 to how many production buildings you own.
@@ -114,7 +124,8 @@ to how many production buildings you own.
 **Auto-research** is deliberately limited to the **storehouse, farmstead and forge** — never the
 civic centre, fortress or barracks, and it never advances the phase: that stays your call. Priority
 follows the phase: phase 1 unlocks food, wood and carrying capacity; phase 2 adds stone and metal;
-phase 3 adds combat and health. Carrying-capacity techs (Baskets → Wheelbarrow → Cart) rank highest
+phase 3 adds combat and health. **Stone and metal techs skip the wait when their slider is above
+zero** — a weight above zero means someone is mining now, so speeding that up already pays off. Carrying-capacity techs (Baskets → Wheelbarrow → Cart) rank highest
 among gathering techs, since they add to all four resources at once. A tech that never reaches the
 queue within 90 s is blacklisted for the session.
 
@@ -128,6 +139,10 @@ queue within 90 s is blacklisted for the session.
 - **Focus fire** — your soldiers concentrate on one target instead of each picking a different enemy.
 - **Defensive garrison** — workers shelter in nearby buildings during a raid and come back out once
   it is calm, with cooldowns that prevent the garrison/ungarrison loop that used to stall the economy.
+  Houses come first (there are many, they are spread out, and it leaves the civic centre free for the
+  military garrison that makes it shoot), then the civic centre, and a threatened shelter still beats
+  open ground. Within each tier the nearest one wins. **With every shelter full they run** — away
+  from the attacker, far enough to leave its actual weapon range.
 - **Panic mode** — on a serious attack, everything stops and the workers are protected. **Back to
   Work** returns them. Panic needs **real hostility**, not proximity: an enemy counts only if it has
   an attack order on something of yours or an ally's, or if it is standing inside your territory.
@@ -145,8 +160,10 @@ Select cavalry and pick a mode:
 - **Deep** — heads for the **far side of the map**, away from your base and your allies', because
   that is where the enemy usually is. It never re-covers ground already explored — yours *or an
   ally's*, since the engine's shared line of sight is what it reads. Once the enemy base is found it
-  circles at a safe distance (at least 120 m, scaled up on very large maps), skipping arcs it has
-  already opened.
+  **follows the border of their territory** rather than a fixed ring, skipping arcs it has already
+  opened. Nothing that shoots ever gets in range: destination *and route* are checked against every
+  enemy attacker's real reach, and sectors that shot at it go on a blacklist. Surrounded, it retreats
+  home — surviving comes first.
 
 On contact the scout **runs directly away from the enemy**, not back to the base, and only resumes
 exploring after two consecutive clear checks. Enemy structures blacklist their sector permanently;
@@ -214,6 +231,15 @@ Portuguese or English, detected automatically from the game's language. To force
   speed — about 45 m for fruit, 64 m for wood, 129 m for stone and metal, replacing a flat 100 m.
 - Every gather-near-position order now carries the resource subtype. Without it the engine's
   FINDINGNEWTARGET state matches nothing and the gatherer stops after emptying one target.
+- **Auto-queue never changes the unit type you picked.** It rebuilt the choice from scratch on every
+  refill, with an explicit villager preference, so 5 warriors queued at the civic centre came back as
+  2 villagers. What you queue in a building is now what gets refilled there, at your batch size; only
+  the quantity still adapts to your stock.
+- Auto-queue also stops re-enabling itself at the population cap or with no resources, where the
+  engine refuses and prints "could not set auto-queue" across the screen every 3 s.
+- **Stone and metal techs no longer wait for phase 2 when their slider is above zero.** The wait made
+  sense with both at zero — nobody is mining, so the tech yields nothing — but a weight above zero
+  means someone is mining right now.
 
 **Military**
 
@@ -222,6 +248,14 @@ Portuguese or English, detected automatically from the game's language. To force
   triggered a full panic with no attack taking place.
 - Fixed a **panic timeout loop**: when the "no civic centre / shelter under siege" lock refused to
   ungarrison, the 120 s valve re-fired every tick — 119 log lines in one match.
+- **Workers under attack take the nearest house.** In the "we can defend" branch the shelter list was
+  filtered to the civic centre alone; the houses were already in the list and simply went unused.
+  With 183 population the civic centre filled in the first ~20 units and everyone else stood there
+  being killed next to empty houses.
+- **With every shelter full they run**, away from the attacker. The base bearing is the opposite of
+  the nearby enemies' centre of mass, but that alone points a surrounded worker straight into a
+  second group, so it tries seven bearings across a ±60° fan and takes the one that ends up furthest
+  from the closest enemy. The distance comes from the attackers' real weapon reach plus 30 m.
 
 **Scouting**
 
@@ -236,12 +270,29 @@ Portuguese or English, detected automatically from the game's language. To force
 - Orbit radius now scales with map size. On a 2048 map the arrival radius (140 m) exceeded the
   largest possible chord of a 120 m ring, so the scout "arrived" without moving and burned the orbit
   standing still.
+- **The orbit follows the enemy's territory border** instead of a fixed 120 m ring. The ring was
+  measured from the civic centre and knew nothing about towers, so one tower near the edge put the
+  scout in range. Civic centre, defensive tower, outpost and fortress all reach 60 m, and the civic
+  centre's territory radius is 140 m — following the border puts the scout at ~158 m, nearly 100 m
+  clear of all of them.
+- **The route is checked too, not just the destination.** Two safe waypoints joined by a line across
+  the base is still a death sentence: that was how the scout crossed the civic centre's range without
+  ever stopping inside it. The path is now sampled every 12 m, shorter than any forbidden radius.
+- Forbidden radius = real weapon reach (`Attack.GetFullAttackRange`, so enemy range upgrades tighten
+  it on their own) plus 25 m for a building, plus two seconds of its own movement for a unit. Those
+  zones go on the scout's blacklist, and surrounded it retreats home.
 
 **Tooling**
 
-- Node test suite under `tools/` — 10 files. Several run the shipping code directly rather than a
+- Node test suite under `tools/` — 14 files. Several run the shipping code directly rather than a
   copy. They have caught real production bugs: a luminance formula, the 2048-map orbit, and a
   farmstead rule that approved three stripped bushes while refusing one full one.
+- **`test_mp_safety.js` turns multiplayer compatibility into a contract.** `mod.json` declares
+  `ignoreInCompatibilityChecks`, which is what lets an unmodded spectator join — that claim is only
+  honest while everything under `simulation/` stays inert, so it is now checked automatically: no
+  executable code in the stubs, no state written to a component, only `GuiInterface` extended, no
+  network commands from the simulation side, only vanilla command types, and no `Math` function the
+  engine has not replaced with a deterministic version.
 
 ---
 
@@ -265,7 +316,11 @@ Mod de conveniência para o **0 A.D. Alpha 28 (Boiorix)**. Reduz a microgestão,
 e acrescenta ferramentas táticas — sem nunca dessincronizar uma partida multiplayer.
 
 Tudo roda na camada de GUI e toda ação sai como comando de rede padrão, então todos os clientes
-permanecem em lockstep.
+permanecem em lockstep. **Jogadores e espectadores sem o mod podem entrar na sua partida**: nada do que o
+mod põe em `simulation/` altera como o jogo simula, e `tools/test_mp_safety.js` transforma isso num
+contrato em vez de uma promessa — ele falha se algum arquivo de lá ganhar código executável, estado
+de componente, comando de rede fora do padrão ou uma função Math que a engine não tornou
+determinística.
 
 > **Sem dependências além do próprio 0 A.D.** O PudimMod traz o seu `pudim_patchApplyN` para
 > modificar funções do jogo, então não precisa do AutoCiv — e como o auxiliar fica no namespace
@@ -367,9 +422,15 @@ dropsite novo colado no recurso, ou uma troca para o mesmo tipo de recurso perto
 **45 m para fruta, 64 m para madeira e 129 m para pedra e metal**. Ele lê os componentes da própria
 unidade, então melhorias de coleta e de velocidade deslocam o limiar sozinhas.
 
-A **auto-fila** mantém a fila de treino cheia no centro cívico e nos quartéis, aprende o tamanho de
-lote que você configurou e contorna o bug do motor que encolhe o lote em silêncio quando falta
-recurso. Cidadãs param em 50, e a partir daí a produção passa a soldados.
+A **auto-fila** mantém a fila de treino cheia no centro cívico e nos quartéis e contorna o bug do
+motor que encolhe o lote em silêncio quando falta recurso.
+
+**Ela nunca troca o tipo de unidade que você escolheu.** O que você põe na fila de um edifício é o
+que é reposto ali — sem preferência por aldeã, e o limite de 50 mulheres também não passa por cima.
+O mod só escolhe o tipo em edifício onde você nunca escolheu nada. O tamanho do lote também segue
+você: pôs 5, volta 5. Só a *quantidade* se adapta ao estoque (menos quando falta, cheio de novo
+quando o banco recupera) — nunca o tipo. Ela também para de insistir em religar a auto-fila no teto
+de população ou sem recurso, onde o motor recusa e imprime erro na sua tela.
 
 As **auto-casas** constroem casas antes de o limite de população travar o treino, com um tempo de
 espera que se adapta à quantidade de edifícios de produção que você tem.
@@ -377,7 +438,9 @@ espera que se adapta à quantidade de edifícios de produção que você tem.
 A **auto-pesquisa** é limitada de propósito ao **armazém, edifício agrícola e forja** — nunca centro
 cívico, fortaleza ou quartel, e nunca avança de fase: isso continua sendo decisão sua. A prioridade
 segue a fase: a fase 1 libera comida, madeira e capacidade de carga; a fase 2 acrescenta pedra e
-metal; a fase 3 acrescenta combate e vida. As techs de capacidade de carga (Cestas → Carrinho de Mão
+metal; a fase 3 acrescenta combate e vida. **As techs de pedra e metal furam a espera quando a
+prioridade delas passa de zero** — peso acima de zero quer dizer que tem gente minerando agora,
+então acelerar essa coleta já rende. As techs de capacidade de carga (Cestas → Carrinho de Mão
 → Carroça) são as mais prioritárias entre as de coleta, porque somam nos quatro recursos de uma vez.
 Uma tech que não entra na fila em 90 s vai para a lista negra da sessão.
 
@@ -391,6 +454,10 @@ O **mercado inteligente** troca o que está sobrando pelo que está faltando.
 - **Foco de fogo** — seus soldados concentram num alvo só em vez de cada um escolher um inimigo.
 - **Guarnição defensiva** — trabalhadores se abrigam em prédios próximos durante um ataque e voltam
   quando acalma, com esperas que impedem o vai-e-volta de guarnecer/soltar que travava a economia.
+  Casa vem primeiro (são muitas, espalhadas, e deixam o centro cívico livre para a guarnição militar
+  que o faz atirar), depois o centro cívico, e abrigo sob ameaça ainda ganha de campo aberto. Dentro
+  de cada faixa vence o mais perto. **Com todos os abrigos lotados, eles correm** — para o lado
+  oposto ao atacante, longe o bastante para sair do alcance real da arma dele.
 - **Modo pânico** — num ataque sério, tudo para e os trabalhadores são protegidos. **Voltar ao
   Trabalho** os traz de volta. O pânico exige **hostilidade real**, não proximidade: um inimigo só
   conta se estiver com ordem de ataque sobre algo seu ou de aliado, ou se estiver dentro do seu
@@ -408,8 +475,11 @@ Selecione a cavalaria e escolha o modo:
   vez de andar só pelo aro externo.
 - **Profundo** — vai para o **lado oposto do mapa**, longe da sua base e das aliadas, porque é onde o
   inimigo normalmente está. Nunca refaz terreno já explorado — seu *ou de um aliado*, já que o que
-  ele lê é a linha de visão compartilhada do motor. Achada a base inimiga, contorna a distância
-  segura (no mínimo 120 m, maior em mapas muito grandes), pulando os arcos que já abriu.
+  ele lê é a linha de visão compartilhada do motor. Achada a base inimiga, ele **contorna a
+  fronteira do território dela** em vez de um anel fixo, pulando os arcos que já abriu. Nada que
+  atira chega a alcançá-lo: destino *e trajeto* são conferidos contra o alcance real de cada
+  atacante inimigo, e o setor de quem atirou nele vai para a lista negra. Cercado, ele recua para
+  casa — sobreviver vem primeiro.
 
 Ao ser avistado, o scout **foge na direção oposta ao inimigo**, não de volta para a base, e só volta
 a explorar após duas verificações seguidas sem perigo. Estruturas inimigas bloqueiam o setor
@@ -480,6 +550,15 @@ Português ou inglês, detectado automaticamente pelo idioma do jogo. Para forç
   metal, no lugar de 100 m fixos.
 - Toda ordem gather-near-position passa a levar o subtipo do recurso. Sem ele o estado
   FINDINGNEWTARGET do motor não casa com nada e o coletor para depois de esvaziar um alvo.
+- **A auto-fila nunca troca o tipo de unidade que você escolheu.** Ela refazia a escolha do zero a
+  cada reposição, com preferência explícita por aldeã, então 5 guerreiros postos no centro cívico
+  voltavam como 2 aldeões. O que você põe na fila de um edifício passa a ser o que é reposto ali, no
+  seu tamanho de lote; só a quantidade ainda se adapta ao estoque.
+- A auto-fila também para de se religar no teto de população ou sem recurso, onde o motor recusa e
+  imprime "não foi possível definir auto-fila" na tela a cada 3 s.
+- **As techs de pedra e metal deixam de esperar a Fase 2 quando a prioridade delas passa de zero.**
+  A espera fazia sentido com as duas zeradas — ninguém está minerando, a tech rende nada — mas peso
+  acima de zero quer dizer que tem gente minerando agora.
 
 **Militar**
 
@@ -488,6 +567,14 @@ Português ou inglês, detectado automaticamente pelo idioma do jogo. Para forç
   disparava pânico total sem ataque nenhum.
 - Corrigido um **laço no timeout do pânico**: quando a trava de "sem centro cívico / abrigo cercado"
   recusava desguarnecer, a válvula de 120 s redisparava a cada tique — 119 linhas de log numa partida.
+- **Trabalhador sob ataque entra na casa mais perto.** No ramo "podemos defender" a lista de abrigos
+  era filtrada só para o centro cívico; as casas já estavam na lista e simplesmente não eram usadas.
+  Com 183 de população o centro cívico enchia nas primeiras ~20 unidades e todo o resto ficava parado
+  apanhando ao lado de casas vazias.
+- **Com todos os abrigos lotados, eles correm**, para o lado oposto ao atacante. A direção base é a
+  oposta ao centro de massa dos inimigos próximos, mas só isso aponta um trabalhador cercado direto
+  para um segundo grupo, então ele testa sete rumos num leque de ±60° e fica com o que termina mais
+  longe do inimigo mais próximo. A distância sai do alcance real da arma dos atacantes mais 30 m.
 
 **Exploração**
 
@@ -502,12 +589,30 @@ Português ou inglês, detectado automaticamente pelo idioma do jogo. Para forç
 - O raio da órbita passa a escalar com o tamanho do mapa. Num mapa 2048 o raio de chegada (140 m) era
   maior que a maior corda possível de um anel de 120 m, então o scout "chegava" sem sair do lugar e
   queimava a órbita parado.
+- **A órbita segue a fronteira do território inimigo** em vez de um anel fixo de 120 m. O anel era
+  medido do centro cívico e não sabia nada sobre torres, então uma torre perto da borda já punha o
+  scout no alcance. Centro cívico, torre defensiva, posto avançado e fortaleza alcançam 60 m, e o
+  raio de território do centro cívico é 140 m — contornar a fronteira põe o scout a ~158 m, quase
+  100 m livre de todos eles.
+- **O trajeto também é conferido, não só o destino.** Dois pontos seguros ligados por uma reta que
+  corta a base continuam sendo sentença de morte: era assim que o scout atravessava o alcance do
+  centro cívico sem nunca parar lá dentro. O caminho passa a ser amostrado a cada 12 m, menor que
+  qualquer raio proibido.
+- Raio proibido = alcance real da arma (`Attack.GetFullAttackRange`, então upgrade de alcance inimigo
+  aperta o cerco sozinho) mais 25 m para prédio, mais dois segundos do próprio deslocamento para
+  unidade. Essas zonas entram na lista negra do scout, e cercado ele recua para casa.
 
 **Ferramentas**
 
-- Suíte de testes em Node dentro de `tools/` — 10 arquivos. Vários rodam o código que vai para o jogo,
+- Suíte de testes em Node dentro de `tools/` — 14 arquivos. Vários rodam o código que vai para o jogo,
   e não uma cópia. Já pegaram defeitos reais: uma fórmula de luminância, a órbita em mapa 2048 e uma
   regra que aprovava três arbustos raspados enquanto recusava um cheio.
+- **`test_mp_safety.js` transforma a compatibilidade em multiplayer num contrato.** O `mod.json`
+  declara `ignoreInCompatibilityChecks`, que é o que permite um espectador sem o mod entrar — essa
+  declaração só é honesta enquanto tudo em `simulation/` continuar inerte, então isso passou a ser
+  verificado sozinho: nenhum código executável nos stubs, nenhum estado gravado em componente, só o
+  `GuiInterface` estendido, nenhum comando de rede saindo da simulação, só tipos de comando do jogo
+  base e nenhuma função `Math` que a engine não tenha substituído por uma versão determinística.
 
 ---
 

@@ -37,16 +37,20 @@ for (const fn of proibidas) {
 
 // ── 2. O passo de órbita: corda >= raio de chegada, em vários tamanhos de mapa ──────────
 // Replica exata da fórmula que ficou no código (conferida pela asserção logo abaixo).
-function orbitDist(gridSize) { return Math.max(120, 0.5477 * gridSize * 1.15); }
+// A orbita agora segue a fronteira do territorio inimigo (ver test_scout_safety.js). O que
+// continua valendo aqui e a geometria do PASSO: a corda entre duas paradas tem de ser maior
+// que o raio de chegada do cliente, senao o scout "chega" sem sair do lugar. O pior caso e o
+// menor raio possivel da orbita, R_MIN.
+function orbitDist(gridSize) { return Math.max(100, 0.5477 * gridSize * 1.15); }
 function orbitStep(gridSize) {
 	const arrivalRadius = 0.5477 * gridSize;
 	return Math.min(1.2, (arrivalRadius * 1.3 * 1.2) / orbitDist(gridSize));
 }
 check("a fórmula do passo é a que está no código",
-	src.indexOf("Math.min(1.2, (arrivalRadius * 1.3 * 1.2) / ORBIT_DIST)") > 0);
-check("o raio da órbita é o que está no código",
-	src.indexOf("Math.max(120, arrivalR0 * 1.15)") > 0);
-check("a órbita nunca fica mais perto que os 120m táticos", orbitDist(64) === 120, orbitDist(64));
+	src.indexOf("Math.min(1.2, (arrivalRadius * 1.3 * 1.2) / R_MIN)") > 0);
+check("o piso da órbita é o que está no código",
+	src.indexOf("Math.max(100, 0.5477 * gridSize * 1.15)") > 0);
+check("o piso nunca fica abaixo dos 100m de segurança", orbitDist(64) === 100, orbitDist(64));
 
 // gridSize = mapSize/8 nos tamanhos reais de mapa do jogo
 for (const mapSize of [512, 768, 1024, 1536, 2048]) {

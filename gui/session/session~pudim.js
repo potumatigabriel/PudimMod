@@ -575,13 +575,51 @@ function pudim_ForceScoutTick() {
 			if (typeof targetData.orbitAngle === "number")
 				g_PudimScoutTheta[ent] = targetData.orbitAngle;
 		} else {
-			// Fallback: explorar em espiral ao redor da posição atual
-			const fallbackR = 60;
-			const fallbackAngle = g_PudimScoutTheta[ent];
-			bestCell = {
-				x: Math.max(15, Math.min(mapSize - 15, pos.x + Math.cos(fallbackAngle) * fallbackR)),
-				z: Math.max(15, Math.min(mapSize - 15, pos.z + Math.sin(fallbackAngle) * fallbackR))
+			// Fallback: explorar em espiral ao redor da posição atual.
+			// A simulação devolve as zonas de tiro em dangerZones; a espiral precisa
+			// respeitá-las também, senão ela é justamente o caminho que devolve o scout ao
+			// alcance de onde ele acabou de fugir. Tenta oito direções e fica na primeira
+			// segura; sem nenhuma segura, recua para o CC mais próximo.
+			const zonas = (targetData && targetData.dangerZones) || [];
+			const zonaSegura = function(px, pz) {
+				for (const z0 of zonas) {
+					const dx = px - z0.x, dz = pz - z0.z;
+					if (dx * dx + dz * dz < z0.r * z0.r) return false;
+				}
+				return true;
 			};
+			const fallbackR = 60;
+			for (let t = 0; t < 8 && !bestCell; ++t) {
+				const ang = g_PudimScoutTheta[ent] + t * Math.PI / 4;
+				const fx = Math.max(15, Math.min(mapSize - 15, pos.x + Math.cos(ang) * fallbackR));
+				const fz = Math.max(15, Math.min(mapSize - 15, pos.z + Math.sin(ang) * fallbackR));
+				if (zonaSegura(fx, fz)) bestCell = { x: fx, z: fz };
+			}
+			if (!bestCell && ccList.length > 0) {
+				// Cercado por zonas de tiro: a prioridade é sobreviver, então volta para casa.
+				let nearCC = ccList[0], minD = Infinity;
+				for (const cc of ccList) {
+					const cdx = cc.x - pos.x, cdz = cc.z - pos.z;
+					const d = cdx * cdx + cdz * cdz;
+					if (d < minD) { minD = d; nearCC = cc; }
+				}
+				bestCell = { x: nearCC.x, z: nearCC.z };
+				pudim_Log("WARN", "SCOUT", "sem rota segura — recuando para a base");
+			}
+		}
+
+		// Setores de quem atira entram na lista negra do scout: ele nao volta ali.
+		// Estrutura nao anda, entao a marca vale a partida inteira; unidade recebe 3min,
+		// tempo de sair de la. Sem isto o scout fugia do tiro e voltava no ciclo seguinte,
+		// que foi como ele morreu no relato de 19/08.
+		if (targetData && targetData.dangerZones) {
+			for (const z0 of targetData.dangerZones) {
+				const zc = Math.max(0, Math.min(PUDIM_SCOUT_GRID - 1, Math.floor(z0.x / cellSize)));
+				const zr = Math.max(0, Math.min(PUDIM_SCOUT_GRID - 1, Math.floor(z0.z / cellSize)));
+				const atual = g_PudimScoutBlocked[zc + "," + zr] || 0;
+				const ate = now + 180000;
+				if (ate > atual) g_PudimScoutBlocked[zc + "," + zr] = ate;
+			}
 		}
 
 		if (bestCell) {

@@ -3840,7 +3840,11 @@ GuiInterface.prototype.pudim_GetProductionBuildings = function(player, data) {
 			})()
 		});
 	}
-	return { "buildings": buildings, "femaleCount": femaleCount, "resources": resources };
+	// População: o painel precisa dela para não insistir em ligar a auto-fila no teto, onde
+	// o motor recusa e imprime "Não foi possível definir auto-fila para a unidade" na tela.
+	return { "buildings": buildings, "femaleCount": femaleCount, "resources": resources,
+	         "popCount": cmpPlayer ? cmpPlayer.GetPopulationCount() : 0,
+	         "popMax":   cmpPlayer ? cmpPlayer.GetMaxPopulation()  : 0 };
 };
 GuiInterface.prototype.pudim_GetPlayerKD = function(player, data) { return null; };
 
@@ -4824,6 +4828,12 @@ GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 	const popNow = cmpPlayer.GetPopulationCount();
 	const combatAllowed = popNow > PUDIM_FORGE_MIN_POP;
 
+	// Pesos das prioridades de coleta, vindos do painel. Peso > 0 significa que há (ou vai
+	// haver) gente naquele recurso, então a tech que o acelera já rende. Ausentes → 0, que
+	// preserva o comportamento antigo de esperar a Fase 2.
+	const wStone = +((data && data.weights && data.weights.stone) || 0);
+	const wMetal = +((data && data.weights && data.weights.metal) || 0);
+
 	/** true se a tech é permitida na fase atual */
 	const allowedInPhase = (tech) => {
 		const n = tech.toLowerCase();
@@ -4837,7 +4847,13 @@ GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 
 		// Capacidade de carga afeta food+wood também → liberada desde a Fase 1
 		if (resSet.has("food") || resSet.has("wood")) return true;
-		// Só pedra/metal → a partir da Fase 2
+
+		// Só pedra/metal. A regra de esperar a Fase 2 existia porque, com os dois zerados nas
+		// prioridades, ninguém está minerando e a tech renderia zero. Mas se o jogador PÔS
+		// peso em pedra ou metal, há gente lá agora e acelerar essa coleta é exatamente o que
+		// ele pediu — não faz sentido segurar até a fase seguinte.
+		if (resSet.has("stone") && wStone > 0) return true;
+		if (resSet.has("metal") && wMetal > 0) return true;
 		return isPhase2;
 	};
 

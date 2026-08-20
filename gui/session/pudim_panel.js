@@ -1523,6 +1523,22 @@ var g_PudimAutoQueueAccum = 0;
 var g_PudimAutoQueueTemplates = {};
 /** Contagem desejada de treino por edifício — baseada no maior count observado */
 var g_PudimAutoQueueDesiredCount = {};
+
+/**
+ * O que o JOGADOR pos na fila daquele edificio: template e tamanho do lote.
+ *
+ * Separado de g_PudimAutoQueueTemplates de proposito. Aquele guarda "o ultimo template visto
+ * ali", que o proprio mod sobrescreve ao semear — inutil para distinguir escolha sua de
+ * escolha dele. Este so e gravado quando o item na fila NAO e o que o mod semeou por ultimo
+ * (g_PudimQueueSeededTpl), ou seja, quando so pode ter vindo de voce.
+ *
+ * Relato de 19/08: o jogador pos 5 guerreiros no centro civico e, quando o lote esvaziou, a
+ * auto-fila semeou 2 aldeoes. A escolha de template era refeita do zero a cada semeadura,
+ * com preferencia pela aldea, e nada olhava o que estava ali antes. Trocar o TIPO de unidade
+ * que voce escolheu nunca pode acontecer.
+ */
+var g_PudimPlayerQueueTpl = {};
+var g_PudimPlayerQueueCount = {};
 // Instante da última semeadura por edifício — carência contra semear duas vezes antes de
 // o comando anterior (ou uma ordem do jogador) aparecer na fila.
 var g_PudimQueueSeededAt = {};
@@ -1835,6 +1851,10 @@ function pudim_ProcessAutoQueue()
 		const femaleCount = aqData.femaleCount || 0;
 		const atFemaleCap = femaleCount >= 50;
 		const res = aqData.resources || {};
+		// No teto de população o motor recusa ligar a auto-fila e imprime
+		// "Não foi possível definir auto-fila para a unidade, desativando" em cima da tela.
+		// Insistir a cada 3s só produz spam: a fila volta sozinha quando abrir vaga.
+		const popCheio = (aqData.popMax || 0) > 0 && (aqData.popCount || 0) >= aqData.popMax;
 
 		// Cachear template e aprender o tamanho de lote que o usuário configurou.
 		// IMPORTANTE: qItem.count é quanto FALTA treinar naquele lote — o motor decrementa
@@ -1852,6 +1872,24 @@ function pudim_ProcessAutoQueue()
 						if (!g_PudimAutoQueueDesiredCount[b.ent] || observed > g_PudimAutoQueueDesiredCount[b.ent])
 							g_PudimAutoQueueDesiredCount[b.ent] = observed;
 					}
+					// Lote que NAO e o que o mod semeou por ultimo so pode ter vindo do
+					// jogador. Guardar tipo e tamanho: a partir daqui a auto-fila repoe
+					// exatamente isso neste edificio, e nunca mais escolhe o tipo sozinha.
+					if (qItem.unitTemplate !== g_PudimQueueSeededTpl[b.ent]) {
+						if (g_PudimPlayerQueueTpl[b.ent] !== qItem.unitTemplate) {
+							g_PudimPlayerQueueTpl[b.ent] = qItem.unitTemplate;
+							pudim_Log("INFO", "QUEUE", "edificio " + b.ent + " passa a repor " +
+								qItem.unitTemplate.split("/").pop() + " (escolha do jogador)");
+						}
+						// So conta como tamanho escolhido enquanto o lote esta fresco: o motor
+						// decrementa count a cada unidade nascida (this.count--), entao um lote
+						// de 5 ja com 3 prontas mostra 2.
+						if ((qItem.progress || 0) < 0.15) {
+							const obs = qItem.count || 1;
+							if (obs > (g_PudimPlayerQueueCount[b.ent] || 0))
+								g_PudimPlayerQueueCount[b.ent] = obs;
+						}
+					}
 				}
 			}
 		}
@@ -1861,7 +1899,12 @@ function pudim_ProcessAutoQueue()
 		for (const b of buildings) {
 			if (!b.autoqueue) {
 				if (b.alwaysQueue) {
-					// Barracks/CC: sempre reativar, independente da causa da desativação
+					// Barracks/CC: sempre reativar, independente da causa da desativação —
+					// menos no teto de população ou sem recurso para uma unidade sequer, onde
+					// o motor recusa e o único efeito é a mensagem de erro na tela.
+					const tplCheck = g_PudimPlayerQueueTpl[b.ent] || g_PudimAutoQueueTemplates[b.ent];
+					const podePagar = tplCheck ? pudim_ComputeAffordableCount(tplCheck, 1, res) >= 1 : true;
+					if (popCheio || !podePagar) continue;
 					toEnable.push(b.ent);
 					g_PudimAutoQueueManagedByMod.add(b.ent);
 					g_PudimAutoQueueUserDisabled.delete(b.ent);
@@ -1916,9 +1959,13 @@ function pudim_ProcessAutoQueue()
 		for (const b of buildings) {
 			if (g_PudimAutoQueueUserDisabled.has(b.ent)) continue;
 
-			// CC: padrão 3; barracks: padrão 1; demais: 1
+			// CC: padrão 3; barracks: padrão 1; demais: 1. O tamanho que o JOGADOR usou vem
+			// na frente de tudo: ele pos 5, repoe 5. (Quanto disso cabe no estoque ainda e
+			// decidido por pudim_ComputeAffordableCount logo abaixo — "faz o que da e depois
+			// volta ao normal" continua valendo para a QUANTIDADE; o que nunca muda e o TIPO.)
 			const defaultCount = b.isCC ? 3 : 1;
-			const desiredCount = g_PudimAutoQueueDesiredCount[b.ent] || defaultCount;
+			const desiredCount = g_PudimPlayerQueueCount[b.ent] ||
+			                     g_PudimAutoQueueDesiredCount[b.ent] || defaultCount;
 
 			if (!b.queueEmpty) {
 				// REGRA: a auto-fila mantém NO MÁXIMO UM lote. Um lote degradado por escassez
@@ -1971,17 +2018,25 @@ function pudim_ProcessAutoQueue()
 				continue;
 			}
 
-			let template = null;
-			// Usar trainerEntities do servidor (mais confiável que GetEntityState para barracas novas)
-			const trainerEnts = b.trainerEntities || [];
-			if (trainerEnts.length > 0) {
-				if (atFemaleCap) {
-					template = trainerEnts.find(t => !isFemaleTemplate(t));
-					if (!template) continue;
-				} else {
-					template = trainerEnts.find(isFemaleTemplate) || trainerEnts[0];
+			// A escolha do jogador manda, sempre. Se ele pos alguma coisa na fila deste
+			// edificio, a auto-fila repoe EXATAMENTE aquilo — sem preferencia por aldea e sem
+			// a troca do limite de 50 mulheres. O mod so escolhe o tipo quando voce nunca
+			// escolheu nada ali.
+			let template = g_PudimPlayerQueueTpl[b.ent] || null;
+			const doJogador = !!template;
+
+			if (!template) {
+				// Usar trainerEntities do servidor (mais confiável que GetEntityState para barracas novas)
+				const trainerEnts = b.trainerEntities || [];
+				if (trainerEnts.length > 0) {
+					if (atFemaleCap) {
+						template = trainerEnts.find(t => !isFemaleTemplate(t));
+						if (!template) continue;
+					} else {
+						template = trainerEnts.find(isFemaleTemplate) || trainerEnts[0];
+					}
+					if (template) g_PudimAutoQueueTemplates[b.ent] = template;
 				}
-				if (template) g_PudimAutoQueueTemplates[b.ent] = template;
 			}
 
 			if (!template) {
@@ -2019,7 +2074,8 @@ function pudim_ProcessAutoQueue()
 			// voltar a empilhar, este número diz se o mod semeou sobre uma fila que já tinha
 			// itens (leitura errada) ou se cada semeadura viu vazio de verdade (corrida).
 			pudim_Log("INFO", "QUEUE", "fila semeada em " + b.ent + " x" + affordable + " " +
-				template.split("/").pop() + " qlen=" + ((b.trainingQueue && b.trainingQueue.length) || 0));
+				template.split("/").pop() + (doJogador ? " (escolha do jogador)" : "") +
+				" qlen=" + ((b.trainingQueue && b.trainingQueue.length) || 0));
 		}
 
 		if (atFemaleCap && !g_PudimFemaleCapLogged) {
@@ -2081,7 +2137,10 @@ function pudim_ProcessAutoResearch()
 
 		const researchData = Engine.GuiInterfaceCall("pudim_GetAutoResearchData", {
 			blacklist: blacklistAtiva,
-			sentTechs: sentKeys
+			sentTechs: sentKeys,
+			// Prioridades de coleta: recurso com peso > 0 e recurso que voce quer, entao a
+			// tech que acelera a coleta dele deixa de esperar a Fase 2.
+			weights: g_PudimResourceWeights
 		});
 		if (!researchData) return;
 

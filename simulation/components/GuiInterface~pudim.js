@@ -1342,7 +1342,33 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 			const d = Math.sqrt(ddx*ddx + ddz*ddz);
 			if (d < nearestDropDist) { nearestDropDist = d; nearestDropPos = ds.pos; }
 		}
-		if (nearestDropDist <= 100) continue; // 100m de ida = 200m/viagem; acima disso é caminhada demais — age já
+		// Limiar de "caminhada demais" calculado, não chutado. Era fixo em 100m, o que
+		// deixava passar muito desperdício em madeira e fruta e era severo demais com
+		// pedra/metal.
+		//
+		// O coletor alterna dois tempos: encher a carga e levar até o dropsite.
+		//   encher   = capacidade / taxa        (ResourceGatherer)
+		//   ida+volta = 2 x distância / velocidade  (UnitMotion.GetWalkSpeed)
+		// Igualando os dois sai a distância em que ele passa a gastar mais tempo andando do
+		// que colhendo:  d = capacidade x velocidade / (2 x taxa).
+		// Com os números da aldeã (capacidade 10, velocidade 9, template_unit.xml e
+		// template_unit_support_female_citizen.xml): fruta 45m, madeira 64m, pedra/metal
+		// 129m. Como sai dos componentes da PRÓPRIA unidade, melhorias de coleta e de
+		// velocidade deslocam o limiar sozinhas.
+		const cmpGath2 = Engine.QueryInterface(ent, IID_ResourceGatherer);
+		let walkThresh = 100;
+		if (cmpGath2 && targetResType.specific) {
+			const rates2 = cmpGath2.GetGatherRates ? cmpGath2.GetGatherRates() : null;
+			const rate2 = rates2 ? +rates2[targetResType.generic + "." + targetResType.specific] : 0;
+			const cap2 = cmpGath2.GetCapacity ? +cmpGath2.GetCapacity(targetResType.generic) : 0;
+			const cmpMot2 = Engine.QueryInterface(ent, IID_UnitMotion);
+			const spd2 = cmpMot2 && cmpMot2.GetWalkSpeed ? +cmpMot2.GetWalkSpeed() : 9;
+			// Piso de 35m: abaixo disso a "viagem" é do tamanho do próprio prédio mais o
+			// alcance de coleta, e mexer só geraria vaivém.
+			if (rate2 > 0 && cap2 > 0 && spd2 > 0)
+				walkThresh = Math.max(35, (cap2 * spd2) / (2 * rate2));
+		}
+		if (nearestDropDist <= walkThresh) continue;
 
 		// Encontrar recurso do mesmo tipo mais próximo de um dropsite (< 50m de algum dropsite)
 		let bestNearbyRes = null, bestNearbyDistSq = Infinity;
@@ -1369,7 +1395,10 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 			redirectTarget: (bestNearbyRes && bestNearbyRes !== targetEnt) ? bestNearbyRes : null,
 			targetResX: targetPos.x,
 			targetResZ: targetPos.y,
-			targetResType: targetResType.generic
+			targetResType: targetResType.generic,
+			// Para o log: quanto ele andaria e a partir de quanto vale agir neste recurso.
+			dropDist: Math.round(nearestDropDist),
+			thresh: Math.round(walkThresh)
 		});
 	}
 

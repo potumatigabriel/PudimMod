@@ -842,6 +842,17 @@ function pudim_RunAutoWork()
 			pudim_Log("SUCCESS", "DROP", "dropsite pré-coleta construído para " + builtCount + " walker(s)");
 		if (redirectCount > 0)
 			pudim_Log("INFO", "WALK", "redirecionando " + redirectCount + " walker(s) sem dropsite disponível");
+		// Amostra do que o detector viu: distância real até o dropsite e o limiar calculado
+		// para aquele recurso (capacidade x velocidade / 2 x taxa). Sem isso não dá para
+		// julgar em jogo se o limiar está apertado ou frouxo demais.
+		if (lw.length > 0 && nowLW - g_PudimWalkDiagAt > 20000) {
+			g_PudimWalkDiagAt = nowLW;
+			const amostra = lw.slice(0, 4)
+				.map(w => w.targetResType + " " + (w.dropDist || "?") + "m/lim" + (w.thresh || "?"))
+				.join(" | ");
+			pudim_Log("DEBUG", "WALK", "longe do dropsite: " + result.longWalkers.length +
+				" (obras=" + builtCount + " redir=" + redirectCount + " segurados=" + heldCount + ") " + amostra);
+		}
 		if (heldCount > 0) g_PudimWalkHeld += heldCount;
 	}
 
@@ -1554,6 +1565,9 @@ var g_PudimFoundationAccum = 0;
  * de 19/08: "mandou os trabalhadores na floresta sem armazém, daí fez armazém em outra
  * floresta e não mandou os trabalhadores pra essa nova floresta".
  */
+/** Throttle do diagnóstico de caminhada longa (ver o log WALK) */
+var g_PudimWalkDiagAt = 0;
+
 var g_PudimDropsiteRally = {};
 /** Janela de validade do rally. Acima disso a âncora provavelmente já não faz sentido. */
 const PUDIM_RALLY_WINDOW = 180000;

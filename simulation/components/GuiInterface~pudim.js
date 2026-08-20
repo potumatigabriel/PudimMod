@@ -4099,16 +4099,29 @@ GuiInterface.prototype.pudim_GetSmartDropsiteData = function(player, data)
 		const cmpUnitAI = Engine.QueryInterface(ent, IID_UnitAI);
 		if (!cmpUnitAI || !cmpUnitAI.orderQueue || cmpUnitAI.orderQueue.length === 0) continue;
 		const ord = cmpUnitAI.orderQueue[0];
-		if (ord.type !== "Gather") continue;
-		const tid = ord.data && ord.data.target;
-		if (!tid) continue;
-		const rs = Engine.QueryInterface(tid, IID_ResourceSupply);
-		if (!rs || !rs.IsAvailable()) continue;
-		const rtype = rs.GetType();
-		if (!rtype) continue;
-		const tp = Engine.QueryInterface(tid, IID_Position);
-		if (!tp || !tp.IsInWorld()) continue;
-		const rp = tp.GetPosition2D();
+		let rp = null, rtype = null;
+		if (ord.type === "Gather") {
+			const tid = ord.data && ord.data.target;
+			if (!tid) continue;
+			const rs = Engine.QueryInterface(tid, IID_ResourceSupply);
+			if (!rs || !rs.IsAvailable()) continue;
+			rtype = rs.GetType();
+			if (!rtype) continue;
+			const tp = Engine.QueryInterface(tid, IID_Position);
+			if (!tp || !tp.IsInWorld()) continue;
+			rp = tp.GetPosition2D();
+		} else if (ord.type === "GatherNearPosition") {
+			// Quem ainda está A CAMINHO da floresta também conta. Só a ordem Gather era
+			// considerada, e ela só existe depois que o coletor CHEGA e escolhe uma árvore:
+			// o armazém só nascia quando a turma já estava lá, e a primeira leva de entregas
+			// era feita atravessando a base. Levantar a fundação enquanto eles caminham faz
+			// a obra correr em paralelo com a ida — que é o pedido de 19/08, "fazer antes de
+			// começar a catar madeira".
+			// A ordem carrega o destino e o tipo direto em data (ver UnitAI.GatherNearPosition).
+			if (!ord.data || typeof ord.data.x !== "number" || !ord.data.type) continue;
+			rtype = ord.data.type;
+			rp = { x: ord.data.x, y: ord.data.z };
+		} else continue;
 
 		let minDsSq = Infinity;
 		for (const ds of dropsites) {
@@ -4144,6 +4157,8 @@ GuiInterface.prototype.pudim_GetSmartDropsiteData = function(player, data)
 	}
 
 	result._dbg.fw = farWoodPos.length + farFoodPos.length;
+	result._dbg.fwW = farWoodPos.length;
+	result._dbg.fwF = farFoodPos.length;
 	if (farWoodPos.length === 0 && farFoodPos.length === 0) {
 		result._dbg.skip = "no_far_workers_50m"; // rótulo alinhado ao limiar real (minDsSq <= 50*50) acima
 		return result;

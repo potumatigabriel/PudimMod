@@ -76,5 +76,29 @@ check("meio arbusto (100) recusa", !constroi(100));
 // Dois arbustos pela metade somam 200 e passam — o que importa é o total, não a contagem.
 check("dois arbustos pela metade (200) aceitam", constroi(200));
 
+// ── Deteccao de "longe do dropsite" tambem enquanto o coletor CAMINHA ──────────────────
+// Log de 19/08 (partida 20:16:10):
+//   2.9s  skip=no_far_workers_50m fw=0
+//   20.5s build storehouse ... density=57
+// Ate 20s ninguem contava como "longe" porque a ordem Gather so existe depois que o
+// coletor CHEGA e escolhe uma arvore. Quem esta a caminho carrega GatherNearPosition.
+console.log("\ndeteccao de coletor a caminho");
+check("GatherNearPosition entra na deteccao de far-worker",
+	/ord\.type === "GatherNearPosition"/.test(src));
+check("Gather continua valendo", /ord\.type === "Gather"/.test(src));
+check("qualquer outra ordem e ignorada", /\} else continue;/.test(src));
+check("a posicao vem de data.x/data.z da propria ordem",
+	/rp = \{ x: ord\.data\.x, y: ord\.data\.z \}/.test(src));
+check("o tipo de recurso vem de data.type (mesmo formato de GetType)",
+	/rtype = ord\.data\.type;/.test(src));
+check("ordem sem destino valido e descartada",
+	/typeof ord\.data\.x !== "number" \|\| !ord\.data\.type/.test(src));
+check("far-workers passam a ser logados separados por recurso",
+	/_dbg\.fwW = farWoodPos\.length/.test(src) && /_dbg\.fwF = farFoodPos\.length/.test(src));
+// A fundacao ja conta como dropsite (correcao anterior), entao o coletor indo para a
+// ancora de um armazem recem-colocado nao dispara uma segunda obra no mesmo lugar.
+check("fundacao conta como dropsite, evitando obra duplicada no mesmo ponto",
+	/cmpFoundation && cmpIdent && \(cmpIdent\.HasClass\("Storehouse"\)/.test(src));
+
 console.log(fails === 0 ? "\nTODOS OS TESTES PASSARAM" : "\n" + fails + " TESTE(S) FALHARAM");
 process.exit(fails === 0 ? 0 : 1);

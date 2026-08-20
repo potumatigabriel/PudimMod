@@ -55,8 +55,10 @@ on its own, and **Refresh Estimate** recomputes on demand.
 ## Economy
 
 **Auto-work** sends idle citizens to gather, following per-resource quotas you set with the
-food / wood / stone / metal sliders. Set a resource to zero and the mod never assigns anyone to it —
-the sliders are yours, the mod does not override them.
+food / wood / stone / metal sliders. Every match starts at **food 3, wood 4, stone 0, metal 0** —
+wood above food, because phase 1 spends wood on houses, storehouses and fields faster than it spends
+food. The sliders are yours: set a resource to zero and the mod never assigns anyone to it, and your
+values are never written to disk, so every match starts from the same known state.
 
 - Cavalry never gathers. It stays free for combat and scouting, but **does hunt animals inside your
   own territory** — and only those, so it never chases a fleeing animal across the map.
@@ -70,8 +72,37 @@ the sliders are yours, the mod does not override them.
 gatherers, so the mod targets at most 45 farm workers. It only redirects workers to existing farms
 instead of building when the free slots cover the whole shortfall.
 
+A **stock brake** sits in front of all of it: the gathering ratio splits workers by weight, not by
+need, so on its own it would keep asking for fields with the granary overflowing. Before computing
+any shortfall the mod compares the food stock against what you could still spend — 40 per free
+population slot plus a 1000 cushion — and stops building and assigning above that. The comfort level
+scales with population headroom, so 60/200 with 4000 food still plants (that food will become units)
+while 195/200 with the same 4000 does not.
+
 **Proactive dropsites** — a storehouse goes up next to distant forest, and a farmstead next to
 distant fruit, *before* workers waste time walking. It skips spots near enemy civic centres.
+
+- The anchor is **density weighted by distance to the crew** (`density / (1 + distance/50)`), not
+  raw density. Delivery is a round trip, so a far tree yields less per minute: the biggest forest on
+  the map no longer wins over the one your team is actually cutting.
+- Detection fires **while the gatherers are still walking**, not after they arrive. The order that
+  carries them there (`GatherNearPosition`) is now read too, so the foundation goes up in parallel
+  with the trip instead of after the first long delivery.
+- **Dropsite foundations count as dropsites.** During the ~30 s of construction the dispatcher used
+  to score that forest as uncovered and keep sending people elsewhere.
+- **Gatherers follow the dropsite they built.** When the work is done — tracked by the foundation
+  itself, not by a timer — the builders gather right there instead of falling back to the global
+  best-scoring resource, which was usually the forest they came from.
+- A farmstead is approved by **how much fruit is actually left within reach** (200, one full bush
+  and twice the farmstead's wood cost), not by counting bushes. One full bush is worth it; three
+  stripped ones are not.
+
+**Long-walk detection** — a gatherer whose resource is too far from a dropsite gets either a new
+dropsite next to the resource, or a move to the same resource type near an existing one. "Too far"
+is computed, not guessed: filling a load takes `capacity / rate` and the round trip takes
+`2 × distance / speed`, so the break-even is `capacity × speed / (2 × rate)` — about **45 m for
+fruit, 64 m for wood, 129 m for stone and metal**. It reads the unit's own components, so gathering
+and speed upgrades move the threshold on their own.
 
 **Auto-queue** keeps the training queue full at the civic centre and barracks, learns the batch size
 you configured, and works around the engine bug that silently shrinks a batch when resources run
@@ -98,16 +129,24 @@ queue within 90 s is blacklisted for the session.
 - **Defensive garrison** — workers shelter in nearby buildings during a raid and come back out once
   it is calm, with cooldowns that prevent the garrison/ungarrison loop that used to stall the economy.
 - **Panic mode** — on a serious attack, everything stops and the workers are protected. **Back to
-  Work** returns them.
+  Work** returns them. Panic needs **real hostility**, not proximity: an enemy counts only if it has
+  an attack order on something of yours or an ally's, or if it is standing inside your territory.
+  Troops passing by on their way to fight someone else no longer trigger it. If your civic centre is
+  gone, or a shelter is under siege, the mod never ungarrisons on its own — that stays your call.
 - **Counter-train** — trains units that answer what the enemy actually has on the field.
 
 ## Scouting
 
 Select cavalry and pick a mode:
 
-- **Local** — sweeps the area around your base looking for resources.
-- **Deep** — finds the enemy base and circles it at a safe 120 m, advancing ~40° per waypoint so it
-  genuinely goes around instead of bouncing between a few points.
+- **Local** — spirals over your whole base, inner ring outward, one full sweep per revolution. It
+  prefers what nobody is watching right now, so it closes blind spots instead of pacing the outer
+  rim.
+- **Deep** — heads for the **far side of the map**, away from your base and your allies', because
+  that is where the enemy usually is. It never re-covers ground already explored — yours *or an
+  ally's*, since the engine's shared line of sight is what it reads. Once the enemy base is found it
+  circles at a safe distance (at least 120 m, scaled up on very large maps), skipping arcs it has
+  already opened.
 
 On contact the scout **runs directly away from the enemy**, not back to the base, and only resumes
 exploring after two consecutive clear checks. Enemy structures blacklist their sector permanently;
@@ -146,6 +185,65 @@ PudimMod, and PudimMod does not require it.
 
 Portuguese or English, detected automatically from the game's language. To force one, set
 `pudim.lang` to `pt` or `en` in the user config.
+
+## Changelog
+
+### 2026-08-19
+
+**Economy**
+
+- Gathering priorities start every match at **food 3 / wood 4 / stone 0 / metal 0**, and are no
+  longer written to disk.
+- Farm cap back to a fixed **9** (45 farm workers). The population-proportional cap it had replaced
+  fixed a food shortfall but produced 15 fields and 66 food workers with 7900 food banked.
+- New **stock brake**: no new field and no extra food worker while the food stock is above what the
+  remaining population headroom could spend.
+- A farmstead is now approved by **how much fruit is left within reach** (200 = one full bush =
+  twice its wood cost) instead of by counting bushes. It was refusing to build next to a single full
+  bush while gatherers walked across the base — three cycles in a row in the log.
+- Storehouse anchor is **density weighted by distance to the crew**, so it lands in the forest your
+  team is cutting rather than the biggest one on the map.
+- **Dropsite foundations count as dropsites.** They carry no `ResourceDropsite` component
+  (`special/filter/foundation.xml` is a filtered entity), so during construction the dispatcher
+  scored that forest as uncovered and kept sending people elsewhere.
+- **Gatherers follow the dropsite they built**, once the foundation is actually gone — tracked by the
+  foundation, not by a timer. Timing it by builder idleness pulled builders off unfinished
+  foundations: one farmstead sat 79 s with four builders and the food stock hit zero.
+- Detection of "far from a dropsite" now fires **while the gatherers walk**, not after they arrive.
+- **Long-walk threshold is computed per resource** from the unit's own capacity, gather rate and walk
+  speed — about 45 m for fruit, 64 m for wood, 129 m for stone and metal, replacing a flat 100 m.
+- Every gather-near-position order now carries the resource subtype. Without it the engine's
+  FINDINGNEWTARGET state matches nothing and the gatherer stops after emptying one target.
+
+**Military**
+
+- **Panic requires real hostility** — an attack order on something of yours or an ally's, or an enemy
+  standing inside your territory. Any combatant within 220 m used to be enough, so troops passing by
+  triggered a full panic with no attack taking place.
+- Fixed a **panic timeout loop**: when the "no civic centre / shelter under siege" lock refused to
+  ungarrison, the 120 s valve re-fired every tick — 119 log lines in one match.
+
+**Scouting**
+
+- Math.asin removed from the simulation component. The engine rejects it there ("does not yet have a
+  synchronization safe implementation"): on-screen errors every waypoint and a desync risk in
+  multiplayer. The orbit step now comes from arc length.
+- **Deep scouting prefers the far side of the map**, away from your base and your allies', and never
+  re-covers ground already explored — including what an ally explored, via the engine's shared line
+  of sight.
+- **Local scouting spirals over the whole base** instead of pacing the outer rim, and prefers what
+  nobody is currently watching, closing blind spots.
+- Orbit radius now scales with map size. On a 2048 map the arrival radius (140 m) exceeded the
+  largest possible chord of a 120 m ring, so the scout "arrived" without moving and burned the orbit
+  standing still.
+
+**Tooling**
+
+- Node test suite under `tools/` — 10 files. Several run the shipping code directly rather than a
+  copy. They have caught real production bugs: a luminance formula, the 2048-map orbit, and a
+  farmstead rule that approved three stripped bushes while refusing one full one.
+
+---
 
 ## License
 
@@ -217,8 +315,11 @@ probabilidade de vitória resume tudo. Atualiza sozinho, e **Atualizar Estimativ
 ## Economia
 
 O **auto-trabalho** manda cidadãos ociosos coletarem, seguindo as cotas por recurso que você define
-nos controles de comida / madeira / pedra / metal. Zere um recurso e o mod nunca manda ninguém para
-ele — as prioridades são suas, o mod não passa por cima.
+nos controles de comida / madeira / pedra / metal. Toda partida começa em **comida 3, madeira 4,
+pedra 0, metal 0** — madeira acima de comida, porque a fase 1 gasta madeira em casas, armazéns e
+fazendas mais rápido do que gasta comida. As prioridades são suas: zere um recurso e o mod nunca
+manda ninguém para ele, e os valores não são gravados em disco, então toda partida começa do mesmo
+estado conhecido.
 
 - A cavalaria nunca coleta. Fica livre para combate e exploração, mas **caça animais dentro do seu
   território** — e só esses, então nunca sai perseguindo animal que foge pelo mapa.
@@ -233,9 +334,38 @@ ele — as prioridades são suas, o mod não passa por cima.
 comporta 5 coletores, então o alvo máximo é 45 trabalhadores em fazenda. Só redireciona para as
 fazendas existentes em vez de construir quando as vagas livres cobrem todo o déficit.
 
+Na frente de tudo isso há um **freio por estoque**: a proporção de coleta distribui por peso, não por
+necessidade, então sozinha ela continuaria pedindo campo com o celeiro transbordando. Antes de
+calcular qualquer déficit o mod compara o estoque de comida com o que ainda dá para gastar — 40 por
+vaga de população livre mais 1000 de colchão — e acima disso para de construir e de puxar gente. O
+conforto escala com a folga de população: 60/200 com 4000 de comida ainda planta (essa comida vai
+virar unidade), 195/200 com os mesmos 4000 não planta.
+
 **Armazéns proativos** — um armazém sobe perto de floresta distante, e um edifício agrícola perto de
 fruta distante, *antes* de os trabalhadores perderem tempo andando. Evita pontos perto de centros
 cívicos inimigos.
+
+- A âncora é **densidade ponderada pela distância até a equipe** (`densidade / (1 + distância/50)`),
+  não densidade pura. A entrega é ida e volta, então árvore longe rende menos por minuto: a maior
+  mata do mapa deixa de ganhar da que a sua turma está realmente cortando.
+- A detecção dispara **enquanto os coletores ainda estão caminhando**, não depois que chegam. A ordem
+  que os leva até lá (`GatherNearPosition`) passou a ser lida também, então a fundação sobe em
+  paralelo com a ida em vez de sair depois da primeira entrega longa.
+- **Fundação de dropsite conta como dropsite.** Durante os ~30 s de obra o despachante pontuava
+  aquela floresta como descoberta e seguia mandando gente para outro lado.
+- **Os coletores acompanham o dropsite que ergueram.** Terminada a obra — controlada pela própria
+  fundação, não por relógio — os construtores colhem ali mesmo, em vez de caírem no recurso de melhor
+  score global, que costumava ser a floresta de onde vieram.
+- O edifício agrícola é aprovado por **quanta fruta de fato sobrou ao alcance** (200, um arbusto
+  cheio e o dobro do custo dele em madeira), não por contagem de arbustos. Um arbusto cheio vale;
+  três raspados não valem.
+
+**Detecção de caminhada longa** — coletor cujo recurso está longe demais de um dropsite recebe ou um
+dropsite novo colado no recurso, ou uma troca para o mesmo tipo de recurso perto de um já existente.
+"Longe demais" é calculado, não chutado: encher a carga leva `capacidade / taxa` e a ida e volta leva
+`2 × distância / velocidade`, então o empate é `capacidade × velocidade / (2 × taxa)` — cerca de
+**45 m para fruta, 64 m para madeira e 129 m para pedra e metal**. Ele lê os componentes da própria
+unidade, então melhorias de coleta e de velocidade deslocam o limiar sozinhas.
 
 A **auto-fila** mantém a fila de treino cheia no centro cívico e nos quartéis, aprende o tamanho de
 lote que você configurou e contorna o bug do motor que encolhe o lote em silêncio quando falta
@@ -262,16 +392,24 @@ O **mercado inteligente** troca o que está sobrando pelo que está faltando.
 - **Guarnição defensiva** — trabalhadores se abrigam em prédios próximos durante um ataque e voltam
   quando acalma, com esperas que impedem o vai-e-volta de guarnecer/soltar que travava a economia.
 - **Modo pânico** — num ataque sério, tudo para e os trabalhadores são protegidos. **Voltar ao
-  Trabalho** os traz de volta.
+  Trabalho** os traz de volta. O pânico exige **hostilidade real**, não proximidade: um inimigo só
+  conta se estiver com ordem de ataque sobre algo seu ou de aliado, ou se estiver dentro do seu
+  território. Tropa passando de largo a caminho de brigar com outro não dispara mais nada. Se o seu
+  centro cívico caiu, ou se um abrigo está cercado, o mod nunca desguarnece sozinho — isso continua
+  sendo decisão sua.
 - **Counter-train** — treina unidades que fazem frente ao que o inimigo realmente tem em campo.
 
 ## Exploração
 
 Selecione a cavalaria e escolha o modo:
 
-- **Local** — varre a região ao redor da sua base procurando recursos.
-- **Profundo** — acha a base inimiga e a contorna a 120 m de distância segura, avançando ~40° por
-  ponto para de fato dar a volta em vez de ricochetear entre poucos pontos.
+- **Local** — faz uma espiral sobre a base inteira, do anel interno para fora, uma volta completa por
+  revolução. Dá preferência ao que ninguém está enxergando no momento, então fecha pontos cegos em
+  vez de andar só pelo aro externo.
+- **Profundo** — vai para o **lado oposto do mapa**, longe da sua base e das aliadas, porque é onde o
+  inimigo normalmente está. Nunca refaz terreno já explorado — seu *ou de um aliado*, já que o que
+  ele lê é a linha de visão compartilhada do motor. Achada a base inimiga, contorna a distância
+  segura (no mínimo 120 m, maior em mapas muito grandes), pulando os arcos que já abriu.
 
 Ao ser avistado, o scout **foge na direção oposta ao inimigo**, não de volta para a base, e só volta
 a explorar após duas verificações seguidas sem perigo. Estruturas inimigas bloqueiam o setor
@@ -310,6 +448,68 @@ PudimMod, e o PudimMod não precisa dele.
 
 Português ou inglês, detectado automaticamente pelo idioma do jogo. Para forçar um deles, defina
 `pudim.lang` como `pt` ou `en` na configuração do usuário.
+
+## Histórico de mudanças
+
+### 19/08/2026
+
+**Economia**
+
+- As prioridades de coleta começam toda partida em **comida 3 / madeira 4 / pedra 0 / metal 0**, e não
+  são mais gravadas em disco.
+- Teto de fazendas de volta ao valor fixo de **9** (45 trabalhadores). O teto proporcional à população
+  que o havia substituído resolvia a falta de comida, mas em jogo produziu 15 campos e 66
+  trabalhadores em comida com 7900 de comida parada.
+- Novo **freio por estoque**: nenhum campo novo e nenhum trabalhador a mais em comida enquanto o
+  estoque estiver acima do que a folga de população ainda conseguiria gastar.
+- O edifício agrícola passa a ser aprovado por **quanta fruta sobrou ao alcance** (200 = um arbusto
+  cheio = o dobro do custo dele em madeira), e não por contagem de arbustos. Ele recusava construir ao
+  lado de um arbusto cheio enquanto os coletores atravessavam a base — três ciclos seguidos no log.
+- A âncora do armazém é **densidade ponderada pela distância até a equipe**, então ele nasce na
+  floresta que a sua turma está cortando, não na maior do mapa.
+- **Fundação de dropsite conta como dropsite.** Ela não carrega o componente `ResourceDropsite`
+  (`special/filter/foundation.xml` é uma entidade filtrada), então durante a obra o despachante
+  pontuava aquela floresta como descoberta e seguia mandando gente para outro lado.
+- **Os coletores acompanham o dropsite que ergueram**, quando a fundação de fato sai do chão —
+  controlado pela fundação, não por relógio. Medir isso pela ociosidade do construtor arrancava gente
+  de obra inacabada: um edifício agrícola passou 79 s com quatro construtores e o estoque de comida
+  foi a zero.
+- A detecção de "longe do dropsite" dispara **enquanto os coletores caminham**, não depois que chegam.
+- O **limiar de caminhada longa é calculado por recurso** a partir da capacidade, da taxa de coleta e
+  da velocidade da própria unidade — cerca de 45 m para fruta, 64 m para madeira e 129 m para pedra e
+  metal, no lugar de 100 m fixos.
+- Toda ordem gather-near-position passa a levar o subtipo do recurso. Sem ele o estado
+  FINDINGNEWTARGET do motor não casa com nada e o coletor para depois de esvaziar um alvo.
+
+**Militar**
+
+- **O pânico exige hostilidade real** — ordem de ataque sobre algo seu ou de aliado, ou inimigo dentro
+  do seu território. Antes bastava qualquer combatente a 220 m, então tropa passando de largo
+  disparava pânico total sem ataque nenhum.
+- Corrigido um **laço no timeout do pânico**: quando a trava de "sem centro cívico / abrigo cercado"
+  recusava desguarnecer, a válvula de 120 s redisparava a cada tique — 119 linhas de log numa partida.
+
+**Exploração**
+
+- Math.asin saiu do componente de simulação. O motor o recusa ali ("does not yet have a
+  synchronization safe implementation"): erro em tela a cada ponto de rota e risco de dessincronizar
+  em multiplayer. O passo da órbita agora vem do comprimento de arco.
+- **O scout profundo dá preferência ao lado oposto do mapa**, longe da sua base e das aliadas, e nunca
+  refaz terreno já explorado — inclusive o que um aliado explorou, pela linha de visão compartilhada
+  do motor.
+- **O scout local faz espiral sobre a base inteira** em vez de andar pelo aro externo, e prioriza o
+  que ninguém está enxergando, fechando pontos cegos.
+- O raio da órbita passa a escalar com o tamanho do mapa. Num mapa 2048 o raio de chegada (140 m) era
+  maior que a maior corda possível de um anel de 120 m, então o scout "chegava" sem sair do lugar e
+  queimava a órbita parado.
+
+**Ferramentas**
+
+- Suíte de testes em Node dentro de `tools/` — 10 arquivos. Vários rodam o código que vai para o jogo,
+  e não uma cópia. Já pegaram defeitos reais: uma fórmula de luminância, a órbita em mapa 2048 e uma
+  regra que aprovava três arbustos raspados enquanto recusava um cheio.
+
+---
 
 ## Licença
 

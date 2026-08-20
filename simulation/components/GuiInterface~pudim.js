@@ -2045,7 +2045,6 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 		// entrar no alcance. A fronteira fica a ~140m do CC (TerritoryInfluence Radius),
 		// mais de 70m fora dos 60m de alcance de todos eles.
 		const threats = pudimThreatsAround(enemyBasePos.x, enemyBasePos.z, 400);
-		result.threats = threats.length;
 
 		// Piso absoluto: nunca chegar perto do CC inimigo, mesmo que a fronteira esteja
 		// estranhamente colada (mapa apertado, território disputado).
@@ -2090,7 +2089,8 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 				if (!pudimPathSafe(scoutX, scoutZ, cx, cz, threats)) continue;
 				// orbitAngle volta ao cliente para ele avançar theta e nunca reescolher este ponto
 				return { "x": cx, "z": cz, "orbitAngle": a, "unexplored": soPontosNovos,
-				         "losOk": !!losAt, "onBorder": true, "orbitR": Math.round(r) };
+				         "losOk": !!losAt, "onBorder": true, "orbitR": Math.round(r),
+				         "threats": threats.length };
 			}
 			if (!losAt) break; // sem leitura de exploração as duas passadas seriam idênticas
 		}
@@ -2135,7 +2135,6 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 	// mapa e, sem isto, podia mandar o scout para dentro do alcance de uma torre avançada ou
 	// de um grupo inimigo em campo — a base inimiga nem precisa ser conhecida para matá-lo.
 	const threatsScan = pudimThreatsAround(scoutX, scoutZ, 400);
-	result.threats = threatsScan.length;
 
 	for (let x = 10; x < mapSize - 10; x += step) {
 		for (let z = 10; z < mapSize - 10; z += step) {
@@ -2260,6 +2259,7 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 	// losOk diz se a leitura de exploração existiu neste build ou se caiu no fallback.
 	// Sem esse sinal não há como julgar em jogo se o scout melhorou ou se a API faltou.
 	bestPos.losOk = !!losAt;
+	bestPos.threats = threatsScan.length;
 	// Zonas proibidas devolvidas ao cliente: ele marca esses setores na lista negra, para
 	// que nem a espiral de emergência (usada quando a varredura não acha nada) leve o scout
 	// de volta ao alcance do que já atirou nele.

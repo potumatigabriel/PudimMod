@@ -1584,6 +1584,12 @@ var g_PudimFoundationAccum = 0;
 /** Throttle do diagnóstico de caminhada longa (ver o log WALK) */
 var g_PudimWalkDiagAt = 0;
 
+/** Throttle do log de abrigo (ver o ramo "defendendo" do pânico) */
+var g_PudimShelterLogAt = 0;
+
+/** Última ordem de fuga por unidade — evita reemitir walk a cada ciclo (id → ms) */
+var g_PudimFleeAt = {};
+
 var g_PudimDropsiteRally = {};
 /** Janela de validade do rally. Acima disso a âncora provavelmente já não faz sentido. */
 const PUDIM_RALLY_WINDOW = 180000;
@@ -3269,8 +3275,40 @@ function pudim_ProcessPanic()
 			}
 			g_PudimPanicMode = true;
 			if (statusEl) statusEl.caption = "Situação: Defendendo (" + panicData.enemyCount + " inimigos)";
-			// Mesmo no modo "pode defender", guarnecer trabalhadores que estão próximos do inimigo
-			const safeCC = panicData.shelters.filter(s => s.type === "cc" && s.freeSlots > 0);
+			// Mesmo no modo "pode defender", abrigar quem está perto do inimigo.
+			//
+			// Aqui só o CENTRO CÍVICO era considerado. Com uma base de 183 de população e
+			// dezenas de casas, o CC enche nas primeiras ~20 unidades e todo o resto ficava
+			// parado apanhando: era o relato de 19/08, "aldeões sendo atacados sem fugir".
+			// As casas já vinham na lista de abrigos e simplesmente não eram usadas neste ramo.
+			//
+			// Casa vem primeiro, de propósito: são muitas e espalhadas, então há sempre uma
+			// perto, e deixam o CC livre para guarnição militar (que é o que faz o CC atirar).
+			// Dentro de cada categoria vence o abrigo MAIS PERTO do trabalhador — mandar
+			// alguém atravessar a base sob ataque é o mesmo que não abrigar.
+			let abrigados = 0, fugindo = 0;
+			const nowPanic = Date.now();
+			// Limpa cooldowns de fuga vencidos, para o objeto não crescer a partida inteira.
+			for (const fid in g_PudimFleeAt)
+				if (nowPanic - g_PudimFleeAt[fid] > 30000) delete g_PudimFleeAt[fid];
+			const escolherAbrigo = function(w) {
+				let melhor = null, melhorRank = 99, melhorD = Infinity;
+				for (const sh of panicData.shelters) {
+					if (sh.freeSlots <= 0) continue;
+					// 0 = casa segura, 1 = CC seguro, 2 = casa sob ameaça, 3 = CC sob ameaça.
+					// Abrigo com inimigo por perto ainda é melhor que campo aberto.
+					const rank = (sh.type === "house" ? 0 : 1) + (sh.safe ? 0 : 2);
+					let d = 0;
+					if (w.x !== null && w.x !== undefined && sh.x !== undefined) {
+						const dx = sh.x - w.x, dz = sh.z - w.z;
+						d = dx * dx + dz * dz;
+					}
+					if (rank < melhorRank || (rank === melhorRank && d < melhorD)) {
+						melhorRank = rank; melhorD = d; melhor = sh;
+					}
+				}
+				return melhor;
+			};
 			for (const worker of panicData.atRiskWorkers) {
 				if (g_PudimPanicGarrisoned[worker.id]) continue;
 				// Só bloqueia se foi solto agora há pouco (anti vai-e-volta). Ataque novo
@@ -3278,12 +3316,30 @@ function pudim_ProcessPanic()
 				if (!pudim_CanGarrison(worker.id)) continue;
 				if (!g_PudimPanicPreTask[worker.id] && worker.currentOrder)
 					g_PudimPanicPreTask[worker.id] = worker.currentOrder;
-				const shelter = safeCC.find(s => s.freeSlots > 0);
+				const shelter = escolherAbrigo(worker);
 				if (shelter) {
 					Engine.PostNetworkCommand({ "type": "garrison", "entities": [worker.id], "target": shelter.id, "queued": false });
 					g_PudimPanicGarrisoned[worker.id] = { shelterID: shelter.id };
 					shelter.freeSlots--;
+					abrigados++;
+				} else if (worker.fleeX !== null && worker.fleeX !== undefined) {
+					// Sem vaga em lugar nenhum: correr para o lado oposto ao atacante, para
+					// fora do alcance. Ficar parado apanhando não é opção — foi o relato.
+					// Cooldown por unidade: reemitir walk a cada ciclo reinicia o pathfinder e
+					// a unidade fica tremendo no lugar em vez de andar.
+					if (nowPanic - (g_PudimFleeAt[worker.id] || 0) > 5000) {
+						g_PudimFleeAt[worker.id] = nowPanic;
+						Engine.PostNetworkCommand({ "type": "walk", "entities": [worker.id],
+							"x": worker.fleeX, "z": worker.fleeZ, "queued": false });
+						fugindo++;
+					}
 				}
+			}
+			if ((abrigados > 0 || fugindo > 0) && nowPanic - g_PudimShelterLogAt > 10000) {
+				g_PudimShelterLogAt = nowPanic;
+				const vagas = panicData.shelters.reduce((a, sh) => a + Math.max(0, sh.freeSlots), 0);
+				pudim_Log("INFO", "PANIC", "abrigando " + abrigados + " e fugindo " + fugindo +
+					"; " + vagas + " vaga(s) em " + panicData.shelters.length + " abrigo(s)");
 			}
 			return;
 		}

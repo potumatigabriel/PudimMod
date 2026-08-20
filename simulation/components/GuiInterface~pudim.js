@@ -1611,6 +1611,10 @@ GuiInterface.prototype.pudim_GetPanicData = function(player, data)
 	// Inimigos combatentes dentro de 220m de qualquer âncora da base (CC ou, se o CC caiu,
 	// outra estrutura / a própria tropa — ver bloco acima). O raio agora é só o pré-filtro
 	// barato; quem decide é pudimIsHostile.
+	// Tamanho do mapa, para não mandar ninguém fugir para fora dele.
+	const cmpTerrainPanic = Engine.QueryInterface(SYSTEM_ENTITY, IID_Terrain);
+	const mapSize = cmpTerrainPanic ? cmpTerrainPanic.GetMapSize() : 512;
+
 	const enemyNear = [];
 	const seenEnemies = new Set();
 	for (const ccPos of anchorPositions) {
@@ -1665,6 +1669,60 @@ GuiInterface.prototype.pudim_GetPanicData = function(player, data)
 		const pos = Engine.QueryInterface(e, IID_Position);
 		if (pos && pos.IsInWorld()) enemyPos.push(pos.GetPosition2D());
 	}
+
+	/**
+	 * Para onde correr quando não há abrigo. A direção base é a OPOSTA ao centro de massa
+	 * dos inimigos próximos — correr para o lado de quem está atirando é morrer mais rápido.
+	 *
+	 * Só a direção oposta não basta quando o trabalhador está cercado: ela pode apontar
+	 * direto para um segundo grupo. Então testa 7 rumos em leque (±60° em torno do oposto) e
+	 * fica com o que termina MAIS LONGE do inimigo mais próximo.
+	 *
+	 * A distância vem do alcance real de quem está por perto (Attack.GetFullAttackRange, que
+	 * já aplica as tecnologias) mais 30m de folga, com piso de 80m: não adianta correr 20m se
+	 * o arqueiro alcança 72.
+	 */
+	const pudimFleePoint = function(wp) {
+		let somaX = 0, somaZ = 0, n = 0, alcanceMax = 0;
+		for (let i = 0; i < enemyNear.length; ++i) {
+			const ep2 = enemyPos[i];
+			if (!ep2) continue;
+			const dx = wp.x - ep2.x, dz = wp.y - ep2.y;
+			if (dx * dx + dz * dz > 120 * 120) continue;
+			somaX += ep2.x; somaZ += ep2.y; n++;
+			const cmpAtk = Engine.QueryInterface(enemyNear[i], IID_Attack);
+			if (cmpAtk && cmpAtk.GetFullAttackRange) {
+				try {
+					const r = +cmpAtk.GetFullAttackRange().max || 0;
+					if (r > alcanceMax) alcanceMax = r;
+				} catch (e) {}
+			}
+		}
+		if (n === 0) return null;
+
+		const cx = somaX / n, cz = somaZ / n;
+		let vx = wp.x - cx, vz = wp.y - cz;
+		let len = Math.sqrt(vx * vx + vz * vz);
+		if (len < 1) { vx = 1; vz = 0; len = 1; }   // em cima do inimigo: qualquer rumo serve
+		vx /= len; vz /= len;
+
+		const dist = Math.max(80, alcanceMax + 30);
+		const base = Math.atan2(vz, vx);
+		let melhor = null, melhorD = -1;
+		for (let k = -3; k <= 3; ++k) {
+			const a = base + k * (Math.PI / 9);   // passo de 20°, leque de ±60°
+			const tx = Math.max(12, Math.min(mapSize - 12, wp.x + Math.cos(a) * dist));
+			const tz = Math.max(12, Math.min(mapSize - 12, wp.y + Math.sin(a) * dist));
+			let perto = Infinity;
+			for (const ep2 of enemyPos) {
+				const dx = tx - ep2.x, dz = tz - ep2.y;
+				const d = dx * dx + dz * dz;
+				if (d < perto) perto = d;
+			}
+			if (perto > melhorD) { melhorD = perto; melhor = { x: tx, z: tz }; }
+		}
+		return melhor;
+	};
 
 	// Militares aliados dentro de 200m de qualquer CC
 	let alliedMilitary = 0;
@@ -1767,7 +1825,17 @@ GuiInterface.prototype.pudim_GetPanicData = function(player, data)
 				if (ord.type === "Gather" && ord.data && ord.data.target)
 					currentOrder = { type: "gather", target: ord.data.target };
 			}
-			result.atRiskWorkers.push({ id: ent, currentOrder: currentOrder });
+			// Posição vai junto: sem ela o painel não tem como escolher o abrigo MAIS PERTO,
+			// e mandar um aldeão atravessar a base sob ataque para chegar ao CC é o mesmo que
+			// não abrigar ninguém.
+			const wpos = Engine.QueryInterface(ent, IID_Position);
+			const wp2 = (wpos && wpos.IsInWorld()) ? wpos.GetPosition2D() : null;
+			// Ponto de fuga, para quando não sobrar vaga em casa nenhuma nem no CC. Direção
+			// oposta a quem está batendo: o alvo é sair do alcance, não chegar a algum lugar.
+			const fuga = wp2 ? pudimFleePoint(wp2) : null;
+			result.atRiskWorkers.push({ id: ent, currentOrder: currentOrder,
+			                            x: wp2 ? wp2.x : null, z: wp2 ? wp2.y : null,
+			                            fleeX: fuga ? fuga.x : null, fleeZ: fuga ? fuga.z : null });
 		} else if (isSoldier) {
 			result.atRiskSoldiers.push({ id: ent });
 		}

@@ -817,7 +817,7 @@ function pudim_RunAutoWork()
 								pudim_ProtectBuilder(pd.builderId, nowLW + 30000);
 								// O dropsite nasceu por causa DESTE recurso-alvo: ao terminar,
 								// o construtor colhe ali mesmo em vez de voltar ao despacho.
-								pudim_SetRally([pd.builderId], w.targetResX, w.targetResZ, w.targetResType);
+								pudim_SetRally([pd.builderId], w.targetResX, w.targetResZ, w.targetResType, fx, fz);
 								builtDropsite = true;
 								builtCount++;
 							}
@@ -927,7 +927,7 @@ function pudim_RunAutoWork()
 					// prende ninguém depois que a obra acaba.
 					pudim_ProtectBuilder(proactive.builderId, Date.now() + 30000);
 					// cand é o cluster que motivou a obra: o construtor colhe lá ao terminar.
-					pudim_SetRally([proactive.builderId], cand.x, cand.z, resKey);
+					pudim_SetRally([proactive.builderId], cand.x, cand.z, resKey, foundX, foundZ);
 					pudim_Log("SUCCESS", "DROP", logLabel + " proativo em (" + foundX.toFixed(0) + "," + foundZ.toFixed(0) + ") antes da 1a colheita");
 					return; // 1 build por ciclo (respeita cooldown); demais candidatos tentam no próximo
 				}
@@ -1566,12 +1566,42 @@ const PUDIM_RALLY_WINDOW = 180000;
  */
 const PUDIM_RES_SPECIFIC = { "wood": "tree", "food": "fruit", "stone": "rock", "metal": "ore" };
 
-/** Registra que estes construtores devem colher na âncora assim que ficarem ociosos. */
-function pudim_SetRally(ids, x, z, res) {
+/**
+ * Registra que estes construtores devem colher na âncora QUANDO A OBRA ACABAR.
+ * bx/bz é onde a fundação foi colocada — é o que segura o rally até ela sair do chão.
+ */
+function pudim_SetRally(ids, x, z, res, bx, bz) {
 	if (x === undefined || x === null || z === undefined || z === null || !res) return;
 	const until = Date.now() + PUDIM_RALLY_WINDOW;
 	const spec = PUDIM_RES_SPECIFIC[res] || "";
-	for (const id of ids) g_PudimDropsiteRally[id] = { x: x, z: z, res: res, specific: spec, until: until };
+	for (const id of ids)
+		g_PudimDropsiteRally[id] = { x: x, z: z, res: res, specific: spec, until: until,
+		                             bx: bx, bz: bz };
+}
+
+/**
+ * Ainda existe fundação do mod de pé em (bx,bz)? Enquanto houver, o rally espera.
+ *
+ * "Apos a obra" era medido por OCIOSIDADE do construtor, e um construtor pode aparecer
+ * ocioso por um instante sem a obra ter andado — ordem que não pegou, caminho recalculado,
+ * o intervalo entre chegar e começar a martelar. Bastava esse instante para o rally
+ * arrancá-lo da fundação, e o auto-work devolvia outro no ciclo seguinte: o vaivém sobre
+ * o celeiro relatado em 19/08, com a comida caindo a zero enquanto a obra de (661,816)
+ * passava 79s sem sair com 4 construtores.
+ *
+ * Agora quem manda é a fundação: enquanto ela estiver na lista rastreada, o rally segura.
+ * 10m de tolerância porque a posição gravada é a do comando, e a fundação assenta na
+ * grade de construção.
+ */
+function pudim_RallyObraPendente(r) {
+	if (!r || r.bx === undefined || r.bx === null) return false;
+	for (const fid in g_PudimDropsiteFoundationPos) {
+		const p = g_PudimDropsiteFoundationPos[fid];
+		if (!p) continue;
+		const dx = p.x - r.bx, dz = p.z - r.bz;
+		if (dx * dx + dz * dz <= 100) return true;
+	}
+	return false;
 }
 
 /**
@@ -1587,6 +1617,7 @@ function pudim_ApplyRally(idleList) {
 	for (const w of idleList) {
 		const r = g_PudimDropsiteRally[w.id];
 		if (!r) continue;
+		if (pudim_RallyObraPendente(r)) continue; // obra de pé: ninguém sai daqui ainda
 		const k = Math.round(r.x) + "," + Math.round(r.z) + "," + r.res;
 		if (!groups[k]) groups[k] = { x: r.x, z: r.z, res: r.res, specific: r.specific, ids: [] };
 		groups[k].ids.push(w.id);
@@ -2515,7 +2546,7 @@ function pudim_ProcessAdvancedAI()
 						pudim_SetRally(allBuilders,
 							dropsiteData.anchorX !== undefined ? dropsiteData.anchorX : foundX,
 							dropsiteData.anchorZ !== undefined ? dropsiteData.anchorZ : foundZ,
-							resKey);
+							resKey, foundX, foundZ);
 					}
 				}
 			}

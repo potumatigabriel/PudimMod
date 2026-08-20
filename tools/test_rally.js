@@ -33,7 +33,9 @@ const sandbox = {
 	pudim_Log: (lvl, tag, msg) => logged.push(tag + ": " + msg),
 	Date: Date,
 	Math: Math,
-	Object: Object
+	Object: Object,
+	// Fundacoes de dropsite do mod que ainda estao de pe (id -> {x,z}).
+	g_PudimDropsiteFoundationPos: {}
 };
 vm.createContext(sandbox);
 vm.runInContext(block, sandbox);
@@ -103,7 +105,46 @@ sandbox.pudim_SetRally([42], 10, 10, null);
 taken = sandbox.pudim_ApplyRally([{ id: 41 }, { id: 42 }]);
 check("âncora/recurso inválido é ignorado", posted.length === 0 && Object.keys(taken).length === 0);
 
-// 8. Tabela de subtipos bate com simulation/data/resources/*.json.
+// 8. Rally espera a obra sair do chao.
+// O construtor pode aparecer ocioso por um instante sem a obra ter andado; era isso que
+// arrancava gente da fundacao e criava o vaivem sobre o celeiro (log de 19/08, a obra de
+// (661,816) passou 79s sem sair com 4 construtores e a comida caiu a zero).
+posted.length = 0;
+sandbox.g_PudimDropsiteFoundationPos = { 900: { x: 300, z: 300 } };
+sandbox.pudim_SetRally([51], 310, 305, "wood", 300, 300);
+taken = sandbox.pudim_ApplyRally([{ id: 51 }]);
+check("fundacao de pe segura o rally", posted.length === 0 && !taken[51], JSON.stringify(posted));
+
+// A obra some da lista quando termina (ou morre) — ai o rally libera.
+sandbox.g_PudimDropsiteFoundationPos = {};
+taken = sandbox.pudim_ApplyRally([{ id: 51 }]);
+check("obra concluida libera o rally", posted.length === 1 && !!taken[51], JSON.stringify(posted));
+check("o destino continua sendo a ancora, nao a obra",
+	Math.round(posted[0].x) === 310 && Math.round(posted[0].z) === 305,
+	JSON.stringify(posted[0]));
+
+// Tolerancia de 10m: a fundacao assenta na grade, entao nao cai exatamente no ponto pedido.
+posted.length = 0;
+sandbox.g_PudimDropsiteFoundationPos = { 901: { x: 306, z: 304 } }; // 7.2m do pedido
+sandbox.pudim_SetRally([52], 400, 400, "wood", 300, 300);
+taken = sandbox.pudim_ApplyRally([{ id: 52 }]);
+check("fundacao deslocada pela grade ainda segura", posted.length === 0 && !taken[52]);
+
+// Obra de OUTRO lugar nao pode segurar este rally.
+posted.length = 0;
+sandbox.g_PudimDropsiteFoundationPos = { 902: { x: 800, z: 800 } };
+taken = sandbox.pudim_ApplyRally([{ id: 52 }]);
+check("obra distante nao segura o rally", posted.length === 1 && !!taken[52]);
+
+// Rally antigo, sem posicao de obra, nao pode travar para sempre.
+posted.length = 0;
+sandbox.g_PudimDropsiteFoundationPos = { 903: { x: 10, z: 10 } };
+sandbox.pudim_SetRally([53], 500, 500, "wood");
+taken = sandbox.pudim_ApplyRally([{ id: 53 }]);
+check("rally sem posicao de obra nao trava", posted.length === 1 && !!taken[53]);
+sandbox.g_PudimDropsiteFoundationPos = {};
+
+// 9. Tabela de subtipos bate com simulation/data/resources/*.json.
 const esperado = { wood: "tree", food: "fruit", stone: "rock", metal: "ore" };
 // `const` do bloco não vira propriedade do sandbox: lê de dentro do contexto.
 const tabela = vm.runInContext("PUDIM_RES_SPECIFIC", sandbox);

@@ -554,6 +554,20 @@ Português ou inglês, detectado automaticamente pelo idioma do jogo. Para forç
 
 Tudo abaixo saiu de uma partida só, com o jogo aberto e os relatos chegando na hora.
 
+**Interface**
+
+- **Os interruptores foram para Menu → Opções → PudimMod**, cada um com explicação do que faz e
+  por quê — e tudo em português, que era metade do problema: "Smart Dropsites", "Auto-Retreat" e
+  "Smart Focus Fire" apareciam em inglês num jogo em pt-BR. O painel ficou com o que é decisão
+  **da partida** (números que você ajusta jogando) e não configuração permanente.
+- **O painel não cabia na tela.** Ele ia até 1156 px numa tela de 1067 — e já passava 16 px da
+  borda antes da seção nova, com a dica do Conselheiro cortada ao meio sem ninguém notar. Um
+  `size` em XML aceita qualquer número e o jogo desenha o que couber, calado sobre o resto. Agora
+  há um teste que faz a conta (`tools/test_painel_cabe.js`).
+- **Quatro controles nas opções não faziam nada.** Os pesos de coleta viraram não-persistentes
+  quando o padrão 3/4/0/0 foi fixado, mas os sliders continuaram lá prometendo o que não
+  cumpriam. Removidos; o teste agora recusa qualquer opção cuja chave ninguém lê.
+
 **O jogador manda mais que o mod**
 
 - **Apagar uma obra pausa TODAS as obras por 10 segundos.** A quarentena por posição existia,

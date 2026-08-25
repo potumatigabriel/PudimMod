@@ -4,56 +4,84 @@
 		"options": [
 			{
 				"type": "boolean",
-				"label": "[color=\"210 100 230\"]Auto-Trabalho:[/color] Ativo ao Iniciar",
-				"tooltip": "Inicia o jogo com o sistema de Auto-Trabalho (idle workers) já ativado por padrão.",
+				"label": "[color=\"255 200 120\"]Ajudas de Combate:[/color] chave-mestra",
+				"tooltip": "Desligando aqui, NENHUMA ajuda de combate age: nem foco de fogo, nem recuo automático, nem manter distância, nem pânico, nem guarnição. Os interruptores individuais continuam existindo, mas este tem precedência sobre todos. Serve para jogar as batalhas 100% no controle manual sem precisar desligar um por um.",
+				"config": "pudim.advanced.combat"
+			},
+			{
+				"type": "boolean",
+				"label": "[color=\"255 200 120\"]Combate:[/color] Recuo Automático (vida abaixo de 20%)",
+				"tooltip": "Unidade que cai abaixo de 20% da vida sai da linha de frente sozinha e vai até um curandeiro ou templo. Vale a pena porque unidade ferida que volta curada custa zero, enquanto substituí-la custa recursos e tempo de treino. Desligue se preferir decidir você mesmo quando cada unidade recua.",
+				"config": "pudim.advanced.retreat"
+			},
+			{
+				"type": "boolean",
+				"label": "[color=\"255 200 120\"]Combate:[/color] Foco de Fogo",
+				"tooltip": "Faz seus soldados concentrarem no MESMO alvo em vez de cada um escolher um inimigo diferente. Matar um inimigo por vez reduz o dano que você recebe a cada segundo, porque inimigo morto para de atirar — dez unidades feridas fazem o mesmo estrago que dez inteiras. Unidade que recebeu ordem sua não é tocada.",
+				"config": "pudim.advanced.focus"
+			},
+			{
+				"type": "boolean",
+				"label": "[color=\"255 200 120\"]Combate:[/color] Guarnição Defensiva",
+				"tooltip": "Durante um ataque, os trabalhadores se abrigam nos prédios próximos e voltam ao trabalho quando acalma. A casa vem antes do centro cívico: são muitas, espalhadas, e deixam o centro livre para a guarnição militar que o faz atirar. Se todos os abrigos estiverem lotados, eles correm — para o lado oposto ao atacante, longe o bastante para sair do alcance real da arma dele.",
+				"config": "pudim.advanced.garrison"
+			},
+			{
+				"type": "boolean",
+				"label": "[color=\"255 200 120\"]Combate:[/color] Sistema de Pânico",
+				"tooltip": "Num ataque sério, tudo para e os trabalhadores são protegidos. Só dispara com HOSTILIDADE REAL, não com proximidade: um inimigo só conta se estiver atacando algo seu ou de um aliado, ou se estiver dentro do seu território — tropa passando de largo não dispara nada. Se o seu centro cívico caiu, ou se um abrigo está cercado, o mod nunca desguarnece sozinho; isso continua sendo decisão sua.",
+				"config": "pudim.advanced.panic"
+			},
+			{
+				"type": "boolean",
+				"label": "[color=\"255 200 120\"]Combate:[/color] Treinar o Contra do Inimigo",
+				"tooltip": "Treina unidades que fazem frente ao que o inimigo REALMENTE tem em campo, e não ao que ele poderia ter. Se ele está de cavalaria, sai lanceiro; se está de infantaria pesada, sai unidade à distância.",
+				"config": "pudim.advanced.countertrain"
+			},
+			{
+				"type": "boolean",
+				"label": "[color=\"120 220 255\"]Economia:[/color] Armazéns e Celeiros Automáticos",
+				"tooltip": "Ergue armazém perto da floresta e celeiro perto das frutas quando os coletores estão andando demais para entregar. O limiar não é um número fixo: sai da capacidade de carga, da taxa de coleta e da velocidade da própria unidade, então melhoria de coleta ou de velocidade desloca o limiar sozinha. Construir custa 100 de madeira e não move ninguém, então dispara cedo; TIRAR um coletor do lugar é bem mais caro e exige folga bem maior.",
+				"config": "pudim.advanced.dropsites"
+			},
+			{
+				"type": "boolean",
+				"label": "[color=\"120 220 255\"]Economia:[/color] Mercado Inteligente",
+				"tooltip": "Vende no mercado o recurso que está sobrando para comprar o que está faltando, respeitando a taxa de câmbio do momento.",
+				"config": "pudim.advanced.barter"
+			},
+			{
+				"type": "boolean",
+				"label": "[color=\"120 220 255\"]Economia:[/color] Auto-Fila de Treino",
+				"tooltip": "Mantém os edifícios de produção treinando sem você precisar reenfileirar. Duas garantias: o TIPO de unidade que você pôs na fila nunca é trocado (5 guerreiros nunca voltam como 2 aldeões), e se você desligar a fila num edifício, o mod não religa. Como o motor também desliga a fila sozinho quando falta recurso, o mod espera 10 segundos antes de religar — e se você desligar duas vezes em 30 segundos, ele entende que é decisão sua e não mexe mais.",
+				"config": "pudim.advanced.autoqueue"
+			},
+			{
+				"type": "boolean",
+				"label": "[color=\"120 220 255\"]Economia:[/color] Auto-Trabalho ativo ao iniciar a partida",
+				"tooltip": "Começa a partida já enviando cidadão ocioso para coletar. Se desligar, o Auto-Trabalho continua existindo no painel; ele só não vem ligado sozinho.",
 				"config": "pudim.autowork.enabled"
 			},
 			{
+				"type": "boolean",
+				"label": "[color=\"200 200 200\"]Diagnóstico:[/color] Mensagens de Debug",
+				"tooltip": "Escreve no log da partida o que o mod está decidindo e por quê: distâncias medidas, limiares calculados, motivo de cada recusa. Não muda nada no jogo — serve para entender uma decisão estranha e para relatar problema. O log fica no botão \"Log\" do painel.",
+				"config": "pudim.debug.show"
+			},
+			{
 				"type": "slider",
-				"label": "[color=\"210 100 230\"]Auto-Trabalho:[/color] Intervalo de Verificação (s)",
-				"tooltip": "Tempo em segundos entre cada verificação e redirecionamento de trabalhadores ociosos.",
+				"label": "[color=\"120 220 255\"]Auto-Trabalho:[/color] Intervalo de Verificação (s)",
+				"tooltip": "De quanto em quanto tempo o mod procura trabalhador ocioso. Mais baixo reage mais rápido; mais alto dá mais tempo para você mesmo dar as ordens antes de o mod agir.",
 				"config": "pudim.autowork.interval",
 				"min": 1,
 				"max": 15
 			},
 			{
 				"type": "slider",
-				"label": "[color=\"210 100 230\"]Combate:[/color] Intervalo do Estimador (s)",
-				"tooltip": "Tempo em segundos entre cada atualização da estimativa de combate no painel.",
+				"label": "[color=\"255 200 120\"]Combate:[/color] Intervalo do Estimador (s)",
+				"tooltip": "De quanto em quanto tempo a estimativa de combate do painel é recalculada. Só afeta o número que você lê; não muda decisão nenhuma do mod.",
 				"config": "pudim.combat.interval",
 				"min": 1,
-				"max": 10
-			},
-			{
-				"type": "slider",
-				"label": "[color=\"210 100 230\"]Prioridades:[/color] Peso Comida",
-				"tooltip": "Urgência padrão para coletar comida (0=desativado, 10=máxima).",
-				"config": "pudim.autowork.weights.food",
-				"min": 0,
-				"max": 10
-			},
-			{
-				"type": "slider",
-				"label": "[color=\"210 100 230\"]Prioridades:[/color] Peso Madeira",
-				"tooltip": "Urgência padrão para coletar madeira (0=desativado, 10=máxima).",
-				"config": "pudim.autowork.weights.wood",
-				"min": 0,
-				"max": 10
-			},
-			{
-				"type": "slider",
-				"label": "[color=\"210 100 230\"]Prioridades:[/color] Peso Pedra",
-				"tooltip": "Urgência padrão para coletar pedra (0=desativado, 10=máxima).",
-				"config": "pudim.autowork.weights.stone",
-				"min": 0,
-				"max": 10
-			},
-			{
-				"type": "slider",
-				"label": "[color=\"210 100 230\"]Prioridades:[/color] Peso Metal",
-				"tooltip": "Urgência padrão para coletar metal (0=desativado, 10=máxima).",
-				"config": "pudim.autowork.weights.metal",
-				"min": 0,
 				"max": 10
 			}
 		]

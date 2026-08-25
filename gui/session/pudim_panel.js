@@ -280,7 +280,7 @@ function pudim_ApplyCompactMode()
 	const panel = Engine.TryGetGUIObjectByName("pudim_mainPanel");
 	if (panel)
 		// Painel ancorado à direita da tela (ver 02_pudim_panel.xml)
-		panel.size = hidden ? "100%-340 50%-514 100%-20 50%-274" : "100%-340 50%-514 100%-20 50%+642";
+		panel.size = hidden ? "100%-340 50%-514 100%-20 50%-274" : "100%-340 50%-514 100%-20 50%+394";
 	// Atualiza ícone do botão
 	const lbl = Engine.TryGetGUIObjectByName("pudim_compactLabel");
 	if (lbl) lbl.caption = hidden ? "▶" : "▼";

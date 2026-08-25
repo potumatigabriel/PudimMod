@@ -61,8 +61,14 @@ check("a quantidade vai de 1 a 10, como pedido",
 check("os dropdowns são populados pela API real (.list/.list_data/.selected)",
 	/tipo\.list = /.test(panel) && /tipo\.list_data = /.test(panel) &&
 	/qtd\.list = /.test(panel) && /qtd\.selected = 0;/.test(panel));
-check("o painel cresceu para caber a seção nova",
-	/50%\+642/.test(xml) && /50%\+642/.test(panel));
+// A altura do painel nao e cravada aqui: ela muda quando o layout muda, e um numero fixo
+// so faria este teste quebrar por motivo errado. O que importa e que XML e JS concordem —
+// quem garante que a secao esta VISIVEL e o test_painel_cabe.js, que faz a conta da tela.
+check("XML e JS concordam sobre a altura do painel", (function() {
+	const a = /50%-514 100%-20 50%\+(\d+)"/.exec(xml);
+	const b = /50%-514 100%-20 50%\+(\d+)"/.exec(panel);
+	return a && b && a[1] === b[1];
+})());
 check("e o init dos dropdowns é chamado de verdade",
 	/pudim_QuartelInit\(\);/.test(panel));
 

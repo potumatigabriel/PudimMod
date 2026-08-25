@@ -39,7 +39,15 @@ check("o limiar fixo de 100m saiu do caminho de decisão",
 check("a decisão usa o limiar calculado",
 	src.indexOf("if (nearestDropDist <= walkThresh) continue;") > 0);
 check("a fórmula é capacidade x velocidade / (2 x taxa)",
-	src.indexOf("PUDIM_WALK_MARGEM * (cap2 * spd2) / (2 * rate2)") > 0);
+	src.indexOf("const empate = (cap2 * spd2) / (2 * rate2);") > 0);
+check("são DOIS limiares: um para construir, outro para mover",
+	/walkThresh = Math\.max\(PUDIM_WALK_PISO_OBRA, empate\);/.test(src) &&
+	/moveThresh = Math\.max\(PUDIM_WALK_PISO, PUDIM_WALK_MARGEM \* empate\);/.test(src));
+check("o limiar de obra é menor que o de mover",
+	+/const PUDIM_WALK_PISO_OBRA = (\d+);/.exec(src)[1] <
+	+/const PUDIM_WALK_PISO = (\d+);/.exec(src)[1]);
+check("o coletor carrega a marca de quem pode ser movido",
+	/podeMover: nearestDropDist > moveThresh/.test(src));
 check("com margem sobre o empate, e não no empate",
 	/const PUDIM_WALK_MARGEM = 1\.5;/.test(src));
 check("e com o piso em 55m",
@@ -139,6 +147,74 @@ check("com a fórmula antiga o relato se reproduz (o teste vale de verdade)",
 
 // O piso tem de cobrir a fruta de base: arbustos ficam tipicamente a 40-50m do CC.
 check("o piso cobre o arbusto de base típico (até 50m)", PISO >= 50, PISO);
+
+// ── A contradição dos 83m, do mesmo dia ───────────────────────────────────────────────
+//
+// Segunda observação do jogador, olhando os lenhadores contornarem um quarteirão de casas:
+// "a essa distância talvez fosse melhor outro armazém mais próximo às árvores, não seria?"
+//
+// O log mostrava o mod discordando de si mesmo em duas linhas quase simultâneas:
+//
+//     1026s [WALK] longe do dropsite: 7 ... wood 83m/lim77
+//     1004s [DROP] skip=within_85pct_CC_dist nd=57 thr=70 fw=12
+//
+// O detector via 83m e pedia socorro; o construtor via 57m e recusava. Mediam coisas
+// diferentes — o detector olha cada trabalhador, o construtor olhava o CENTRÓIDE do grupo,
+// que por ser média encolhe justamente a cauda que está andando demais.
+//
+// E havia um segundo erro por baixo: um limiar só para duas decisões de custo muito
+// diferente. Construir custa 100 de madeira e não move ninguém; mover custa duas caminhadas
+// e a carga parcial largada. A 83m com 19 lenhadores a obra é óbvia e mover é discutível.
+console.log("");
+console.log("contradicao dos 83m: obra e movimento nao sao a mesma decisao");
+const PISO_OBRA = 40;
+function limiarObra(cap, spd, rate) {
+	if (!(rate > 0 && cap > 0 && spd > 0)) return 100;
+	return Math.max(PISO_OBRA, empate(cap, spd, rate));
+}
+const DIST_MADEIRA = 83;
+// A taxa exata da partida não está no log, mas dá para cercá-la: o mod reportou lim77 com a
+// fórmula antiga (empate puro, piso 35), então empate ≈ 77 → taxa ≈ 0.58.
+const TAXA_DAQUELA_PARTIDA = (CAP * SPD) / (2 * 77);
+check("a taxa inferida do log bate com o lim77 reportado",
+	Math.abs(empate(CAP, SPD, TAXA_DAQUELA_PARTIDA) - 77) < 0.5,
+	empate(CAP, SPD, TAXA_DAQUELA_PARTIDA).toFixed(1));
+check("83m de madeira JUSTIFICA construir um armazém",
+	DIST_MADEIRA > limiarObra(CAP, SPD, TAXA_DAQUELA_PARTIDA),
+	"limiar de obra " + limiarObra(CAP, SPD, TAXA_DAQUELA_PARTIDA).toFixed(0));
+check("mas NÃO justifica arrancar os lenhadores de lá",
+	DIST_MADEIRA < limiar(CAP, SPD, TAXA_DAQUELA_PARTIDA),
+	"limiar de mover " + limiar(CAP, SPD, TAXA_DAQUELA_PARTIDA).toFixed(0));
+check("os dois limiares não podem coincidir, senão a distinção não existe",
+	limiarObra(CAP, SPD, 0.7) < limiar(CAP, SPD, 0.7));
+
+// A eficiência a 83m explica por que a obra compensa tão rápido.
+const tColhe83 = CAP / TAXA_DAQUELA_PARTIDA;
+const tAnda83 = 2 * DIST_MADEIRA / SPD;
+const efAntes = tColhe83 / (tColhe83 + tAnda83);
+const tAndaDepois = 2 * 15 / SPD;   // armazém a ~15m das árvores
+const efDepois = tColhe83 / (tColhe83 + tAndaDepois);
+check("a 83m o lenhador passa menos da metade do tempo colhendo",
+	efAntes < 0.5, (efAntes * 100).toFixed(0) + "%");
+check("com armazém perto ele volta para acima de 75%",
+	efDepois > 0.75, (efDepois * 100).toFixed(0) + "%");
+// 19 lenhadores é o fw= do log naquele instante.
+const ganhoPorSeg = 19 * TAXA_DAQUELA_PARTIDA * (efDepois - efAntes);
+check("com 19 lenhadores o armazém (100 de madeira) se paga em menos de 30s",
+	100 / ganhoPorSeg < 30, (100 / ganhoPorSeg).toFixed(0) + "s");
+
+// ── E o construtor tem de usar o MESMO número que o detector ──────────────────────────
+check("existe um helper único de limiar de obra, para os dois sistemas",
+	/function pudim_LimiarObra\(ent, generico\)/.test(src));
+check("o gate do armazém chama esse helper em vez de um número fixo",
+	/nearestSHToWorkers > pudim_LimiarObra\(/.test(src) &&
+	src.indexOf("if (nearestSHToWorkers > 80) {") < 0);
+check("e mede o PIOR trabalhador, não o centróide do grupo",
+	/for \(const p of farWoodPos\) \{[\s\S]{0,400}?if \(dMin > nearestSHToWorkers/.test(src));
+check("o pior lenhador vai para o log, para dar para conferir em jogo",
+	/result\._dbg\.piorLenhador/.test(src));
+check("o helper indexa a taxa como generic.specific, igual ao motor",
+	/generico \+ "\." \+ esp/.test(src));
 
 console.log(fails === 0 ? "\nTODOS OS TESTES PASSARAM" : "\n" + fails + " TESTE(S) FALHARAM");
 process.exit(fails === 0 ? 0 : 1);

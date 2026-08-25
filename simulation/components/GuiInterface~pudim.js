@@ -406,6 +406,52 @@ GuiInterface.prototype.pudim_GetCombatEstimation = function(player, data)
 const PUDIM_WALK_MARGEM = 1.5;
 const PUDIM_WALK_PISO = 55;
 
+// CONSTRUIR um dropsite e MOVER um trabalhador não custam a mesma coisa, e usar um limiar
+// só para as duas decisões foi o erro de fundo por trás dos dois relatos de 25/08.
+//
+//   mover  = duas caminhadas (ele sai de onde está e vai até o destino) + a carga parcial
+//            que ele larga no chão. Caro, e o ganho só aparece nas cargas seguintes.
+//   obra   = 100 de madeira, e ninguém sai do lugar. O construtor já está por perto e volta
+//            a colher ali mesmo; todo mundo que trabalha naquele recurso ganha, para sempre.
+//
+// Por isso a obra pode disparar já no EMPATE (a partir dali cada carga desperdiça mais
+// tempo andando do que colhendo, e 100 de madeira se paga em segundos com 19 lenhadores),
+// enquanto mover exige a margem de 1.5.
+//
+// Piso menor para a obra: 40m ainda protege contra armazém colado no CC, mas não veta o
+// caso do arbusto de base, que é onde 55m faz sentido para MOVER e nenhum para construir.
+const PUDIM_WALK_PISO_OBRA = 40;
+
+// Nome específico de cada recurso, como GetGatherRates o indexa ("wood.tree", "food.fruit").
+// Conferido em ResourceGatherer.js: a chave é generic + "." + specific.
+const PUDIM_ESPECIFICO = { wood: "tree", food: "fruit", stone: "rock", metal: "ore" };
+
+/**
+ * Distância a partir da qual vale a pena CONSTRUIR um dropsite mais perto, para um coletor
+ * concreto e um recurso concreto.
+ *
+ * Existe para que o detector de caminhada longa e o construtor de armazém usem literalmente
+ * o mesmo número. Enquanto cada um fazia sua conta, eles se contradiziam: um pedia socorro
+ * a 83m enquanto o outro recusava por medir 57m no centróide do grupo.
+ *
+ * Sai dos componentes da PRÓPRIA unidade, então melhorias de coleta e de velocidade
+ * deslocam o limiar sozinhas, sem ninguém precisar reajustar constante.
+ */
+function pudim_LimiarObra(ent, generico)
+{
+	if (!ent) return 100;
+	const cmpG = Engine.QueryInterface(ent, IID_ResourceGatherer);
+	const cmpM = Engine.QueryInterface(ent, IID_UnitMotion);
+	if (!cmpG || !cmpG.GetGatherRates || !cmpG.GetCapacity) return 100;
+	const esp = PUDIM_ESPECIFICO[generico];
+	if (!esp) return 100;
+	const taxa = +cmpG.GetGatherRates()[generico + "." + esp];
+	const cap = +cmpG.GetCapacity(generico);
+	const vel = cmpM && cmpM.GetWalkSpeed ? +cmpM.GetWalkSpeed() : 9;
+	if (!(taxa > 0 && cap > 0 && vel > 0)) return 100;
+	return Math.max(PUDIM_WALK_PISO_OBRA, (cap * vel) / (2 * taxa));
+}
+
 GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, data)
 {
 	// suggestStorehouse/suggestFarmstead são LISTAS: se vários workers forem despachados pra
@@ -1388,7 +1434,8 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 		// 129m. Como sai dos componentes da PRÓPRIA unidade, melhorias de coleta e de
 		// velocidade deslocam o limiar sozinhas.
 		const cmpGath2 = Engine.QueryInterface(ent, IID_ResourceGatherer);
-		let walkThresh = PUDIM_WALK_MARGEM * 100;
+		let walkThresh = 100;
+		let moveThresh = PUDIM_WALK_MARGEM * 100;
 		if (cmpGath2 && targetResType.specific) {
 			const rates2 = cmpGath2.GetGatherRates ? cmpGath2.GetGatherRates() : null;
 			const rate2 = rates2 ? +rates2[targetResType.generic + "." + targetResType.specific] : 0;
@@ -1406,9 +1453,11 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 			// A margem afasta o gatilho do empate: só vale mexer quando ele já gasta bem
 			// mais tempo andando do que colhendo (com 1.5, ~40% de eficiência), e aí a
 			// viagem economizada paga a mudança em poucas cargas.
-			if (rate2 > 0 && cap2 > 0 && spd2 > 0)
-				walkThresh = Math.max(PUDIM_WALK_PISO,
-					PUDIM_WALK_MARGEM * (cap2 * spd2) / (2 * rate2));
+			if (rate2 > 0 && cap2 > 0 && spd2 > 0) {
+				const empate = (cap2 * spd2) / (2 * rate2);
+				walkThresh = Math.max(PUDIM_WALK_PISO_OBRA, empate);
+				moveThresh = Math.max(PUDIM_WALK_PISO, PUDIM_WALK_MARGEM * empate);
+			}
 		}
 		if (nearestDropDist <= walkThresh) continue;
 
@@ -1440,7 +1489,11 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 			targetResType: targetResType.generic,
 			// Para o log: quanto ele andaria e a partir de quanto vale agir neste recurso.
 			dropDist: Math.round(nearestDropDist),
-			thresh: Math.round(walkThresh)
+			thresh: Math.round(walkThresh),
+			// Acima do limiar de obra ele entra na lista (vale um dropsite mais perto).
+			// Só acima do limiar de MOVER é que tirá-lo dali compensa as duas caminhadas.
+			podeMover: nearestDropDist > moveThresh,
+			moveThresh: Math.round(moveThresh)
 		});
 	}
 
@@ -4920,14 +4973,38 @@ GuiInterface.prototype.pudim_GetSmartDropsiteData = function(player, data)
 		if (bestGroupKey === "wood" && farWoodPos.length >= 5) {
 			const wcX = farWoodPos.reduce((s, p) => s + p.x, 0) / farWoodPos.length;
 			const wcZ = farWoodPos.reduce((s, p) => s + p.z, 0) / farWoodPos.length;
-			let nearestSHToWorkers = Infinity;
-			for (const ds of dropsites) {
-				if (!ds.isStorehouse) continue;
-				const ddx = ds.x - wcX, ddz = ds.y - wcZ;
-				const d = Math.sqrt(ddx*ddx + ddz*ddz);
-				if (d < nearestSHToWorkers) nearestSHToWorkers = d;
+			// A DISTÂNCIA QUE VALE É A DE QUEM ANDA, NÃO A DO CENTRÓIDE.
+			//
+			// Relato de 25/08, com a partida na tela: "a essa distância talvez fosse melhor
+			// outro armazém mais próximo às árvores, não seria?". O log dava razão a ele e
+			// mostrava o mod se contradizendo em duas linhas seguidas:
+			//
+			//   1026s [WALK] longe do dropsite: 7 ... wood 83m/lim77
+			//   1004s [DROP] skip=within_85pct_CC_dist nd=57 thr=70 fw=12
+			//
+			// O detector de caminhada dizia 83m e pedia socorro; o construtor media 57m e
+			// recusava. Números diferentes porque mediam coisas diferentes: o detector olha
+			// cada trabalhador, o construtor olhava o CENTRÓIDE do grupo. Centróide encolhe
+			// distância por definição — é a média, então some com a cauda, e é justamente a
+			// cauda que está andando demais. Resultado: 19 lenhadores a 83m do armazém, para
+			// sempre, com o mod convencido de que estava tudo bem.
+			//
+			// Agora mede o PIOR trabalhador do grupo, que é o mesmo número que o detector de
+			// caminhada usa, e compara com o empate andar-vs-colher em vez de um 80 fixo.
+			let nearestSHToWorkers = 0;
+			for (const p of farWoodPos) {
+				let dMin = Infinity;
+				for (const ds of dropsites) {
+					if (!ds.isStorehouse) continue;
+					const ddx = ds.x - p.x, ddz = ds.y - p.z;
+					const d = Math.sqrt(ddx*ddx + ddz*ddz);
+					if (d < dMin) dMin = d;
+				}
+				if (dMin > nearestSHToWorkers && dMin < Infinity) nearestSHToWorkers = dMin;
 			}
-			if (nearestSHToWorkers > 80) {
+			if (farWoodPos.length === 0) nearestSHToWorkers = Infinity;
+			result._dbg.piorLenhador = Math.round(nearestSHToWorkers);
+			if (nearestSHToWorkers > pudim_LimiarObra(farWoodWorkers[0], "wood")) {
 				// Cluster secundário sem armazém — recalcular âncora no centróide dos workers
 				anchorX = wcX; anchorZ = wcZ;
 				result._dbg.anchorCC = Math.round(anchorToCCDist);

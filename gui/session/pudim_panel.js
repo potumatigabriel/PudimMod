@@ -828,8 +828,11 @@ function pudim_RunAutoWork()
 				}
 			}
 
-			// Fallback: sem dropsite possível → redirecionar para recurso próximo de dropsite existente
-			if (!builtDropsite && w.redirectTarget) {
+			// Fallback: sem dropsite possível → redirecionar para recurso próximo de dropsite
+			// existente. Só para quem está ALÉM do limiar de mover (podeMover): entre o
+			// limiar de obra e o de mover, a resposta certa é construir mais perto e deixar
+			// o coletor em paz. Mover custa duas caminhadas e a carga parcial que ele larga.
+			if (!builtDropsite && w.redirectTarget && w.podeMover) {
 				Engine.PostNetworkCommand({ "type": "gather", "entities": [w.id],
 					"target": w.redirectTarget, "autorepair": true, "autocontinue": true,
 					"queued": false, "pushFront": false });
@@ -848,7 +851,8 @@ function pudim_RunAutoWork()
 		if (lw.length > 0 && nowLW - g_PudimWalkDiagAt > 20000) {
 			g_PudimWalkDiagAt = nowLW;
 			const amostra = lw.slice(0, 4)
-				.map(w => w.targetResType + " " + (w.dropDist || "?") + "m/lim" + (w.thresh || "?"))
+				.map(w => w.targetResType + " " + (w.dropDist || "?") + "m/obra" + (w.thresh || "?") +
+					"/mover" + (w.moveThresh || "?") + (w.podeMover ? "" : " [so_obra]"))
 				.join(" | ");
 			pudim_Log("DEBUG", "WALK", "longe do dropsite: " + result.longWalkers.length +
 				" (obras=" + builtCount + " redir=" + redirectCount + " segurados=" + heldCount + ") " + amostra);

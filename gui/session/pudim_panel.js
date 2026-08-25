@@ -3477,8 +3477,12 @@ function pudim_ProcessAutoKite()
 	const now = Date.now();
 
 	// Limpar entradas expiradas (3s de cooldown por unidade)
+	// 3s deixava a mesma unidade ser reposicionada sem parar: no replay de 24/08 as mais
+	// afetadas levaram 9 ou 10 walks em 100s, e cada walk cancela o ataque em curso. Com o
+	// gatilho novo (baseado no alcance do AMEACANTE) o recuo ja e grande o bastante para
+	// nao reabrir sozinho; 6s cobrem a caminhada ate o destino antes de reavaliar.
 	for (const ent in g_PudimKiting)
-		if (now - g_PudimKiting[ent] > 3000)
+		if (now - g_PudimKiting[ent] > 6000)
 			delete g_PudimKiting[ent];
 
 	let kiteData;

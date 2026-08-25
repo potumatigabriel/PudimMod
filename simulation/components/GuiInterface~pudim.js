@@ -778,6 +778,16 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 		return bestField;
 	};
 
+	// Batalha em curso: alguem nosso com ordem de Attack. Uma passada, antes do laco.
+	// Barato e direto — a mesma leitura de ordem que pudim_GetPanicData faz.
+	let batalhaEmCurso = false;
+	for (const ent of allEnts) {
+		const cmpAIb = Engine.QueryInterface(ent, IID_UnitAI);
+		if (!cmpAIb || !cmpAIb.GetOrders) continue;
+		const ob = cmpAIb.GetOrders()[0];
+		if (ob && ob.type === "Attack") { batalhaEmCurso = true; break; }
+	}
+
 	const dropsites = [];
 	const idleWorkersList = [];
 	const assignedWorkers = [];
@@ -947,6 +957,19 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 				continue; // nunca vai para lógica de recurso genérico
 			}
 
+			// Havendo batalha em qualquer lugar do mapa, nenhuma unidade de combate faz
+			// auto-trabalho — atacando ou defendendo, tanto faz. Regra do jogador, 24/08.
+			//
+			// A regra antiga era local: inimigo a 100m. Isso deixava passar todo soldado
+			// longe do contato, e o replay 2026-08-24_0003 mostrou o resultado — no pico da
+			// luta o mod despachava gente para colher enquanto a batalha corria a poucos
+			// metros. Combate e assunto do exercito inteiro, nao so de quem esta encostado.
+			if (batalhaEmCurso && cmpIdentity &&
+			    (cmpIdentity.HasClass("CitizenSoldier") || cmpIdentity.HasClass("FastMoving"))) {
+				result.unplaced.push({ id: ent, kind: "soldado", tried: "batalha_em_curso" });
+				continue;
+			}
+
 			// CitizenSoldier: o ÚNICO motivo para não trabalhar é inimigo por perto.
 			//
 			// Estar fora do território não é motivo e era tratado como se fosse: um `continue`
@@ -1025,6 +1048,7 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 		toRedirect.push({ "id": ent, "isIdle": true });
 	}
 	result._bal.idle = idleWorkersList.length;
+	result._bal.batalha = batalhaEmCurso;
 
 	let deficits = { "food": 0, "wood": 0, "stone": 0, "metal": 0 };
 
@@ -3565,6 +3589,42 @@ GuiInterface.prototype.pudim_GetScoutStatus = function(player, data) {
 
     return result;
 };
+/**
+ * Recuo das unidades a distancia (kite).
+ *
+ * Reescrito em 24/08 a partir do replay 2026-08-24_0003. No pico da batalha, na janela
+ * de 100s dos turnos 7350-7650, 305 unidades receberam walk E attack, e as mais afetadas
+ * levaram 9 ou 10 walks cada — uma reordenacao a cada 7,5s. Cada walk cancela o ataque em
+ * curso, entao elas passaram a batalha inteira andando em vez de atirar. Era o "ficou
+ * bagunçando durante a luta".
+ *
+ * A causa estava na propria regra: recuava quando o inimigo entrava a 60% do NOSSO alcance
+ * e reposicionava para NOSSO alcance menos 2m. Para um arqueiro (60), isso dispara com um
+ * lanceiro ainda a 36m — que nao alcanca nada — e para a apenas 58m, de onde o mesmo
+ * lanceiro volta a disparar o gatilho em segundos. Girava para sempre.
+ *
+ * A base certa e o alcance do AMEACANTE, nao o nosso. Numeros dos templates do jogo:
+ * espadachim 3, lanceiro 4, dardeiro 30, fundeiro 45, arqueiro 60.
+ *
+ *   • Corpo a corpo: o perigo nao e o alcance dele (3-4m), e a velocidade com que ele fecha
+ *     a distancia. O gatilho e alcance + 2s de caminhada dele, lido de UnitMotion.
+ *   • A distancia: o perigo e o alcance mesmo, mais uma folga.
+ *
+ * E so vale recuar de quem tem alcance MENOR que o nosso — que e a regra que o jogador
+ * pediu: arqueiro se afasta de fundeiro e dardeiro, e nao de outro arqueiro. Contra alcance
+ * igual ou maior, recuar so perde dano: ele continua acertando enquanto a gente anda.
+ *
+ * A folga entre gatilho e destino e o que mata o vai-e-vem: contra um lanceiro o arqueiro
+ * recua de 22m para 57m, longe demais para o gatilho reabrir no ciclo seguinte.
+ */
+
+/** Folga para continuar atirando depois de parar. */
+const PUDIM_KITE_FOLGA_TIRO = 3;
+/** Margem sobre o alcance de um atirador inimigo. */
+const PUDIM_KITE_MARGEM_RANGED = 3;
+/** Segundos de aproximacao de um corpo a corpo que o gatilho antecipa. */
+const PUDIM_KITE_SEG_APROXIMACAO = 2;
+
 GuiInterface.prototype.pudim_GetAutoKiteData = function(player, data)
 {
 	const result = [];
@@ -3574,59 +3634,86 @@ GuiInterface.prototype.pudim_GetAutoKiteData = function(player, data)
 	const playerEnt = cmpPlayerManager.GetPlayerByID(player);
 	const cmpDiplomacy = Engine.QueryInterface(playerEnt, IID_Diplomacy);
 	if (!cmpDiplomacy) return result;
-	const enemies = cmpDiplomacy.GetEnemies();
-	if (!enemies || enemies.length === 0) return result;
+	const enemies = cmpDiplomacy.GetEnemies().filter(id => id > 0);
+	if (enemies.length === 0) return result;
 	const kiting = (data && data.kiting) ? data.kiting : {};
 
-	// Recolhe posições só de inimigos MELEE: recuar de ranged inimigo é inútil (ele
-	// continua atirando enquanto a unidade foge e perde DPS à toa).
-	const enemyPositions = [];
+	// Ameacas: qualquer inimigo que ataque. O alcance sai de Attack.GetFullAttackRange, que
+	// ja aplica as tecnologias, entao upgrade de alcance inimigo aperta o cerco sozinho.
+	// Cada uma leva o raio a partir do qual ela ja e perigosa.
+	const ameacas = [];
 	for (const ep of enemies) {
-		const ents = cmpRangeManager.GetEntitiesByPlayer(ep);
-		for (const ent of ents) {
+		for (const ent of cmpRangeManager.GetEntitiesByPlayer(ep)) {
 			const cmpId = Engine.QueryInterface(ent, IID_Identity);
-			if (!cmpId || (!cmpId.HasClass("CitizenSoldier") && !cmpId.HasClass("FastMoving"))) continue;
-			if (cmpId.HasClass("Ranged")) continue;
+			if (!cmpId || cmpId.HasClass("Animal") || cmpId.HasClass("FishingBoat")) continue;
+			const cmpAtk = Engine.QueryInterface(ent, IID_Attack);
+			if (!cmpAtk || !cmpAtk.GetFullAttackRange) continue;
 			const cmpPos = Engine.QueryInterface(ent, IID_Position);
-			if (cmpPos && cmpPos.IsInWorld()) {
-				const p = cmpPos.GetPosition2D();
-				enemyPositions.push({ x: p.x, y: p.y, id: ent });
+			if (!cmpPos || !cmpPos.IsInWorld()) continue;
+			let alcance = 0;
+			try { alcance = +cmpAtk.GetFullAttackRange().max || 0; } catch (e) { continue; }
+			if (alcance <= 0) continue;
+
+			// Corpo a corpo assusta pela aproximacao; atirador, pelo alcance.
+			let gatilho;
+			if (cmpId.HasClass("Ranged")) {
+				gatilho = alcance + PUDIM_KITE_MARGEM_RANGED;
+			} else {
+				let vel = 9;
+				const cmpMot = Engine.QueryInterface(ent, IID_UnitMotion);
+				if (cmpMot && cmpMot.GetWalkSpeed) {
+					try { vel = +cmpMot.GetWalkSpeed() || 9; } catch (e) {}
+				}
+				gatilho = alcance + PUDIM_KITE_SEG_APROXIMACAO * vel;
 			}
+			const q = cmpPos.GetPosition2D();
+			ameacas.push({ x: q.x, z: q.y, id: ent, alcance: alcance, gatilho: gatilho });
 		}
 	}
-	if (enemyPositions.length === 0) return result;
+	if (ameacas.length === 0) return result;
 
-	const myEnts = cmpRangeManager.GetEntitiesByPlayer(player);
-	for (const ent of myEnts) {
-		if (kiting[ent]) continue; // Em cooldown
+	for (const ent of cmpRangeManager.GetEntitiesByPlayer(player)) {
+		if (kiting[ent]) continue; // recuou ha pouco — deixar chegar e atirar
 		const cmpId = Engine.QueryInterface(ent, IID_Identity);
 		if (!cmpId || !cmpId.HasClass("Ranged")) continue;
 		const cmpPos = Engine.QueryInterface(ent, IID_Position);
 		if (!cmpPos || !cmpPos.IsInWorld()) continue;
+		const cmpAttack = Engine.QueryInterface(ent, IID_Attack);
+		if (!cmpAttack || !cmpAttack.GetFullAttackRange) continue;
+		let meuAlcance = 0;
+		try { meuAlcance = +cmpAttack.GetFullAttackRange().max || 0; } catch (e) { continue; }
+		if (meuAlcance <= 0) continue;
+
+		// Onde queremos parar: o limite do nosso alcance, para o inimigo ter de atravessar
+		// a distancia inteira enquanto apanha.
+		const destinoDist = meuAlcance - PUDIM_KITE_FOLGA_TIRO;
 		const pos = cmpPos.GetPosition2D();
 
-		// Distância de segurança PROATIVA: 60% do próprio alcance máximo (mín. 9m).
-		// O gatilho fixo antigo de 9m só disparava com o melee já em contato — a unidade
-		// "chegava perto e depois recuava". Agora recua antes de o inimigo alcançá-la,
-		// e a distância escala com o alcance real da arma (arqueiro kita mais cedo que
-		// fundeiro; ambos continuam dentro do próprio alcance pra seguir atirando).
-		const cmpAttack = Engine.QueryInterface(ent, IID_Attack);
-		const ownRange = cmpAttack ? cmpAttack.GetFullAttackRange().max : 15;
-		const safeDist = Math.max(9, ownRange * 0.6);
-
-		let nearestDx = 0, nearestDz = 0, nearestDistSq = safeDist * safeDist;
-		let nearestEnemyEnt = null;
-		for (const ep of enemyPositions) {
-			const dx = pos.x - ep.x, dz = pos.y - ep.y;
-			const dsq = dx*dx + dz*dz;
-			if (dsq < nearestDistSq) { nearestDistSq = dsq; nearestDx = dx; nearestDz = dz; nearestEnemyEnt = ep.id; }
+		// A ameaca mais urgente entre as que INVADIRAM o gatilho e das quais recuar
+		// resolve — ou seja, aquelas cujo gatilho cabe dentro do nosso alcance util.
+		let pior = null, piorFolga = -Infinity, piorDist = 0;
+		for (const a of ameacas) {
+			if (destinoDist <= a.gatilho) continue; // recuar nao tira a gente do perigo
+			const dx = pos.x - a.x, dz = pos.y - a.z;
+			const d2 = dx * dx + dz * dz;
+			if (d2 >= a.gatilho * a.gatilho) continue; // ainda longe o bastante
+			const d = Math.sqrt(d2) || 0.001;
+			// Quem esta proporcionalmente mais dentro do proprio gatilho e a mais urgente.
+			const urgencia = a.gatilho - d;
+			if (urgencia > piorFolga) { piorFolga = urgencia; pior = a; piorDist = d; }
 		}
-		if (nearestDistSq >= safeDist * safeDist) continue;
+		if (!pior) continue;
 
-		// Recua até reabrir o próprio alcance (- 2m de folga pra atacar já ao parar)
-		const dist = Math.sqrt(nearestDistSq) || 1;
-		const step = Math.max(8, (ownRange - 2) - dist);
-		result.push({ "ent": ent, "x": pos.x + (nearestDx/dist)*step, "z": pos.y + (nearestDz/dist)*step, "enemyTarget": nearestEnemyEnt });
+		const dx = pos.x - pior.x, dz = pos.y - pior.z;
+		const d = piorDist || 1;
+		const passo = destinoDist - d;
+		if (passo <= 0) continue;
+		result.push({
+			"ent": ent,
+			"x": pos.x + (dx / d) * passo,
+			"z": pos.y + (dz / d) * passo,
+			"enemyTarget": pior.id
+		});
 	}
 	return result;
 };

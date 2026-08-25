@@ -42,8 +42,19 @@ check("o limite de 50 mulheres nao troca um template do jogador",
 	PANEL.indexOf("const doJogador = !!template;") > 0 &&
 	PANEL.indexOf("trainerEnts.find(isFemaleTemplate) || trainerEnts[0]") >
 	PANEL.indexOf("const doJogador = !!template;"));
+// A declaracao virou `let` quando o lote proporcional entrou (25/08) — a regra nao mudou,
+// so o keyword. A assercao agora e sobre o COMPORTAMENTO: a escolha do jogador vem primeiro
+// no `||`, seja const ou let.
 check("o tamanho do jogador tem precedencia sobre o padrao do mod",
-	/const desiredCount = g_PudimPlayerQueueCount\[b\.ent\] \|\|/.test(PANEL));
+	/(?:const|let) desiredCount = g_PudimPlayerQueueCount\[b\.ent\] \|\|/.test(PANEL));
+// E o lote proporcional, que pode SOBRESCREVER desiredCount, tem de recuar diante dele.
+// Sem esta guarda, configurar proporcao de unidades reabriria o bug dos 5 guerreiros que
+// voltavam como 2 aldeoes — dessa vez no TAMANHO em vez do tipo.
+check("e o lote proporcional nao atropela o tamanho que o jogador pos",
+	/if \(!g_PudimPlayerQueueCount\[b\.ent\] && pudim_ProporcaoAtiva\(\)\)/.test(PANEL));
+check("nem o tipo: a proporcao so escolhe quando ele nunca escolheu ali",
+	PANEL.indexOf("const atrasada = pudim_UnidadeMaisAtrasada();") >
+	PANEL.indexOf("let template = g_PudimPlayerQueueTpl[b.ent] || null;"));
 check("o log diz de quem foi a escolha", /\(doJogador \? " \(escolha do jogador\)" : ""\)/.test(PANEL));
 
 // ── 3. A quantidade continua se adaptando ao estoque (pedido anterior do jogador) ───────

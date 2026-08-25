@@ -84,6 +84,48 @@ const semObjeto = mapa.filter(e => xml.indexOf('name="' + e.obj + '"') < 0);
 check("todo objeto mapeado existe no XML", semObjeto.length === 0,
 	semObjeto.map(e => e.obj).join(", "));
 
+// TIPO DO OBJETO. Isto custou caro: eu mapeei "pudim_combatFlash", que é a IMAGEM de fundo
+// que pisca na cor do combate, achando que era o cabeçalho. Imagem não tem caption, e como o
+// aplicador roda no laço de atualização, o motor imprimia
+// "Property 'caption' does not exist!" na tela do jogador SESSENTA VEZES POR SEGUNDO.
+//
+// try/catch não salva: o motor imprime antes de lançar. A defesa é não escrever no objeto
+// errado — e é isto que esta asserção garante.
+const SEM_CAPTION = ["image"];
+const tipoDe = nome => {
+	const m = new RegExp('<object name="' + nome + '"([^>]*)>').exec(xml);
+	if (!m) return null;
+	const t2 = /type="(\w+)"/.exec(m[1]);
+	// Sem type explícito, o 0 A.D. trata como image — que é justamente o caso que quebrou.
+	return t2 ? t2[1] : "image";
+};
+const tipoRuim = mapa.filter(e => SEM_CAPTION.indexOf(tipoDe(e.obj)) >= 0);
+check("nenhum objeto mapeado é de um tipo que não aceita caption",
+	tipoRuim.length === 0,
+	tipoRuim.map(e => e.obj + " (" + tipoDe(e.obj) + ")").join(", "));
+
+// E cada um tem de ter caption PRÓPRIA no XML — objeto sem caption declarada é sinal de que
+// mapeei o irmão errado, que foi exatamente o que aconteceu.
+const semCaptionPropria = mapa.filter(e => {
+	const i0 = xml.indexOf('name="' + e.obj + '"');
+	if (i0 < 0) return true;
+	const fim = xml.indexOf("</object>", i0);
+	const autoFechado = xml.lastIndexOf("/>", fim) > xml.indexOf(">", i0) - 2 &&
+	                    xml.slice(i0, fim).indexOf("/>") >= 0 &&
+	                    xml.slice(i0, fim).indexOf("/>") < xml.slice(i0, fim).indexOf("<object", 1);
+	return xml.slice(i0, fim < 0 ? undefined : fim)
+	          .indexOf('<translatableAttribute id="caption">') < 0;
+});
+check("todo objeto mapeado declara a própria caption no XML",
+	semCaptionPropria.length === 0, semCaptionPropria.map(e => e.obj).join(", "));
+
+// E o aplicador não pode confiar só no mapa: uma vez errado, tem de sair da lista.
+check("o aplicador testa o objeto uma vez e descarta o que não aceita",
+	/var g_PudimCaptionOk = null;/.test(i18n) &&
+	/catch\(e\) \{ warn\("\[PudimMod\] " \+ objName \+ " nao aceita caption/.test(i18n));
+check("e o teste é feito UMA vez, não a cada quadro",
+	/if \(!g_PudimCaptionOk\)/.test(i18n));
+
 const semChave = mapa.filter(e => i18n.indexOf('"' + e.chave + '":') < 0);
 check("toda chave mapeada existe no dicionário", semChave.length === 0,
 	semChave.map(e => e.chave).join(", "));

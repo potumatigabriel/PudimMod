@@ -10,7 +10,7 @@
   <!-- Fundo que pisca na cor do estado do combate (verde/amarelo/vermelho).
        Declarado ANTES dos textos para ficar atras deles; ghost para nao roubar clique. -->
   <object name="pudim_combatFlash" type="image" size="4 28 100%-4 234" sprite="color: 0 0 0 0" ghost="true"/>
-  <object type="text" size="8 30 100%-8 52" font="sans-bold-14" textcolor="255 255 255 255" style="ModernLabelText" ghost="true"><translatableAttribute id="caption">Estimador de Combate</translatableAttribute></object>
+  <object name="pudim_combatHeader" type="text" size="8 30 100%-8 52" font="sans-bold-14" textcolor="255 255 255 255" style="ModernLabelText" ghost="true"><translatableAttribute id="caption">Estimador de Combate</translatableAttribute></object>
   <object name="pudim_allyCount" type="text" size="8 56 50% 74" font="sans-bold-13" textcolor="80 220 80 255" ghost="true"><translatableAttribute id="caption">Aliados: --</translatableAttribute></object>
   <object name="pudim_enemyCount" type="text" size="50% 56 100%-8 74" font="sans-bold-13" textcolor="220 80 80 255" ghost="true"><translatableAttribute id="caption">Inimigos: --</translatableAttribute></object>
   <object name="pudim_allyHP" type="text" size="8 76 50% 94" font="sans-13" textcolor="210 210 210 255" ghost="true"><translatableAttribute id="caption">HP: --</translatableAttribute></object>

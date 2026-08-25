@@ -265,7 +265,12 @@ function pudim_RefreshTooltipsIfNeeded()
 // Mesma tabela, mesma função, mesmo par [en, pt] dos tooltips. O que muda é só o atributo
 // escrito: caption em vez de tooltip.
 const PUDIM_CAPTION_MAP = {
-	"pudim_combatFlash":        "cap.combatHeader",
+	// pudim_combatHeader, NAO pudim_combatFlash. O Flash e a imagem de fundo que pisca na
+	// cor do combate — image nao tem caption, e escrever nela imprimia
+	// "Property 'caption' does not exist!" na tela do jogador a CADA QUADRO, porque este
+	// aplicador roda no laco de atualizacao. O texto ficava num objeto sem nome; agora ele
+	// tem nome, que e o que permite traduzi-lo.
+	"pudim_combatHeader":       "cap.combatHeader",
 	"pudim_combatRefreshBtn":   "cap.combatRefresh",
 	"pudim_autoWorkHeader":     "cap.autoWorkHeader",
 	"pudim_autoWorkDesc":       "cap.autoWorkDesc",
@@ -285,9 +290,31 @@ const PUDIM_CAPTION_MAP = {
 	"pudim_counselorCameraBtn": "cap.counselorCam"
 };
 
+/** Objetos que aceitam caption. Descoberto uma vez; ver o porque em pudim_ApplyCaptions. */
+var g_PudimCaptionOk = null;
+
 function pudim_ApplyCaptions()
 {
-	for (const objName in PUDIM_CAPTION_MAP)
+	// Nem todo objeto de GUI tem caption. Uma imagem nao tem, e escrever nela faz o motor
+	// imprimir "Property 'caption' does not exist!" — e como este aplicador roda no laco de
+	// atualizacao, o aviso saia a cada quadro e cobriu a tela do jogador.
+	//
+	// try/catch nao resolve: o motor IMPRIME antes de lancar. Entao o teste e feito uma vez
+	// so, na primeira passada, e o objeto problematico sai da lista para sempre. No pior
+	// caso o jogador ve o aviso uma vez, em vez de sessenta por segundo.
+	if (!g_PudimCaptionOk)
+	{
+		g_PudimCaptionOk = [];
+		for (const objName in PUDIM_CAPTION_MAP)
+		{
+			const o = Engine.TryGetGUIObjectByName(objName);
+			if (!o) continue;
+			try { const _ = o.caption; g_PudimCaptionOk.push(objName); }
+			catch(e) { warn("[PudimMod] " + objName + " nao aceita caption; fora da traducao"); }
+		}
+	}
+
+	for (const objName of g_PudimCaptionOk)
 	{
 		const obj = Engine.TryGetGUIObjectByName(objName);
 		if (!obj) continue;

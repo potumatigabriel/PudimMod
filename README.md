@@ -465,6 +465,25 @@ O **mercado inteligente** troca o que está sobrando pelo que está faltando.
   centro cívico caiu, ou se um abrigo está cercado, o mod nunca desguarnece sozinho — isso continua
   sendo decisão sua.
 - **Counter-train** — treina unidades que fazem frente ao que o inimigo realmente tem em campo.
+- **Herói na aura** — em modo passivo ("fuja se atacado"), o herói se posiciona perto o bastante da
+  luta para as suas unidades ficarem dentro da aura dele, e longe o bastante para nenhuma arma
+  inimiga alcançá-lo. O raio sai da própria aura (`Auras.GetRange`) e o alcance inimigo de
+  `Attack.GetFullAttackRange`, então melhoria de alcance do adversário aperta o cerco sozinha. Entre
+  os pontos seguros ele escolhe o mais distante da ameaça mais próxima, o que o deixa atrás da
+  própria linha sem cálculo de retaguarda. **Se não existir ponto seguro dentro da aura, ele recua** —
+  a tropa luta sem o bônus e o log diz isso. Nos outros modos o mod não encosta nele.
+- **Ordem sua manda mais que o mod.** Unidade que recebeu uma ordem do jogador não é tocada pelo
+  kite, pelo foco de fogo nem pela auto-retirada. E com batalha em curso, unidade de combate não
+  volta ao auto-serviço — só as de trabalho.
+
+## Construção
+
+- **Casa nunca no corredor de coleta.** O edifício vira obstáculo de pathfinding, então casa pousada
+  entre o recurso e o dropsite faz cada viagem contornar — por carga, para o resto da partida, sem
+  aparecer em lugar nenhum da interface. Cada recurso sendo colhido define um segmento até o dropsite
+  que o aceita, e o candidato é medido por distância ponto-segmento. É preferência e não veto: ficar
+  sem população é pior que um corredor atrapalhado, então lugar bloqueado ainda serve se nada limpo
+  couber. O trecho colado no dropsite é isento — todas as rotas convergem ali.
 
 ## Exploração
 
@@ -520,6 +539,93 @@ Português ou inglês, detectado automaticamente pelo idioma do jogo. Para forç
 `pudim.lang` como `pt` ou `en` na configuração do usuário.
 
 ## Histórico de mudanças
+
+### 25/08/2026
+
+Tudo abaixo saiu de uma partida só, com o jogo aberto e os relatos chegando na hora.
+
+**Economia**
+
+- **O limiar de caminhada longa deixou de disparar no empate.** O empate entre andar e colher é onde
+  o coletor ainda entrega meia carga por ciclo; tirá-lo dali custa uma viagem inteira sem colher nada.
+  Com a taxa de fruta melhorada o limiar caía para 35 m, e coletores a **42 m** do centro cívico —
+  distância banal para um arbusto de base — eram marcados e realocados a cada ciclo, enquanto o
+  despacho mandava outros para a mesma fruta. Na tela isso é passeio. O gatilho de mover agora fica
+  1,5× depois do empate, com piso de 55 m.
+- **Construir um dropsite e mover um trabalhador viraram decisões separadas**, porque custam coisas
+  muito diferentes: a obra são 100 de madeira e ninguém sai do lugar, enquanto mover são duas
+  caminhadas mais a carga parcial largada no chão. A obra dispara já no empate; mover exige a margem.
+- **O construtor de armazém parou de medir pelo centróide do grupo.** As duas metades do mod
+  discordavam da mesma distância em linhas quase simultâneas do log: o detector de caminhada via
+  83 m e pedia socorro, o construtor via 57 m e recusava. Centróide é média, então come justamente a
+  cauda que está andando demais. Ele passa a medir o **pior trabalhador**, e os dois sistemas chamam o
+  mesmo cálculo em vez de cada um fazer o seu. Dezenove lenhadores tinham andado 83 m até o fim da
+  partida com o mod convencido de que estava tudo bem.
+- **Quem acabou de nascer pega o serviço novo.** O pool de construtores de campo saía direto dos
+  lenhadores, que são gente com ordem de coleta ativa; um recém-nascido é ocioso, então nunca entrava
+  lá, e o auto-trabalho o pegava antes e o mandava para a fruta. O número de gente em cada recurso
+  acabava idêntico, pago com duas caminhadas e duas cargas parciais. O pool começa pelos ociosos.
+
+**Construção**
+
+- **Casa nunca entre o coletor e o dropsite.** É literal no motor: o edifício vira obstáculo de
+  pathfinding e cada viagem passa a contornar — por carga, para o resto da partida, sem aparecer em
+  lugar nenhum da interface. Cada recurso sendo colhido define um segmento até o dropsite que o
+  aceita, e o candidato a casa é medido por distância ponto-segmento. É **preferência, não veto**:
+  ficar sem população é pior que um corredor atrapalhado, então os bloqueados vão para o fim da lista
+  e ainda são usados se nada limpo couber. O trecho colado no dropsite é isento, porque todas as
+  rotas convergem ali e é onde o vilarejo cresce.
+
+**Militar**
+
+- **Herói passivo fica dentro da própria aura e fora do alcance das armas.** Ele escolhe o anel mais
+  afastado da aura que ainda esteja seguro, e só encosta mais se aquele anel estiver todo exposto —
+  dentro da aura, 20 m e 55 m valem igual para a tropa e valem muito diferente para a vida dele.
+  Entre os pontos seguros vence o mais longe da ameaça mais próxima, o que o empurra para trás da
+  própria linha sem ninguém precisar calcular onde é a retaguarda. **Quando a aura inteira cai dentro
+  do alcance inimigo ele recua e a tropa luta sem o bônus** — herói morto não dá aura nenhuma e ainda
+  entrega saque e experiência ao adversário — e isso vai para o log em vez de virar silêncio. Só age
+  em modo passivo; nos outros o jogador quer o herói lutando.
+- O kite volta a recuar de cavalaria. A viabilidade comparava a distância do destino com o **gatilho**
+  em vez do alcance mais a margem, o que desligava o kite de javelineiro contra cavalaria. O erro
+  ficou escondido porque os números absolutos de troca pareciam só um lobby mais difícil; ele só
+  apareceu ao normalizar a troca pela mediana do lobby (1,96× → 0,52×).
+- **Ordem manual manda em combate.** Unidade que recebeu ordem sua não é tocada pelo kite, pelo foco
+  de fogo nem pela auto-retirada.
+- **Combatente não volta ao trabalho com a batalha rolando** — atacando ou defendendo, tanto faz. Só
+  unidade de trabalho entra em auto-serviço.
+
+**Multiplayer**
+
+- Contrato de compatibilidade fixado em teste: o mod só lê da simulação e só escreve por
+  `PostNetworkCommand`, então quem não tem o mod continua sincronizado.
+
+**Ferramentas**
+
+- `tools/analisar_replay.py` normaliza a troca de unidades pela **mediana do lobby**, porque número
+  absoluto confunde regressão do mod com lobby mais forte.
+- Vinte arquivos de teste, rodando sem o jogo aberto. Os de hoje cravam os relatos com os números do
+  próprio log: nenhuma taxa de fruta plausível pode marcar 42 m como caminhada longa, e a madeira a
+  83 m tem de pedir armazém sem mover ninguém.
+
+### 24/08/2026
+
+**Militar**
+
+- **Kite pelo alcance de quem ameaça**, não por um número fixo, com ciclo de recuar-e-atacar em vez
+  de só recuar.
+- **Ninguém volta ao trabalho com a batalha rolando.** A soltura do pânico olhava só os arredores da
+  base e liberou 152 unidades no meio de uma luta.
+
+**Ferramentas**
+
+- `tools/analisar_replay.py`: mede combate a partir das séries do `metadata.json` do replay. A
+  duração do turno vem de `timeElapsed / turns` — nunca suposta.
+
+### 20/08/2026
+
+- Corrige `result is not defined` no explorador, e passa a caçar essa classe de erro automaticamente
+  com um verificador de escopo por função (`tools/test_scope.js`).
 
 ### 19/08/2026
 

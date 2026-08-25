@@ -154,5 +154,62 @@ check("o painel escreve só por PostNetworkCommand",
 check("e o estado da série vive só na GUI",
 	/var g_PudimQuartelAtivo = false;/.test(panel) && !/g_PudimQuartelAtivo/.test(sim));
 
+// ── A série termina, e no número certo ────────────────────────────────────────────────
+//
+// "isso terminou uma obra, parte pra proxima ate acabar a sequencia" — é isso mesmo, e o
+// "até acabar" tinha um bug de contagem.
+//
+// g_PudimQuartelBase guarda quantos daquele tipo já existiam quando a série começou, para o
+// alvo ser "quantos NOVOS" e não um total. Ele nascia 0, e 0 significava DUAS coisas: "ainda
+// não medi" e "não havia nenhum". Quem começa a série sem nenhum quartel cai nas duas ao
+// mesmo tempo: a base era remedida a cada ciclo, e quando a primeira obra concluía, prontos
+// virava 1 e a base virava 1 junto — aquela primeira obra deixava de ser contada.
+//
+// Pedir 3 construía 4. Sempre que se começava do zero.
+console.log("");
+console.log("a serie termina no numero pedido");
+
+check("o sentinela não colide com um valor legítimo",
+	/var g_PudimQuartelBase = null;/.test(panel));
+check("e o teste é contra null, não contra zero",
+	/if \(g_PudimQuartelBase === null\) g_PudimQuartelBase = d\.prontos;/.test(panel));
+check("começar uma série nova reseta para o sentinela, não para zero",
+	/g_PudimQuartelBase = null;\s*\n\s*g_PudimQuartelUltima = 0;/.test(panel));
+
+// A contagem, espelhada: quantas obras a série chega a erguer.
+function quantasErgue(alvo, jaTinha) {
+	let base = null, prontos = jaTinha, erguidas = 0;
+	for (let c = 0; c < 60; c++) {
+		if (base === null) base = prontos;
+		if (alvo - Math.max(0, prontos - base) <= 0) return erguidas;
+		erguidas++;
+		prontos++;   // a obra conclui antes do ciclo seguinte
+	}
+	return -1;       // não terminou: seria série infinita
+}
+for (const [alvo, jaTinha] of [[1, 0], [3, 0], [10, 0], [1, 5], [3, 2], [10, 7]])
+	check("pedir " + alvo + " com " + jaTinha + " já pronto(s) ergue " + alvo,
+		quantasErgue(alvo, jaTinha) === alvo, quantasErgue(alvo, jaTinha));
+
+check("e a série sempre termina — nunca fica erguendo para sempre",
+	[1, 3, 10].every(a => quantasErgue(a, 0) > 0));
+
+// A forma ERRADA, para provar que o teste está medindo algo de verdade.
+function quantasErgueBugado(alvo, jaTinha) {
+	let base = 0, prontos = jaTinha, erguidas = 0;
+	for (let c = 0; c < 60; c++) {
+		if (base === 0) base = prontos;
+		if (alvo - Math.max(0, prontos - base) <= 0) return erguidas;
+		erguidas++;
+		prontos++;
+	}
+	return -1;
+}
+check("com o sentinela antigo o erro se reproduz (o teste vale de verdade)",
+	quantasErgueBugado(3, 0) === 4, quantasErgueBugado(3, 0));
+check("e ele só aparecia começando do zero — por isso passou despercebido",
+	quantasErgueBugado(3, 2) === 3, quantasErgueBugado(3, 2));
+
+
 console.log(fails === 0 ? "\nTODOS OS TESTES PASSARAM" : "\n" + fails + " TESTE(S) FALHARAM");
 process.exit(fails === 0 ? 0 : 1);

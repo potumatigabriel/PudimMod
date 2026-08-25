@@ -3759,7 +3759,14 @@ var g_PudimQuartelAtivo = false;
 var g_PudimQuartelAccum = 0;
 var g_PudimQuartelUltima = 0;
 var g_PudimQuartelEquipe = [];      // quem foi recrutado, para devolver ao trabalho
-var g_PudimQuartelBase = 0;         // quantos já existiam quando a série começou
+// Quantos daquele tipo já existiam quando a série começou. null = ainda não medido.
+//
+// Era 0, e 0 significava DUAS coisas: "ainda não medi" e "não havia nenhum". Quem começa a
+// série sem nenhum quartel cai nas duas ao mesmo tempo, e a base era remedida a cada ciclo
+// até a primeira obra concluir — quando prontos virava 1, a base virava 1 junto e aquela
+// primeira obra deixava de ser contada. Resultado: pedir 3 construía 4, sempre que se
+// começava do zero. Um sentinela que não colide com um valor legítimo resolve.
+var g_PudimQuartelBase = null;
 
 /** Chamado pelo dropdown de tipo. */
 function pudim_QuartelSetTipo()
@@ -3792,7 +3799,7 @@ function pudim_QuartelToggle()
 		const dd = Engine.GetGUIObjectByName("pudim_quartelQtd");
 		g_PudimQuartelAlvo = dd ? dd.selected + 1 : 1;
 		g_PudimQuartelAtivo = true;
-		g_PudimQuartelBase = 0;
+		g_PudimQuartelBase = null;
 		g_PudimQuartelUltima = 0;
 		pudim_Log("INFO", "QUARTEL", "série iniciada: " + g_PudimQuartelAlvo + " " +
 			PUDIM_QUARTEL_NOMES[g_PudimQuartelTipo]);
@@ -3869,7 +3876,8 @@ function pudim_ProcessQuartel()
 	}
 
 	// Na primeira volta, guarda quantos já existiam: o alvo é quantos NOVOS, não um total.
-	if (g_PudimQuartelBase === 0) g_PudimQuartelBase = d.prontos;
+	// O teste é contra null, não contra 0 — ver a declaração de g_PudimQuartelBase.
+	if (g_PudimQuartelBase === null) g_PudimQuartelBase = d.prontos;
 
 	const feitos = Math.max(0, d.prontos - g_PudimQuartelBase);
 	const faltam = g_PudimQuartelAlvo - feitos;

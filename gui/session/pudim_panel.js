@@ -280,7 +280,7 @@ function pudim_ApplyCompactMode()
 	const panel = Engine.TryGetGUIObjectByName("pudim_mainPanel");
 	if (panel)
 		// Painel ancorado à direita da tela (ver 02_pudim_panel.xml)
-		panel.size = hidden ? "100%-340 50%-514 100%-20 50%-274" : "100%-340 50%-514 100%-20 50%+394";
+		panel.size = hidden ? "100%-340 50%-514 100%-20 50%-274" : "100%-340 50%-514 100%-20 50%+476";
 	// Atualiza ícone do botão
 	const lbl = Engine.TryGetGUIObjectByName("pudim_compactLabel");
 	if (lbl) lbl.caption = hidden ? "▶" : "▼";
@@ -441,6 +441,9 @@ function pudim_Init()
 	// tooltips fixos do XML, que estavam só em português e faltavam na maioria dos botões.
 	try { pudim_ApplyTooltips(); } catch(e) {}
 	try { pudim_ApplyCaptions(); } catch(e) {}
+	// Estimador nasce colapsado, e a lista de unidades e lida uma vez ja no inicio.
+	try { pudim_AplicarCombatBox(); } catch(e) { pudim_Log("ERROR", "PAINEL", "combatbox: " + e); }
+	try { pudim_AtualizarUnidades(); } catch(e) { pudim_Log("ERROR", "PAINEL", "unidades: " + e); }
 
 	const awL = Engine.TryGetGUIObjectByName("pudim_autoWorkLabel");
 	if (awL) {
@@ -1936,6 +1939,15 @@ function pudim_Tick(dt)
 		pudim_ProcessHeroAura();
 	}
 
+	// Lista de unidades treinaveis: a cada 4s. Ela muda quando um edificio de producao sobe
+	// ou quando a fase avanca, e nenhum dos dois e frequente o bastante para justificar mais.
+	g_PudimUnitAccum += dt;
+	if (g_PudimUnitAccum >= 4000)
+	{
+		g_PudimUnitAccum = 0;
+		try { pudim_AtualizarUnidades(); } catch(e) {}
+	}
+
 	// Série de quartéis/estábulos: a cada 1s; o freio real é PUDIM_QUARTEL_INTERVALO.
 	g_PudimQuartelAccum += dt;
 	if (g_PudimQuartelAccum >= 1000)
@@ -2239,6 +2251,25 @@ function pudim_ProcessAutoQueue()
 			// escolheu nada ali.
 			let template = g_PudimPlayerQueueTpl[b.ent] || null;
 			const doJogador = !!template;
+
+			// A PROPORCAO DE UNIDADES entra aqui, e so aqui.
+			//
+			// Ordem: escolha do jogador naquele edificio > proporcao que ele configurou >
+			// o palpite antigo. Nunca por cima do que ele pos na fila — essa regra ja custou
+			// caro uma vez, quando 5 guerreiros voltavam como 2 aldeoes.
+			//
+			// A unidade escolhida tem de ser treinavel NESTE edificio: pedir cavalaria num
+			// quartel faria o motor recusar em silencio, e a fila ficaria parada sem motivo
+			// visivel.
+			if (!template) {
+				const atrasada = pudim_UnidadeMaisAtrasada();
+				if (atrasada && (b.trainerEntities || []).indexOf(atrasada.tpl) >= 0) {
+					if (!(atFemaleCap && isFemaleTemplate(atrasada.tpl))) {
+						template = atrasada.tpl;
+						g_PudimAutoQueueTemplates[b.ent] = template;
+					}
+				}
+			}
 
 			if (!template) {
 				// Usar trainerEntities do servidor (mais confiável que GetEntityState para barracas novas)
@@ -4022,6 +4053,227 @@ function pudim_ProcessQuartel()
 		d.builderIds.length + " trabalhador(es) — faltam " + faltam +
 		(paralelo ? " [paralelo: pop " + d._dbg.pop + " e recurso sobrando]" : " [em série]"));
 }
+
+
+// ─── Estimador de combate: colapsa e expande ──────────────────────────────────────────
+//
+// Pedido de 25/08: "estimador de combate deixar compactado, e ao clicar no titulo expande e
+// ao clicar de novo colapsa".
+//
+// Ele ocupava 182px do painel o tempo todo — mais que qualquer outra seção — para um número
+// que fica em zero na maior parte da partida. Nasce colapsado.
+//
+// O 0 A.D. não tem contêiner que encolha sozinho: cada objeto tem posição absoluta dentro
+// do painel. Então colapsar é esconder o miolo E subir tudo que vem abaixo. As posições de
+// origem ficam nesta tabela porque ler `.size` de volta e reinterpretar a string
+// ("8 602 100%-8 622") seria frágil — a parte horizontal é texto com porcentagem.
+const PUDIM_COMBAT_ALTURA = 182;   // 234 (fim do miolo) menos 52 (fim do título)
+
+/** Objetos do miolo do estimador: somem quando colapsado. */
+const PUDIM_COMBAT_MIOLO = [
+	"pudim_combatFlash", "pudim_allyCount", "pudim_enemyCount", "pudim_allyHP",
+	"pudim_enemyHP", "pudim_allyDPS", "pudim_enemyDPS", "pudim_allyTypes1",
+	"pudim_allyTypes2", "pudim_winChanceBar", "pudim_winChanceBg", "pudim_winChancePct",
+	"pudim_counterHint", "pudim_combatRefreshBtn"
+];
+
+const PUDIM_ABAIXO_DO_COMBATE = [
+	"pudim_autoWorkHeader", "pudim_autoWorkDesc", "pudim_autoWorkToggle",
+	"pudim_autoWorkStatus", "pudim_priorityHeaderLabel", "pudim_foodLabel", "pudim_foodMinus",
+	"pudim_foodPlus", "pudim_foodVal", "pudim_woodLabel", "pudim_woodMinus", "pudim_woodPlus",
+	"pudim_woodVal", "pudim_stoneLabel", "pudim_stoneMinus", "pudim_stonePlus",
+	"pudim_stoneVal", "pudim_metalLabel", "pudim_metalMinus", "pudim_metalPlus",
+	"pudim_metalVal", "pudim_sendIdleNowBtn", "pudim_repeatHeader", "pudim_repeatDesc",
+	"pudim_repeatStatus", "pudim_stopAllRepeatBtn", "pudim_quartelHeader", "pudim_quartelQtd",
+	"pudim_quartelTipo", "pudim_quartelBtn", "pudim_toggleAutoHouseBtn", "pudim_panicStatus",
+	"pudim_backToWorkBtn2", "pudim_optionsHint", "pudim_unitHeader", "pudim_unitLabel0",
+	"pudim_unitMinus0", "pudim_unitPlus0", "pudim_unitVal0", "pudim_unitVazio",
+	"pudim_unitLabel1", "pudim_unitMinus1", "pudim_unitPlus1", "pudim_unitVal1",
+	"pudim_unitLabel2", "pudim_unitMinus2", "pudim_unitPlus2", "pudim_unitVal2",
+	"pudim_unitLabel3", "pudim_unitMinus3", "pudim_unitPlus3", "pudim_unitVal3",
+	"pudim_unitLabel4", "pudim_unitMinus4", "pudim_unitPlus4", "pudim_unitVal4",
+	"pudim_unitLabel5", "pudim_unitMinus5", "pudim_unitPlus5", "pudim_unitVal5",
+	"pudim_unitLabel6", "pudim_unitMinus6", "pudim_unitPlus6", "pudim_unitVal6"
+];
+
+var g_PudimCombatAberto = false;
+
+/** Posições de origem, com o estimador ABERTO. Preenchido na primeira passada. */
+var g_PudimYBase = null;
+var g_PudimPainelBaseBottom = null;
+
+function pudim_ToggleCombatBox()
+{
+	g_PudimCombatAberto = !g_PudimCombatAberto;
+	pudim_AplicarCombatBox();
+}
+
+function pudim_AplicarCombatBox()
+{
+	// Guarda as posições originais uma vez. Ler agora, e não no toggle, evita gravar
+	// posições já deslocadas caso alguém chame o toggle duas vezes seguidas.
+	// GUARDA NUMEROS, NAO O OBJETO. O `size` devolvido pelo motor e VIVO — gui/hotkeys/
+	// HotkeyPicker.js le `.size` e escreve `.top` direto, sem reatribuir. Guardar a
+	// referencia faria a tabela de base mudar junto com o primeiro deslocamento, e o
+	// segundo clique somaria em cima do valor ja deslocado.
+	if (!g_PudimYBase)
+	{
+		g_PudimYBase = {};
+		for (const nome of PUDIM_ABAIXO_DO_COMBATE)
+		{
+			const o = Engine.TryGetGUIObjectByName(nome);
+			if (!o) continue;
+			try { g_PudimYBase[nome] = { top: o.size.top, bottom: o.size.bottom }; } catch (e) {}
+		}
+	}
+
+	for (const nome of PUDIM_COMBAT_MIOLO)
+	{
+		const o = Engine.TryGetGUIObjectByName(nome);
+		if (o) try { o.hidden = !g_PudimCombatAberto; } catch (e) {}
+	}
+
+	const desloca = g_PudimCombatAberto ? 0 : -PUDIM_COMBAT_ALTURA;
+	for (const nome in g_PudimYBase)
+	{
+		const o = Engine.TryGetGUIObjectByName(nome);
+		if (!o) continue;
+		const b = g_PudimYBase[nome];
+		// Mexer so no eixo vertical: a parte horizontal tem porcentagem e nao precisa mudar.
+		try { const sz = o.size; sz.top = b.top + desloca; sz.bottom = b.bottom + desloca;
+		      o.size = sz; } catch (e) {}
+	}
+
+	const lbl = Engine.TryGetGUIObjectByName("pudim_combatHeaderLabel");
+	if (lbl) try {
+		lbl.caption = (g_PudimCombatAberto ? "▼ " : "▶ ") + pudim_T("cap.combatHeader");
+	} catch (e) {}
+
+	// O painel encolhe junto: moldura vazia sobre o mapa atrapalha a visão.
+	// O painel encolhe junto: moldura vazia sobre o mapa atrapalha a visao. Guardado na
+	// primeira passada pelo mesmo motivo do resto — o objeto de size e vivo.
+	if (g_PudimPainelBaseBottom === null) {
+		const p0 = Engine.TryGetGUIObjectByName("pudim_mainPanel");
+		if (p0) try { g_PudimPainelBaseBottom = p0.size.bottom; } catch (e) {}
+	}
+	const painel = Engine.TryGetGUIObjectByName("pudim_mainPanel");
+	if (painel && g_PudimPainelBaseBottom !== null) try {
+		const sz = painel.size;
+		sz.bottom = g_PudimPainelBaseBottom + desloca;
+		painel.size = sz;
+	} catch (e) {}
+}
+
+
+// ─── Proporção de unidades ────────────────────────────────────────────────────────────
+//
+// Pedido de 25/08: "faz um pra construir automaticamente unidades... pra balancear elas...
+// ai a gente coloca as proporções, tem que aparecer na lista todas que estão disponíveis no
+// momento".
+//
+// Funciona igual às prioridades de coleta: peso por tipo, e o mod treina primeiro quem está
+// mais atrás da sua fatia. A diferença é que a lista é DINÂMICA — o que dá para treinar
+// muda quando um quartel sobe, quando um estábulo sobe, quando a fase muda. Ela é
+// perguntada aos edifícios de pé, não escrita no código.
+//
+// Peso zero significa "não treine isto", igual em coleta. Todos começam em zero: o mod não
+// deve escolher exército pelo jogador — ele mantém a proporção QUE O JOGADOR pediu.
+const PUDIM_UNIT_LINHAS = 7;
+var g_PudimUnitPesos = {};      // tpl -> peso 0..10, escolha do jogador
+var g_PudimUnitLista = [];      // o que a simulação devolveu na última leitura
+var g_PudimUnitAccum = 0;
+
+function pudim_UnitWeightDelta(linha, delta)
+{
+	const u = g_PudimUnitLista[linha];
+	if (!u) return;
+	const atual = g_PudimUnitPesos[u.tpl] || 0;
+	const novo = Math.max(0, Math.min(10, atual + delta));
+	g_PudimUnitPesos[u.tpl] = novo;
+	pudim_DesenharUnidades();
+}
+
+function pudim_AtualizarUnidades()
+{
+	let d;
+	try { d = Engine.GuiInterfaceCall("pudim_GetTrainableUnits", {}); }
+	catch (e) { return; }
+	if (!d || !d.unidades) return;
+
+	// Cabem sete linhas. Com mais tipos disponíveis, os que o jogador já pesou vêm primeiro
+	// — esconder justamente o que ele configurou seria o pior corte possível.
+	const lista = d.unidades.slice();
+	lista.sort(function(a, b) {
+		const pa = g_PudimUnitPesos[a.tpl] || 0, pb = g_PudimUnitPesos[b.tpl] || 0;
+		if (pa !== pb) return pb - pa;
+		return a.tpl < b.tpl ? -1 : (a.tpl > b.tpl ? 1 : 0);
+	});
+	g_PudimUnitLista = lista.slice(0, PUDIM_UNIT_LINHAS);
+	g_PudimUnitTodas = lista;
+	pudim_DesenharUnidades();
+}
+
+function pudim_DesenharUnidades()
+{
+	for (let i = 0; i < PUDIM_UNIT_LINHAS; i++)
+	{
+		const u = g_PudimUnitLista[i];
+		const mostra = !!u;
+		for (const parte of ["Label", "Minus", "Val", "Plus"])
+		{
+			const o = Engine.TryGetGUIObjectByName("pudim_unit" + parte + i);
+			if (o) try { o.hidden = !mostra; } catch (e) {}
+		}
+		if (!mostra) continue;
+		const lbl = Engine.TryGetGUIObjectByName("pudim_unitLabel" + i);
+		const val = Engine.TryGetGUIObjectByName("pudim_unitVal" + i);
+		// Quantas existem entra no rótulo: sem esse número o jogador ajusta a proporção às
+		// cegas, sem saber o que já tem.
+		if (lbl) try { lbl.caption = u.nome + " (" + u.existentes + ")"; } catch (e) {}
+		if (val) try { val.caption = String(g_PudimUnitPesos[u.tpl] || 0); } catch (e) {}
+	}
+	const vazio = Engine.TryGetGUIObjectByName("pudim_unitVazio");
+	if (vazio) try { vazio.hidden = g_PudimUnitLista.length > 0; } catch (e) {}
+}
+
+/**
+ * Qual unidade está mais atrás da proporção pedida — ou null se nenhuma foi pesada.
+ *
+ * Mesma conta das prioridades de coleta: peso não é quantidade, é fatia. Com lanceiro 3 e
+ * arqueiro 1, de cada 4 unidades 3 são lanceiros. Quem tem a maior falta relativa vem
+ * primeiro; empate desempata por peso, para o que o jogador priorizou sair antes.
+ */
+function pudim_UnidadeMaisAtrasada()
+{
+	const pesadas = (g_PudimUnitTodas || []).filter(u => (g_PudimUnitPesos[u.tpl] || 0) > 0);
+	if (!pesadas.length) return null;
+
+	let somaPeso = 0, total = 0;
+	for (const u of pesadas) {
+		somaPeso += g_PudimUnitPesos[u.tpl];
+		total += u.existentes + u.emFila;   // a fila conta: senão pede a mesma de novo
+	}
+	if (somaPeso <= 0) return null;
+	// Sem nenhuma ainda, o alvo de todos é zero e a falta empata. Trata como se houvesse uma
+	// a distribuir, para a de maior peso sair primeiro em vez de a ordem alfabética decidir.
+	const base = Math.max(total, 1);
+
+	let melhor = null, maiorFalta = -Infinity;
+	for (const u of pesadas) {
+		const alvo = base * (g_PudimUnitPesos[u.tpl] / somaPeso);
+		const falta = alvo - (u.existentes + u.emFila);
+		if (falta > maiorFalta ||
+		    (Math.abs(falta - maiorFalta) < 0.001 && melhor &&
+		     g_PudimUnitPesos[u.tpl] > g_PudimUnitPesos[melhor.tpl]))
+		{
+			maiorFalta = falta;
+			melhor = u;
+		}
+	}
+	return melhor;
+}
+
+var g_PudimUnitTodas = [];
 
 
 function pudim_ProcessAutoKite()

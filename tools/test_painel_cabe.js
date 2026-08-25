@@ -102,6 +102,10 @@ for (let i = 0; i < ordenados.length; i++)
 		// A barra de titulo: o titulo fica na moldura (y negativo) e os tres botoes nos
 		// cantos. Eles convivem de proposito e nao disputam clique.
 		if (a.nome === "pudim_header" || b.nome === "pudim_header") continue;
+		// pudim_unitVazio ocupa o mesmo espaço das linhas de unidade DE PROPÓSITO: ou há o
+		// que treinar e as linhas aparecem, ou não há e a mensagem aparece no lugar delas.
+		// Nunca os dois ao mesmo tempo — pudim_DesenharUnidades garante isso.
+		if (a.nome === "pudim_unitVazio" || b.nome === "pudim_unitVazio") continue;
 		sobrepostos.push(a.nome + " x " + b.nome);
 	}
 check("nenhum objeto se sobrepõe por acidente",

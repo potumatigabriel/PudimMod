@@ -109,6 +109,8 @@ const PUDIM_STRINGS = {
 	"cap.counselorHeader":["Strategic Advisor", "Conselheiro Estratégico"],
 	"cap.counselorTip":  ["Tip: Reading the map...", "Dica: Analisando o mapa..."],
 	"cap.counselorCam":  ["Show Location on Map", "Ver Local no Mapa"],
+	"cap.unitHeader":    ["Unit Proportions", "Proporção de Unidades"],
+	"cap.unitVazio":     ["Nothing to train yet.", "Nada para treinar ainda."],
 	"cap.optionsHint":   ["Switches and explanations: Menu > Options > PudimMod",
 	                      "Interruptores e explicações: Menu > Opções > PudimMod"],
 	// Cabeçalho do painel
@@ -290,8 +292,8 @@ const PUDIM_CAPTION_MAP = {
 	"pudim_quartelHeader":      "cap.serieHeader",
 	"pudim_backToWorkBtn2":     "cap.backToWork",
 	"pudim_optionsHint":        "cap.optionsHint",
-	"pudim_counselorHeader":    "cap.counselorHeader",
-	"pudim_counselorCameraBtn": "cap.counselorCam"
+	"pudim_unitHeader":         "cap.unitHeader",
+	"pudim_unitVazio":          "cap.unitVazio"
 };
 
 /** Objetos que aceitam caption. Descoberto uma vez; ver o porque em pudim_ApplyCaptions. */

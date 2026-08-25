@@ -3470,6 +3470,102 @@ GuiInterface.prototype.pudim_GetBarracksBuildData = function(player, data)
 };
 
 
+// ─── O que dá para treinar agora, e o que já existe ───────────────────────────────────
+//
+// Pedido de 25/08: "faz um pra construir automaticamente unidades... pra balancear elas...
+// ai a gente coloca as proporções, tem que aparecer na lista todas que estão disponíveis no
+// momento, elas vão mudar conforme o jogo andar, construir quartéis, estábulos, passar de
+// fase, liberar campeões e etc".
+//
+// "no momento" é a parte que decide o desenho. Uma lista fixa de tipos de unidade estaria
+// errada em toda partida: cada civilização treina coisas diferentes, o quartel libera um
+// conjunto, o estábulo outro, e mudar de fase libera campeão. Então a lista não é escrita
+// aqui — ela é PERGUNTADA aos edifícios que o jogador tem de pé, a cada vez.
+//
+// ProductionQueue.GetEntitiesList() devolve exatamente isso: o que AQUELE edifício pode
+// treinar agora, já com fase e tecnologia aplicadas. É a mesma fonte que a interface do
+// próprio jogo usa para desenhar os botões de treino.
+GuiInterface.prototype.pudim_GetTrainableUnits = function(player, data)
+{
+	const result = { "unidades": [], "_dbg": { "edificios": 0 } };
+	const cmpRangeManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_RangeManager);
+	if (!cmpRangeManager) return result;
+
+	const allEnts = cmpRangeManager.GetEntitiesByPlayer(player);
+	const cmpTemplateManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_TemplateManager);
+
+	// tpl -> { treinaveis, existentes, emFila, edificios: [ids] }
+	const porTpl = {};
+
+	for (const ent of allEnts) {
+		const cmpPQ = Engine.QueryInterface(ent, IID_ProductionQueue);
+		if (!cmpPQ || !cmpPQ.GetEntitiesList) continue;
+		// Fundação ainda não treina nada; contá-la faria a lista piscar durante a obra.
+		if (Engine.QueryInterface(ent, IID_Foundation)) continue;
+		result._dbg.edificios++;
+
+		let lista = [];
+		try { lista = cmpPQ.GetEntitiesList() || []; } catch (e) { continue; }
+		for (const tpl of lista) {
+			if (!porTpl[tpl]) porTpl[tpl] = { existentes: 0, emFila: 0, edificios: [] };
+			porTpl[tpl].edificios.push(ent);
+		}
+
+		// O que já está na fila conta como "vai existir": sem isso o balanceador pediria de
+		// novo a mesma unidade a cada ciclo, enquanto a primeira ainda nem saiu.
+		try {
+			for (const item of cmpPQ.GetQueue())
+				if (item.productiontype === "unit" && item.unitTemplate && porTpl[item.unitTemplate])
+					porTpl[item.unitTemplate].emFila += (item.count || 1);
+		} catch (e) {}
+	}
+
+	// Quantas de cada tipo já estão em campo. É a metade da conta que falta para saber quem
+	// está atrás da proporção.
+	for (const ent of allEnts) {
+		const cmpId = Engine.QueryInterface(ent, IID_Identity);
+		if (!cmpId || !cmpId.GetTemplateName) continue;
+		let nome = "";
+		try { nome = cmpId.GetTemplateName(); } catch (e) { continue; }
+		if (!nome) continue;
+		// A unidade em campo pode ter promovido de posto (ranks a/b/e no fim do nome),
+		// então o template dela não bate com o treinável. Compara pela raiz.
+		const raiz = nome.replace(/_[abe]$/, "");
+		for (const tpl in porTpl)
+			if (tpl.replace(/_[abe]$/, "") === raiz) { porTpl[tpl].existentes++; break; }
+	}
+
+	for (const tpl in porTpl) {
+		let nomeCurto = tpl.substr(tpl.lastIndexOf("/") + 1);
+		let generico = nomeCurto;
+		let classes = [];
+		try {
+			const t = cmpTemplateManager.GetTemplate(tpl);
+			if (t && t.Identity) {
+				if (t.Identity.GenericName) generico = t.Identity.GenericName;
+				if (t.Identity.VisibleClasses)
+					classes = t.Identity.VisibleClasses._string ?
+						t.Identity.VisibleClasses._string.split(/\s+/) :
+						String(t.Identity.VisibleClasses).split(/\s+/);
+			}
+		} catch (e) {}
+		result.unidades.push({
+			"tpl": tpl,
+			"nome": generico,
+			"classes": classes,
+			"existentes": porTpl[tpl].existentes,
+			"emFila": porTpl[tpl].emFila,
+			"edificios": porTpl[tpl].edificios
+		});
+	}
+
+	// Ordem estável: sem ela a lista dança na tela a cada atualização, e o jogador clica no
+	// "+" de uma unidade e acerta outra.
+	result.unidades.sort(function(a, b) { return a.tpl < b.tpl ? -1 : (a.tpl > b.tpl ? 1 : 0); });
+	return result;
+};
+
+
 GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 	const cmpPlayerManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_PlayerManager);
 	const playerEnt = cmpPlayerManager.GetPlayerByID(player);
@@ -6225,6 +6321,7 @@ var pudim_exposedFunctions = {
  	"pudim_GetAutoHouseData": 1,
 	"pudim_GetHeroAuraData": 1,
 	"pudim_GetBarracksBuildData": 1,
+	"pudim_GetTrainableUnits": 1,
   	"pudim_GetScoutStatus": 1,
   	"pudim_GetAutoKiteData": 1,
   	"pudim_GetCombatEstimation": 1,

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Ancorado à DIREITA da tela (100%-340 .. 100%-20): a esquerda fica livre para o chat
      e para a barra de aliados. Largura de 320 mantida; a JS ajusta só a altura. -->
-<object name="pudim_mainPanel" type="image" size="100%-340 50%-514 100%-20 50%+394" sprite="ModernDarkBoxGold" z="150" hidden="true">
+<object name="pudim_mainPanel" type="image" size="100%-340 50%-514 100%-20 50%+476" sprite="ModernDarkBoxGold" z="150" hidden="true">
   <object name="pudim_header" type="text" style="TitleText" size="50%-80 -16 50%+80 16"><translatableAttribute id="caption">PudimMod</translatableAttribute></object>
   <object name="pudim_compactBtn" type="button" size="4 6 50 28" style="StoneButton" tooltip="Alternar modo compacto"><action on="Press">pudim_ToggleCompact();</action><object name="pudim_compactLabel" type="text" size="0 0 100% 100%" font="sans-bold-13" text_align="center" text_valign="center" textcolor="200 200 200 255" ghost="true"><translatableAttribute id="caption">▼</translatableAttribute></object></object>
   <object name="pudim_logBtn" type="button" size="100%-76 6 100%-32 28" style="StoneButton" tooltip="Abre o painel de debug"><action on="Press">pudim_ToggleLog();</action><translatableAttribute id="caption">Log</translatableAttribute></object>
@@ -10,7 +10,11 @@
   <!-- Fundo que pisca na cor do estado do combate (verde/amarelo/vermelho).
        Declarado ANTES dos textos para ficar atras deles; ghost para nao roubar clique. -->
   <object name="pudim_combatFlash" type="image" size="4 28 100%-4 234" sprite="color: 0 0 0 0" ghost="true"/>
-  <object name="pudim_combatHeader" type="text" size="8 30 100%-8 52" font="sans-bold-14" textcolor="255 255 255 255" style="ModernLabelText" ghost="true"><translatableAttribute id="caption">Estimador de Combate</translatableAttribute></object>
+  <!-- Clicar no titulo colapsa e expande o estimador. Sem ghost, senao nao recebe clique.
+       Ele nasce COLAPSADO: o estimador so importa quando ha combate, e ocupava 182px do
+       painel o tempo todo — mais que qualquer outra secao, para um numero que fica em zero
+       na maior parte da partida. -->
+  <object name="pudim_combatHeader" type="button" size="8 30 100%-8 52" sprite="" tooltip="Clique para expandir ou recolher"><action on="Press">pudim_ToggleCombatBox();</action><object name="pudim_combatHeaderLabel" type="text" size="0 0 100% 100%" font="sans-bold-14" text_align="center" text_valign="center" textcolor="255 255 255 255" ghost="true"><translatableAttribute id="caption">Estimador de Combate</translatableAttribute></object></object>
   <object name="pudim_allyCount" type="text" size="8 56 50% 74" font="sans-bold-13" textcolor="80 220 80 255" ghost="true"><translatableAttribute id="caption">Aliados: --</translatableAttribute></object>
   <object name="pudim_enemyCount" type="text" size="50% 56 100%-8 74" font="sans-bold-13" textcolor="220 80 80 255" ghost="true"><translatableAttribute id="caption">Inimigos: --</translatableAttribute></object>
   <object name="pudim_allyHP" type="text" size="8 76 50% 94" font="sans-13" textcolor="210 210 210 255" ghost="true"><translatableAttribute id="caption">HP: --</translatableAttribute></object>
@@ -67,9 +71,6 @@
        um tem explicacao do que faz e por que. O painel ficou com o que e decisao DA PARTIDA
        (numeros que voce ajusta jogando) e nao configuracao permanente. -->
   <object name="pudim_optionsHint" type="text" size="8 772 100%-8 790" font="sans-11" text_align="center" textcolor="170 170 170 255" ghost="true"><translatableAttribute id="caption">Interruptores e explicacoes: Menu > Opcoes > PudimMod</translatableAttribute></object>
-  <object name="pudim_counselorHeader" type="text" size="8 798 100%-8 820" font="sans-bold-14" textcolor="255 215 0 255" style="ModernLabelText" ghost="true"><translatableAttribute id="caption">Conselheiro Estrategico</translatableAttribute></object>
-  <object name="pudim_counselorTip" type="text" size="8 824 100%-8 868" font="sans-13" text_align="center" textcolor="220 220 220 255" ghost="true"><translatableAttribute id="caption">Dica: Analisando o mapa...</translatableAttribute></object>
-  <object name="pudim_counselorCameraBtn" type="button" size="8 872 100%-8 896" style="StoneButton" tooltip="Ver Local" hidden="true"><action on="Press">pudim_CounselorCameraMove();</action><translatableAttribute id="caption">Ver Local no Mapa</translatableAttribute></object>
 
   <!-- Construcao em serie de quarteis/estabulos.
        Dois dropdowns e um botao: tipo, quantidade (1 a 10), e liga/desliga a serie.
@@ -82,5 +83,41 @@
   <object name="pudim_quartelTipo" type="dropdown" style="ModernDropDown" size="8 626 55%-4 654" tooltip="Quartel ou Estabulo"><action on="SelectionChange">pudim_QuartelSetTipo();</action></object>
   <object name="pudim_quartelQtd" type="dropdown" style="ModernDropDown" size="55%+4 626 100%-8 654" tooltip="Quantos construir (1 a 10)"><action on="SelectionChange">pudim_QuartelSetQtd();</action></object>
   <object name="pudim_quartelBtn" type="button" size="8 658 100%-8 682" style="StoneButton" tooltip="Ergue um de cada vez, com 5 trabalhadores do recurso mais abundante. Eles voltam ao trabalho ao terminar."><action on="Press">pudim_QuartelToggle();</action><object name="pudim_quartelBtnLabel" type="text" size="0 0 100% 100%" font="sans-bold-13" text_align="center" text_valign="center" textcolor="200 160 255 255" ghost="true"><translatableAttribute id="caption">Construir 1 Quartel</translatableAttribute></object></object>
+
+  <!-- Balanceador de unidades: mesma ideia das prioridades de coleta, mas a LISTA E
+       DINAMICA. O que da para treinar muda durante a partida — quartel libera infantaria,
+       estabulo libera cavalaria, mudar de fase libera campeao — entao as linhas nascem
+       escondidas e o JS preenche com o que existe AGORA. Sete linhas cobrem o que costuma
+       estar disponivel ao mesmo tempo; havendo mais, entram as de maior peso. -->
+  <object name="pudim_unitHeader" type="text" size="8 800 100%-8 822" font="sans-bold-14" textcolor="255 200 120 255" style="ModernLabelText" ghost="true"><translatableAttribute id="caption">Proporcao de Unidades</translatableAttribute></object>
+  <object name="pudim_unitLabel0" type="text" size="8 826 48%-4 844" font="sans-13" textcolor="220 220 220 255" ghost="true" hidden="true"><translatableAttribute id="caption"> </translatableAttribute></object>
+  <object name="pudim_unitMinus0" type="button" size="48% 826 60% 844" style="StoneButton" hidden="true"><action on="Press">pudim_UnitWeightDelta(0, -1);</action><translatableAttribute id="caption">-</translatableAttribute></object>
+  <object name="pudim_unitVal0" type="text" size="61% 826 73% 844" font="sans-bold-13" text_align="center" textcolor="255 255 255 255" ghost="true" hidden="true"><translatableAttribute id="caption">0</translatableAttribute></object>
+  <object name="pudim_unitPlus0" type="button" size="74% 826 86% 844" style="StoneButton" hidden="true"><action on="Press">pudim_UnitWeightDelta(0, 1);</action><translatableAttribute id="caption">+</translatableAttribute></object>
+  <object name="pudim_unitLabel1" type="text" size="8 848 48%-4 866" font="sans-13" textcolor="220 220 220 255" ghost="true" hidden="true"><translatableAttribute id="caption"> </translatableAttribute></object>
+  <object name="pudim_unitMinus1" type="button" size="48% 848 60% 866" style="StoneButton" hidden="true"><action on="Press">pudim_UnitWeightDelta(1, -1);</action><translatableAttribute id="caption">-</translatableAttribute></object>
+  <object name="pudim_unitVal1" type="text" size="61% 848 73% 866" font="sans-bold-13" text_align="center" textcolor="255 255 255 255" ghost="true" hidden="true"><translatableAttribute id="caption">0</translatableAttribute></object>
+  <object name="pudim_unitPlus1" type="button" size="74% 848 86% 866" style="StoneButton" hidden="true"><action on="Press">pudim_UnitWeightDelta(1, 1);</action><translatableAttribute id="caption">+</translatableAttribute></object>
+  <object name="pudim_unitLabel2" type="text" size="8 870 48%-4 888" font="sans-13" textcolor="220 220 220 255" ghost="true" hidden="true"><translatableAttribute id="caption"> </translatableAttribute></object>
+  <object name="pudim_unitMinus2" type="button" size="48% 870 60% 888" style="StoneButton" hidden="true"><action on="Press">pudim_UnitWeightDelta(2, -1);</action><translatableAttribute id="caption">-</translatableAttribute></object>
+  <object name="pudim_unitVal2" type="text" size="61% 870 73% 888" font="sans-bold-13" text_align="center" textcolor="255 255 255 255" ghost="true" hidden="true"><translatableAttribute id="caption">0</translatableAttribute></object>
+  <object name="pudim_unitPlus2" type="button" size="74% 870 86% 888" style="StoneButton" hidden="true"><action on="Press">pudim_UnitWeightDelta(2, 1);</action><translatableAttribute id="caption">+</translatableAttribute></object>
+  <object name="pudim_unitLabel3" type="text" size="8 892 48%-4 910" font="sans-13" textcolor="220 220 220 255" ghost="true" hidden="true"><translatableAttribute id="caption"> </translatableAttribute></object>
+  <object name="pudim_unitMinus3" type="button" size="48% 892 60% 910" style="StoneButton" hidden="true"><action on="Press">pudim_UnitWeightDelta(3, -1);</action><translatableAttribute id="caption">-</translatableAttribute></object>
+  <object name="pudim_unitVal3" type="text" size="61% 892 73% 910" font="sans-bold-13" text_align="center" textcolor="255 255 255 255" ghost="true" hidden="true"><translatableAttribute id="caption">0</translatableAttribute></object>
+  <object name="pudim_unitPlus3" type="button" size="74% 892 86% 910" style="StoneButton" hidden="true"><action on="Press">pudim_UnitWeightDelta(3, 1);</action><translatableAttribute id="caption">+</translatableAttribute></object>
+  <object name="pudim_unitLabel4" type="text" size="8 914 48%-4 932" font="sans-13" textcolor="220 220 220 255" ghost="true" hidden="true"><translatableAttribute id="caption"> </translatableAttribute></object>
+  <object name="pudim_unitMinus4" type="button" size="48% 914 60% 932" style="StoneButton" hidden="true"><action on="Press">pudim_UnitWeightDelta(4, -1);</action><translatableAttribute id="caption">-</translatableAttribute></object>
+  <object name="pudim_unitVal4" type="text" size="61% 914 73% 932" font="sans-bold-13" text_align="center" textcolor="255 255 255 255" ghost="true" hidden="true"><translatableAttribute id="caption">0</translatableAttribute></object>
+  <object name="pudim_unitPlus4" type="button" size="74% 914 86% 932" style="StoneButton" hidden="true"><action on="Press">pudim_UnitWeightDelta(4, 1);</action><translatableAttribute id="caption">+</translatableAttribute></object>
+  <object name="pudim_unitLabel5" type="text" size="8 936 48%-4 954" font="sans-13" textcolor="220 220 220 255" ghost="true" hidden="true"><translatableAttribute id="caption"> </translatableAttribute></object>
+  <object name="pudim_unitMinus5" type="button" size="48% 936 60% 954" style="StoneButton" hidden="true"><action on="Press">pudim_UnitWeightDelta(5, -1);</action><translatableAttribute id="caption">-</translatableAttribute></object>
+  <object name="pudim_unitVal5" type="text" size="61% 936 73% 954" font="sans-bold-13" text_align="center" textcolor="255 255 255 255" ghost="true" hidden="true"><translatableAttribute id="caption">0</translatableAttribute></object>
+  <object name="pudim_unitPlus5" type="button" size="74% 936 86% 954" style="StoneButton" hidden="true"><action on="Press">pudim_UnitWeightDelta(5, 1);</action><translatableAttribute id="caption">+</translatableAttribute></object>
+  <object name="pudim_unitLabel6" type="text" size="8 958 48%-4 976" font="sans-13" textcolor="220 220 220 255" ghost="true" hidden="true"><translatableAttribute id="caption"> </translatableAttribute></object>
+  <object name="pudim_unitMinus6" type="button" size="48% 958 60% 976" style="StoneButton" hidden="true"><action on="Press">pudim_UnitWeightDelta(6, -1);</action><translatableAttribute id="caption">-</translatableAttribute></object>
+  <object name="pudim_unitVal6" type="text" size="61% 958 73% 976" font="sans-bold-13" text_align="center" textcolor="255 255 255 255" ghost="true" hidden="true"><translatableAttribute id="caption">0</translatableAttribute></object>
+  <object name="pudim_unitPlus6" type="button" size="74% 958 86% 976" style="StoneButton" hidden="true"><action on="Press">pudim_UnitWeightDelta(6, 1);</action><translatableAttribute id="caption">+</translatableAttribute></object>
+  <object name="pudim_unitVazio" type="text" size="8 826 100%-8 866" font="sans-11" text_align="center" textcolor="170 170 170 255" ghost="true"><translatableAttribute id="caption">Nada para treinar ainda.</translatableAttribute></object>
 
 </object>

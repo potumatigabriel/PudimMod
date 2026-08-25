@@ -172,6 +172,34 @@ check("só escolhe unidade que AQUELE edifício treina",
 check("e respeita o teto de mulheres",
 	/if \(!\(atFemaleCap && isFemaleTemplate\(atrasada\.tpl\)\)\)/.test(panel));
 
+// ── A fila cheia: onde a proporção realmente precisava agir ────────────────────────────
+//
+// Relato do jogador: pôs peso no escaramuçador e o centro cívico continuou fazendo mulheres.
+//
+// A auto-fila só SEMEIA fila vazia, e a fila nunca esvaziava — a auto-fila nativa do motor
+// (autoqueue-on) repete o lote indefinidamente. A proporção era consultada num ponto que
+// nunca era alcançado. Semear certo não basta: é preciso TROCAR o que já está enfileirado.
+check("a proporção também troca o TIPO do lote já enfileirado",
+	/let tplDesejado = null;[\s\S]{0,400}?tplDesejado = alvo\.tpl;/.test(panel));
+check("e o comando é stop-production seguido de train",
+	/"type": "stop-production", "entity": b\.ent, "id": cur\.id[\s\S]{0,300}?"template": tplDesejado/.test(panel));
+
+// A trava que já existia continua sendo a certa: lote do jogador não se toca.
+check("só troca lote RECONHECIDAMENTE do mod",
+	/if \(isOurs && \(cur\.progress \|\| 0\) <= 0 && tplDesejado\)/.test(panel));
+check("e 'nosso' é o que bate com a última semeadura do próprio mod",
+	/const isOurs = !!\(cur\.unitTemplate && seededTpl && cur\.unitTemplate === seededTpl\);/.test(panel));
+check("nunca troca lote que já começou — cancelar jogaria fora o tempo investido",
+	/\(cur\.progress \|\| 0\) <= 0 && tplDesejado/.test(panel));
+check("nem quando há mais de um lote (o resto é do jogador)",
+	/if \(b\.trainingQueue && b\.trainingQueue\.length === 1\) \{/.test(panel));
+check("a unidade escolhida tem de ser treinável NAQUELE edifício",
+	/alvo && alvo\.tpl !== cur\.unitTemplate &&[\s\S]{0,120}?trainerEntities \|\| \[\]\)\.indexOf\(alvo\.tpl\) >= 0/.test(panel));
+check("e a semeadura registrada é atualizada, senão o mod leria a propria troca como ordem do jogador",
+	/g_PudimQueueSeededTpl\[b\.ent\] = tplDesejado;/.test(panel));
+check("o log diz que foi a proporção",
+	/\(proporção de unidades\)/.test(panel));
+
 // ── Lote de treino ─────────────────────────────────────────────────────────────────────
 //
 // "sempre treine em lotes, se tiver recursos, assim a proporção tempo/unidades é mais

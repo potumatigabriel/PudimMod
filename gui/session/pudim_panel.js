@@ -2242,6 +2242,44 @@ function pudim_ProcessAutoQueue()
 					// diferente é ordem do jogador e não se toca.
 					const seededTpl = g_PudimQueueSeededTpl[b.ent];
 					const isOurs = !!(cur.unitTemplate && seededTpl && cur.unitTemplate === seededTpl);
+
+					// A PROPORÇÃO TAMBÉM TROCA O TIPO, e não só o tamanho.
+					//
+					// Relato do jogador: ele pôs peso no escaramuçador e o centro cívico
+					// continuou fazendo mulheres. A causa: a auto-fila só SEMEIA fila vazia, e
+					// a fila nunca esvaziava — a auto-fila nativa do motor (autoqueue-on)
+					// repete o lote indefinidamente. A proporção era consultada num ponto que
+					// nunca era alcançado.
+					//
+					// Trocar o tipo aqui resolve, e a trava que já existia continua sendo a
+					// certa: só se o lote for RECONHECIDAMENTE do mod (mesmo template da última
+					// semeadura dele) e ainda não tiver começado. Lote do jogador não se toca —
+					// é a mesma regra que impediu 5 guerreiros de voltarem como 2 aldeões, e
+					// configurar proporção não é motivo para reabri-la.
+					let tplDesejado = null;
+					if (isOurs && pudim_ProporcaoAtiva()) {
+						const alvo = pudim_UnidadeMaisAtrasada();
+						if (alvo && alvo.tpl !== cur.unitTemplate &&
+						    (b.trainerEntities || []).indexOf(alvo.tpl) >= 0 &&
+						    !(atFemaleCap && isFemaleTemplate(alvo.tpl)))
+							tplDesejado = alvo.tpl;
+					}
+
+					if (isOurs && (cur.progress || 0) <= 0 && tplDesejado) {
+						const affordable = pudim_ComputeAffordableCount(tplDesejado, desiredCount, res);
+						const lote = Math.max(1, Math.min(desiredCount, affordable));
+						if (cur.id !== undefined && affordable >= 1) {
+							Engine.PostNetworkCommand({ "type": "stop-production", "entity": b.ent, "id": cur.id });
+							Engine.PostNetworkCommand({ "type": "train", "entities": [b.ent],
+								"template": tplDesejado, "count": lote });
+							g_PudimQueueSeededTpl[b.ent] = tplDesejado;
+							g_PudimQueueSeededAt[b.ent] = nowQueue;
+							pudim_Log("INFO", "QUEUE", "edifício " + b.ent + " trocado para " +
+								tplDesejado.split("/").pop() + " x" + lote + " (proporção de unidades)");
+						}
+						continue;
+					}
+
 					if (isOurs && (cur.progress || 0) <= 0 && curCount < desiredCount) {
 						const tpl = cur.unitTemplate;
 						// Exige poder pagar o lote CHEIO com o estoque atual, sem contar o

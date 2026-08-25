@@ -53,7 +53,7 @@ check("o tamanho do jogador tem precedencia sobre o padrao do mod",
 check("e o lote proporcional nao atropela o tamanho que o jogador pos",
 	/if \(!g_PudimPlayerQueueCount\[b\.ent\] && pudim_ProporcaoAtiva\(\)\)/.test(PANEL));
 check("nem o tipo: a proporcao so escolhe quando ele nunca escolheu ali",
-	PANEL.indexOf("const atrasada = pudim_UnidadeMaisAtrasada();") >
+	PANEL.indexOf("const atrasada = pudim_UnidadeMaisAtrasada(") >
 	PANEL.indexOf("let template = g_PudimPlayerQueueTpl[b.ent] || null;"));
 check("o log diz de quem foi a escolha", /\(doJogador \? " \(escolha do jogador\)" : ""\)/.test(PANEL));
 

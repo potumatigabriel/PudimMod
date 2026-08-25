@@ -161,16 +161,24 @@ check("peso zero nunca é escolhido",
 // ── Onde ela entra na auto-fila ────────────────────────────────────────────────────────
 // A ordem importa e já custou caro: o jogador pôs 5 guerreiros e voltavam 2 aldeões.
 const iJogador = panel.indexOf("let template = g_PudimPlayerQueueTpl[b.ent] || null;");
-const iProporcao = panel.indexOf("const atrasada = pudim_UnidadeMaisAtrasada();");
+const iProporcao = panel.indexOf("const atrasada = pudim_UnidadeMaisAtrasada(");
 const iPalpite = panel.indexOf("const trainerEnts = b.trainerEntities || [];");
 check("a escolha do jogador vem primeiro", iJogador > 0 && iJogador < iProporcao);
 check("a proporção vem depois dela", iProporcao > 0 && iProporcao < iPalpite);
 check("e o palpite antigo fica por último", iPalpite > 0);
 // Pedir cavalaria num quartel faz o motor recusar em silêncio e a fila fica parada.
+//
+// A garantia mudou de lugar em 25/08, e ficou mais forte: antes a escolha era global e a
+// checagem vinha DEPOIS, recusando — e caindo no palpite antigo. No log, o quartel 6177
+// semeou infantry_spearman_b vinte vezes seguidas com prop=on porque a mais atrasada no
+// geral era cavalaria. Agora a lista do edifício entra ANTES da escolha, então nunca sai
+// dali uma unidade que ele não treine. O comportamento está coberto de verdade em
+// tools/test_lote_proporcao.js, que roda a função.
 check("só escolhe unidade que AQUELE edifício treina",
-	/\(b\.trainerEntities \|\| \[\]\)\.indexOf\(atrasada\.tpl\) >= 0/.test(panel));
+	/const atrasada = pudim_UnidadeMaisAtrasada\(b\.trainerEntities \|\| \[\],/.test(panel) &&
+	/\.filter\(u => !permitidos \|\| permitidos\.indexOf\(u\.tpl\) >= 0\)/.test(panel));
 check("e respeita o teto de mulheres",
-	/if \(!\(atFemaleCap && isFemaleTemplate\(atrasada\.tpl\)\)\)/.test(panel));
+	/if \(atrasada && !\(atFemaleCap && isFemaleTemplate\(atrasada\.tpl\)\)\)/.test(panel));
 
 // ── A fila cheia: onde a proporção realmente precisava agir ────────────────────────────
 //
@@ -194,7 +202,26 @@ check("nunca troca lote que já começou — cancelar jogaria fora o tempo inves
 check("nem quando há mais de um lote (o resto é do jogador)",
 	/if \(b\.trainingQueue && b\.trainingQueue\.length === 1\) \{/.test(panel));
 check("a unidade escolhida tem de ser treinável NAQUELE edifício",
-	/alvo && alvo\.tpl !== cur\.unitTemplate &&[\s\S]{0,120}?trainerEntities \|\| \[\]\)\.indexOf\(alvo\.tpl\) >= 0/.test(panel));
+	/const alvo = pudim_ProporcaoTrocaria\(b\.trainerEntities \|\| \[\],\s+cur\.unitTemplate/.test(panel));
+
+// ── A troca não pode se desfazer sozinha ───────────────────────────────────────────────
+// "demora muitos ciclos e as vezes n troca as unidades". `emFila` conta na proporção — e
+// tem de contar, senão o mod pede a mesma unidade a cada ciclo. Mas então semear 5
+// escaramuçadores empurra a falta para o espadachim, o ciclo seguinte cancela os 5, e a
+// falta volta para o escaramuçador. No log de 25/08 há cancelamentos em 227s e 330s sem
+// nenhuma unidade ter saído no meio.
+//
+// A pergunta passou a ser feita com o lote DESCONTADO: "se eu não tivesse enfileirado
+// nada, o que pediria agora?". Se a resposta for o próprio semeado, não há troca.
+check("a decisão de trocar desconta o lote que seria cancelado",
+	/function pudim_ProporcaoTrocaria\(permitidos, semeado, naFila\)/.test(panel) &&
+	/descontos\[semeado\] = naFila;/.test(panel));
+check("e o desconto sai da fila na hora de contar",
+	/return u\.existentes \+ Math\.max\(0, u\.emFila - desc\);/.test(panel));
+check("empate mantém quem já estava, em vez de alternar",
+	/if \(preferido && u\.tpl === preferido\) ganha = true;/.test(panel));
+check("e o cancelamento conta só os lotes que ainda não começaram",
+	/if \(item\.unitTemplate === seededTpl && \(item\.progress \|\| 0\) <= 0\)\s+naFila \+= item\.count \|\| 1;/.test(panel));
 check("e a semeadura registrada é atualizada, senão o mod leria a propria troca como ordem do jogador",
 	/g_PudimQueueSeededTpl\[b\.ent\] = tplDesejado;/.test(panel));
 check("o log diz que foi a proporção",
@@ -234,21 +261,30 @@ check("o porquê do teto está escrito, não é número solto",
 	/o lote inteiro só ENTREGA quando termina/i.test(panel) ||
 	/só ENTREGA quando termina/.test(panel));
 
-// A regra, espelhada.
-function lote(cabe, numEdificios) {
-	return Math.max(1, Math.min(TETO, Math.floor(cabe / Math.max(1, numEdificios))));
-}
-check("com recursos de sobra e um edifício, vai no teto", lote(40, 1) === TETO);
-check("o estoque é dividido entre os edifícios que treinam",
-	lote(12, 4) === 3, lote(12, 4));
-check("sem recursos, o lote é 1 — nunca zero, senão nada é treinado",
-	lote(0, 3) === 1, lote(0, 3));
-check("um edifício a mais reduz o lote de cada um",
-	lote(20, 2) > lote(20, 5));
-check("e nunca passa do teto, por mais recurso que haja", lote(9999, 1) === TETO);
+// Aqui havia a regra ESPELHADA à mão — `floor(cabe / numEdificios)` reescrito no teste — e
+// ela passava verdinha enquanto o jogo treinava de 1 em 1. O espelho reproduzia o erro
+// junto com a regra: `cabe` já vinha limitado ao teto, e dividir um valor limitado pelo
+// número de edifícios dava zero assim que a base passava de dez construções.
+//
+// Espelhar a regra só verifica que eu escrevi duas vezes a mesma coisa. Quem checa o
+// comportamento é tools/test_lote_proporcao.js, que EXECUTA pudim_LoteIdeal com o cenário
+// exato do log de 25/08 (estoque farto, 15 edifícios) e exige lote maior que 1.
+check("o comportamento do lote é testado rodando a função, não espelhando a regra",
+	fs.readFileSync(path.join(base, "tools", "test_lote_proporcao.js"), "utf8")
+		.indexOf("ctx.pudim_LoteIdeal(") > 0);
 
 check("o lote sai de pudim_ComputeAffordableCount, não de um palpite",
-	/pudim_ComputeAffordableCount\(template, PUDIM_LOTE_MAX, res \|\| \{\}\)/.test(panel));
+	/pudim_ComputeAffordableCount\(template, PUDIM_LOTE_TETO_CONTA, res \|\| \{\}\)/.test(panel));
+// E o teto da CONTA não pode ser o teto do LOTE: foi confundir os dois que causou o "1 em 1".
+check("o que se divide é o que o estoque paga, sem o teto do lote aplicado antes",
+	/const PUDIM_LOTE_TETO_CONTA = (\d+);/.test(panel) &&
+	+/const PUDIM_LOTE_TETO_CONTA = (\d+);/.exec(panel)[1] > TETO * 10);
+check("e a divisão é pelos edifícios que treinam AQUELE template, não por todos",
+	/pudim_QuantosTreinam\(template, buildings\)/.test(panel) &&
+	/if \(\(b\.trainerEntities \|\| \[\]\)\.indexOf\(template\) >= 0\) n\+\+;/.test(panel));
+// Casa e armazém têm IID_ProductionQueue porque ProductionQueue também pesquisa tecnologia.
+check("e está escrito por que casa e armazém apareciam na conta",
+	/tambem serve para PESQUISAR TECNOLOGIA/.test(panel));
 // res já vem com a madeira das fazendas descontada, então o lote cede sozinho quando a
 // comida está atrasada — sem precisar saber que a regra existe.
 check("e respeita a reserva das fazendas sem saber que ela existe",

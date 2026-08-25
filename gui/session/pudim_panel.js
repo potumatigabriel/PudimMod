@@ -2207,7 +2207,7 @@ function pudim_ProcessAutoQueue()
 			if (!g_PudimPlayerQueueCount[b.ent] && pudim_ProporcaoAtiva())
 				desiredCount = pudim_LoteIdeal(
 					g_PudimPlayerQueueTpl[b.ent] || g_PudimAutoQueueTemplates[b.ent],
-					res, buildings.length);
+					res, buildings);
 
 			// ── PROPORCAO COM A FILA CHEIA ──────────────────────────────────────────
 			//
@@ -2230,10 +2230,16 @@ function pudim_ProcessAutoQueue()
 			// cancelamento devolve os recursos e a troca sai de graca).
 			if (pudim_ProporcaoAtiva() && b.trainingQueue && b.trainingQueue.length) {
 				const seededTpl = g_PudimQueueSeededTpl[b.ent];
-				const alvo = pudim_UnidadeMaisAtrasada();
-				if (seededTpl && alvo && alvo.tpl !== seededTpl &&
-				    (b.trainerEntities || []).indexOf(alvo.tpl) >= 0 &&
-				    !(atFemaleCap && isFemaleTemplate(alvo.tpl)))
+				// Quantos deste tipo estao na fila SEM ter comecado — sao exatamente os que
+				// seriam cancelados, e por isso sao os que saem da conta da proporcao.
+				let naFila = 0;
+				if (seededTpl)
+					for (const item of b.trainingQueue)
+						if (item.unitTemplate === seededTpl && (item.progress || 0) <= 0)
+							naFila += item.count || 1;
+				const alvo = seededTpl && naFila
+					? pudim_ProporcaoTrocaria(b.trainerEntities || [], seededTpl, naFila) : null;
+				if (alvo && !(atFemaleCap && isFemaleTemplate(alvo.tpl)))
 				{
 					let cancelados = 0;
 					for (const item of b.trainingQueue) {
@@ -2306,10 +2312,9 @@ function pudim_ProcessAutoQueue()
 					// configurar proporção não é motivo para reabri-la.
 					let tplDesejado = null;
 					if (isOurs && pudim_ProporcaoAtiva()) {
-						const alvo = pudim_UnidadeMaisAtrasada();
-						if (alvo && alvo.tpl !== cur.unitTemplate &&
-						    (b.trainerEntities || []).indexOf(alvo.tpl) >= 0 &&
-						    !(atFemaleCap && isFemaleTemplate(alvo.tpl)))
+						const alvo = pudim_ProporcaoTrocaria(b.trainerEntities || [],
+							cur.unitTemplate, cur.count || 1);
+						if (alvo && !(atFemaleCap && isFemaleTemplate(alvo.tpl)))
 							tplDesejado = alvo.tpl;
 					}
 
@@ -2363,12 +2368,11 @@ function pudim_ProcessAutoQueue()
 			// quartel faria o motor recusar em silencio, e a fila ficaria parada sem motivo
 			// visivel.
 			if (!template) {
-				const atrasada = pudim_UnidadeMaisAtrasada();
-				if (atrasada && (b.trainerEntities || []).indexOf(atrasada.tpl) >= 0) {
-					if (!(atFemaleCap && isFemaleTemplate(atrasada.tpl))) {
-						template = atrasada.tpl;
-						g_PudimAutoQueueTemplates[b.ent] = template;
-					}
+				const atrasada = pudim_UnidadeMaisAtrasada(b.trainerEntities || [],
+					g_PudimQueueSeededTpl[b.ent]);
+				if (atrasada && !(atFemaleCap && isFemaleTemplate(atrasada.tpl))) {
+					template = atrasada.tpl;
+					g_PudimAutoQueueTemplates[b.ent] = template;
 				}
 			}
 
@@ -2423,7 +2427,7 @@ function pudim_ProcessAutoQueue()
 			pudim_Log("INFO", "QUEUE", "fila semeada em " + b.ent + " x" + affordable + " " +
 				template.split("/").pop() + (doJogador ? " (escolha do jogador)" : "") +
 				" qlen=" + ((b.trainingQueue && b.trainingQueue.length) || 0) +
-				(g_PudimShowDebug ? " | " + pudim_LoteDiag(template, res, buildings.length) : ""));
+				(g_PudimShowDebug ? " | " + pudim_LoteDiag(template, res, buildings) : ""));
 		}
 
 		if (atFemaleCap && !g_PudimFemaleCapLogged) {
@@ -4660,34 +4664,82 @@ function pudim_DesenharUnidades()
  * arqueiro 1, de cada 4 unidades 3 são lanceiros. Quem tem a maior falta relativa vem
  * primeiro; empate desempata por peso, para o que o jogador priorizou sair antes.
  */
-function pudim_UnidadeMaisAtrasada()
+/**
+ * A unidade mais atrasada em relacao a proporcao configurada.
+ *
+ * permitidos  limita ao que AQUELE edificio treina. Sem isso a mais atrasada podia ser
+ *             cavalaria enquanto o edificio da vez era um quartel — a checagem seguinte
+ *             recusava e o mod caia no palpite antigo. No log de 25/08 o quartel 6177
+ *             semeou infantry_spearman_b vinte vezes seguidas com prop=on, porque a mais
+ *             atrasada NO GERAL era cavalry_spearman_b.
+ *
+ * descontos   {tpl: n} — quantos tirar da fila antes de contar. Serve para perguntar "e se
+ *             este lote nao existisse?", que e a unica forma de decidir cancelamento sem
+ *             entrar em loop (ver pudim_ProporcaoTrocaria).
+ *
+ * preferido   desempate: com falta igual, fica quem ja estava. Sem isso duas unidades de
+ *             mesmo peso alternam o alvo a cada ciclo, que foi o "as vezes n troca as
+ *             unidades" — trocava tanto que nunca terminava nenhuma.
+ */
+function pudim_ProporcaoAlvo(permitidos, descontos, preferido)
 {
-	const pesadas = (g_PudimUnitTodas || []).filter(u => (g_PudimUnitPesos[u.tpl] || 0) > 0);
+	const pesadas = (g_PudimUnitTodas || [])
+		.filter(u => (g_PudimUnitPesos[u.tpl] || 0) > 0)
+		.filter(u => !permitidos || permitidos.indexOf(u.tpl) >= 0);
 	if (!pesadas.length) return null;
+
+	const conta = function(u) {
+		const desc = (descontos && descontos[u.tpl]) || 0;
+		return u.existentes + Math.max(0, u.emFila - desc);
+	};
 
 	let somaPeso = 0, total = 0;
 	for (const u of pesadas) {
 		somaPeso += g_PudimUnitPesos[u.tpl];
-		total += u.existentes + u.emFila;   // a fila conta: senão pede a mesma de novo
+		total += conta(u);   // a fila conta: senao pede a mesma de novo
 	}
 	if (somaPeso <= 0) return null;
-	// Sem nenhuma ainda, o alvo de todos é zero e a falta empata. Trata como se houvesse uma
-	// a distribuir, para a de maior peso sair primeiro em vez de a ordem alfabética decidir.
+	// Sem nenhuma ainda, o alvo de todos e zero e a falta empata. Trata como se houvesse uma
+	// a distribuir, para a de maior peso sair primeiro em vez de a ordem alfabetica decidir.
 	const base = Math.max(total, 1);
 
 	let melhor = null, maiorFalta = -Infinity;
 	for (const u of pesadas) {
-		const alvo = base * (g_PudimUnitPesos[u.tpl] / somaPeso);
-		const falta = alvo - (u.existentes + u.emFila);
-		if (falta > maiorFalta ||
-		    (Math.abs(falta - maiorFalta) < 0.001 && melhor &&
-		     g_PudimUnitPesos[u.tpl] > g_PudimUnitPesos[melhor.tpl]))
-		{
-			maiorFalta = falta;
-			melhor = u;
+		const falta = base * (g_PudimUnitPesos[u.tpl] / somaPeso) - conta(u);
+		let ganha = falta > maiorFalta + 0.001;
+		if (!ganha && melhor && Math.abs(falta - maiorFalta) <= 0.001) {
+			if (preferido && u.tpl === preferido) ganha = true;
+			else if (!(preferido && melhor.tpl === preferido))
+				ganha = g_PudimUnitPesos[u.tpl] > g_PudimUnitPesos[melhor.tpl];
 		}
+		if (ganha) { maiorFalta = falta; melhor = u; }
 	}
 	return melhor;
+}
+
+function pudim_UnidadeMaisAtrasada(permitidos, preferido)
+{
+	return pudim_ProporcaoAlvo(permitidos, null, preferido || null);
+}
+
+/**
+ * Vale a pena cancelar `naFila` lotes de `semeado` neste edificio para trocar de unidade?
+ *
+ * A pergunta e feita COM O LOTE JA DESCONTADO, e e isso que quebra o ciclo. Contando o lote,
+ * semear 5 escaramurcadores empurra a falta para o espadachim; no ciclo seguinte o mod
+ * cancela os 5, o que devolve a falta ao escaramurcador, e recomeca. No log de 25/08 isso
+ * aparece como cancelamentos em 227s e 330s sem nenhuma unidade ter saido no meio.
+ *
+ * Descontado o lote, a pergunta vira "se eu nao tivesse enfileirado nada, o que pediria
+ * agora?". Se a resposta continua sendo o proprio semeado, nao ha o que trocar — e o
+ * desempate por `preferido` garante que empate tambem fica parado.
+ */
+function pudim_ProporcaoTrocaria(permitidos, semeado, naFila)
+{
+	const descontos = {};
+	descontos[semeado] = naFila;
+	const alvo = pudim_ProporcaoAlvo(permitidos, descontos, semeado);
+	return alvo && alvo.tpl !== semeado ? alvo : null;
 }
 
 var g_PudimUnitTodas = [];
@@ -4705,6 +4757,10 @@ function pudim_ProporcaoAtiva()
 // 20 segura a primeira unidade por 8,14 tempos de treino; e ele tranca os recursos enquanto
 // isso, inclusive os que as fazendas — prioridade máxima — podem precisar.
 const PUDIM_LOTE_MAX = 10;
+// Teto so da CONTA de quanto o estoque paga — nao e tamanho de lote. Existe porque
+// pudim_ComputeAffordableCount precisa de um limite superior, e este tem de ser alto o
+// bastante para nunca ser ele a decidir o lote (quem decide e PUDIM_LOTE_MAX, depois).
+const PUDIM_LOTE_TETO_CONTA = 500;
 
 /**
  * Tamanho do lote de treino.
@@ -4736,12 +4792,13 @@ const PUDIM_LOTE_MAX = 10;
  * sai de quatro coisas (estoque, reserva das fazendas, numero de edificios, proporcao ligada
  * ou nao) e so o numero final aparecia no log.
  */
-function pudim_LoteDiag(template, res, numEdificios)
+function pudim_LoteDiag(template, res, buildings)
 {
 	try {
-		const cabe = pudim_ComputeAffordableCount(template, PUDIM_LOTE_MAX, res || {});
-		return "lote=" + pudim_LoteIdeal(template, res, numEdificios) +
-			" cabe=" + cabe + " edif=" + numEdificios +
+		const paga = pudim_ComputeAffordableCount(template, PUDIM_LOTE_TETO_CONTA, res || {});
+		return "lote=" + pudim_LoteIdeal(template, res, buildings) +
+			" paga=" + paga + " treinam=" + pudim_QuantosTreinam(template, buildings) +
+			" edif=" + (buildings ? buildings.length : 0) +
 			" prop=" + (pudim_ProporcaoAtiva() ? "on" : "off") +
 			" reserva=" + g_PudimMadeiraReservada +
 			" w=" + Math.round(+(res && res.wood) || 0) +
@@ -4749,10 +4806,39 @@ function pudim_LoteDiag(template, res, numEdificios)
 	} catch (e) { return "diag?"; }
 }
 
-function pudim_LoteIdeal(template, res, numEdificios)
+/**
+ * Quantos edificios disputam o estoque para ESTE template.
+ *
+ * Nao e buildings.length. A lista vem de pudim_GetProductionBuildings, que aceita tudo que
+ * tem IID_ProductionQueue — e no 0 A.D. quase toda construcao tem, porque ProductionQueue
+ * tambem serve para PESQUISAR TECNOLOGIA. Casa, armazem e celeiro entravam na conta. No log
+ * de 25/08 isso deu edif=15 com um centro civico e um quartel em pe.
+ */
+function pudim_QuantosTreinam(template, buildings)
 {
-	const cabe = pudim_ComputeAffordableCount(template, PUDIM_LOTE_MAX, res || {});
-	const porEdificio = Math.floor(cabe / Math.max(1, numEdificios || 1));
+	if (!template || !buildings || !buildings.length) return 1;
+	let n = 0;
+	for (const b of buildings)
+		if ((b.trainerEntities || []).indexOf(template) >= 0) n++;
+	return Math.max(1, n);
+}
+
+/**
+ * O tamanho do lote: o que o estoque paga, dividido entre quem vai gastar dele.
+ *
+ * "esta treinando de 1 em 1, ao inves de fazer em lote pra otimizar o tempo". A versao
+ * anterior dividia `cabe`, que JA vinha limitado a PUDIM_LOTE_MAX. Com 10 disponiveis e 15
+ * edificios na conta, floor(10/15) = 0 e o lote caia para 1 — e piorava a cada construcao
+ * nova, justamente quando havia mais recursos. Dividir um valor ja limitado nao significa
+ * nada: quem tem de ser dividido e quanto o estoque REALMENTE paga, e o teto entra depois.
+ *
+ * O ganho que isso persegue e real: GetBatchTime(n) = n^0.7, entao o tempo por unidade cai
+ * com n^-0.3 — lote de 5 sai 38% mais rapido por unidade, lote de 10, 50%.
+ */
+function pudim_LoteIdeal(template, res, buildings)
+{
+	const paga = pudim_ComputeAffordableCount(template, PUDIM_LOTE_TETO_CONTA, res || {});
+	const porEdificio = Math.floor(paga / pudim_QuantosTreinam(template, buildings));
 	return Math.max(1, Math.min(PUDIM_LOTE_MAX, porEdificio));
 }
 

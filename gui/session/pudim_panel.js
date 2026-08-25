@@ -3926,6 +3926,7 @@ var g_PudimQuartelEquipe = [];      // quem foi recrutado, para devolver ao trab
 // primeira obra deixava de ser contada. Resultado: pedir 3 construía 4, sempre que se
 // começava do zero. Um sentinela que não colide com um valor legítimo resolve.
 var g_PudimQuartelBase = null;
+var g_PudimQuartelLogAt = 0;
 
 /** Chamado pelo dropdown de tipo. */
 function pudim_QuartelSetTipo()
@@ -4240,8 +4241,24 @@ function pudim_ProcessQuartel()
 
 	if (!g_PudimQuartelAtivo) { g_PudimQuartelUltima = agora; return; }
 
+	/**
+	 * Toda saida daqui em diante DIZ por que parou.
+	 *
+	 * Esta funcao tinha quatro saidas silenciosas, e foi por isso que "mandei fazer quarteis
+	 * e nada" custou duas partidas para diagnosticar: o log mostrava "serie iniciada" e mais
+	 * nada, para sempre. Silencio nao e neutro — ele transforma um bug de dez minutos num de
+	 * dois dias.
+	 */
+	const parar = function(motivo, extra) {
+		g_PudimQuartelUltima = agora;
+		if (agora - (g_PudimQuartelLogAt || 0) > 15000) {
+			g_PudimQuartelLogAt = agora;
+			pudim_Log("DEBUG", "QUARTEL", "parado: " + motivo + (extra ? " (" + extra + ")" : ""));
+		}
+	};
+
 	// A pausa de "o jogador apagou uma obra" vale aqui também: ele apagou, ele decide.
-	if (pudim_ObrasPausadas()) return;
+	if (pudim_ObrasPausadas()) { parar("o jogador apagou uma obra ha pouco"); return; }
 
 	if (!d.template) {
 		pudim_Log("WARN", "QUARTEL", "esta civilização não constrói " +
@@ -4280,13 +4297,14 @@ function pudim_ProcessQuartel()
 
 	if (d.emObra >= tetoObras) {
 		// Já há obra em andamento: no regime sequencial isto é o freio inteiro.
-		g_PudimQuartelUltima = agora;
+		parar("obra em andamento", d.emObra + " de teto " + tetoObras);
 		return;
 	}
 
 	if (!d.builderIds || d.builderIds.length === 0 ||
 	    !d.candidatePositions || d.candidatePositions.length === 0) {
-		g_PudimQuartelUltima = agora;
+		parar(!d.builderIds || !d.builderIds.length ? "sem trabalhador livre" : "sem posicao candidata",
+			"pool=" + ((d._dbg && d._dbg.pool) || "?") + " cands=" + (d.candidatePositions || []).length);
 		return;
 	}
 
@@ -4304,7 +4322,10 @@ function pudim_ProcessQuartel()
 		if (r && r.success) { escolhida = pos; break; }
 	}
 	try { Engine.GuiInterfaceCall("SetBuildingPlacementPreview", { "template": "" }); } catch (e) {}
-	if (!escolhida) { g_PudimQuartelUltima = agora; return; }
+	if (!escolhida) {
+		parar("nenhuma das " + d.candidatePositions.length + " posicoes foi aceita pelo motor");
+		return;
+	}
 
 	Engine.PostNetworkCommand({
 		"type": "construct",

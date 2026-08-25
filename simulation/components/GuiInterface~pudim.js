@@ -3288,6 +3288,16 @@ const PUDIM_CASA_ROTA_MAX = 120;
 // A exceção que ele pediu é igualmente concreta: com população perto do teto o gargalo
 // deixa de ser recurso e passa a ser QUANTOS lugares treinam ao mesmo tempo, e aí paralelo
 // ganha. Os dois regimes estão certos, cada um no seu momento.
+// "Esta coletando" nao e so a ordem Gather.
+//
+// O mod despacha a maior parte dos coletores com gather-near-position, cuja ordem no UnitAI
+// e GatherNearPosition — e quem esta voltando com a carga tem ReturnResource. O recrutador
+// aceitava so "Gather" e descartava o resto com um `else if (ord) continue`, entao sobravam
+// apenas os OCIOSOS. Como o auto-trabalho roda a cada 500ms e o construtor a cada 2,5s, todo
+// ocioso ja tinha ordem quando a vez do construtor chegava: a lista vinha vazia e a serie de
+// quarteis nunca saia do lugar, sem dizer por que.
+const PUDIM_ORDENS_COLETA = { "Gather": 1, "GatherNearPosition": 1, "ReturnResource": 1 };
+
 const PUDIM_QUARTEL_EQUIPE = 5;      // trabalhadores por obra, o tamanho que ele pediu
 const PUDIM_QUARTEL_POP_PARALELO = 180;
 const PUDIM_QUARTEL_RAIO_MIN = 30;   // não colar no centro cívico
@@ -3410,11 +3420,16 @@ GuiInterface.prototype.pudim_GetBarracksBuildData = function(player, data)
 		if (ord && ord.type === "Repair") continue;
 
 		let recurso = "ocioso";
-		if (ord && ord.type === "Gather") {
+		if (ord && PUDIM_ORDENS_COLETA[ord.type]) {
+			// O recurso serve para escolher "o mais abundante"; quando nao da para saber
+			// (gather-near-position guarda o tipo, ReturnResource nao), o subtipo da ordem
+			// resolve, e no pior caso ele entra num balde generico. Isso nao o desqualifica
+			// como construtor — que e o que importa aqui.
 			const alvo = ord.data && ord.data.target;
 			const rs = alvo ? Engine.QueryInterface(alvo, IID_ResourceSupply) : null;
 			if (rs) recurso = rs.GetType().generic;
-			else continue;
+			else if (ord.data && ord.data.type && ord.data.type.generic) recurso = ord.data.type.generic;
+			else recurso = "coletando";
 		} else if (ord) {
 			continue;   // ocupado com outra coisa (atacar, guarnecer): não mexer
 		}
@@ -3715,7 +3730,9 @@ GuiInterface.prototype.pudim_GetPalicadaData = function(player, data)
 		const cmpAI = Engine.QueryInterface(ent, IID_UnitAI);
 		const ord = cmpAI && cmpAI.orderQueue && cmpAI.orderQueue.length ? cmpAI.orderQueue[0] : null;
 		if (!ord) ociosos.push(ent);
-		else if (ord.type === "Gather") colhendo.push(ent);
+		// Mesma correcao do recrutador de quarteis: gather-near-position vira
+		// GatherNearPosition, e quem volta com a carga esta em ReturnResource.
+		else if (PUDIM_ORDENS_COLETA[ord.type]) colhendo.push(ent);
 	}
 	if (!result.template) { result._dbg.reason = "civ_sem_palicada"; return result; }
 

@@ -74,6 +74,39 @@ check("XML e JS concordam sobre a altura do painel", (function() {
 check("e o init dos dropdowns é chamado de verdade",
 	/pudim_QuartelInit\(\);/.test(panel));
 
+// ── "Esta coletando" nao e so a ordem Gather ──────────────────────────────────────────
+//
+// Isto custou duas partidas. O mod despacha a maior parte dos coletores com
+// gather-near-position, cuja ordem no UnitAI e GatherNearPosition — e quem volta com a carga
+// esta em ReturnResource. O recrutador aceitava so "Gather" e descartava o resto, entao
+// sobravam apenas os OCIOSOS. Como o auto-trabalho roda a cada 500ms e o construtor a cada
+// 2,5s, todo ocioso ja tinha ordem quando a vez do construtor chegava: lista vazia, serie
+// travada, e nenhuma linha no log dizendo por que.
+check("as tres ordens de coleta contam como recrutavel",
+	/const PUDIM_ORDENS_COLETA = \{ "Gather": 1, "GatherNearPosition": 1, "ReturnResource": 1 \};/.test(sim));
+check("o recrutador de quarteis usa a tabela",
+	/if \(ord && PUDIM_ORDENS_COLETA\[ord\.type\]\)/.test(sim));
+check("e o da palicada tambem — mesmo erro, mesma correcao",
+	/else if \(PUDIM_ORDENS_COLETA\[ord\.type\]\) colhendo\.push\(ent\);/.test(sim));
+check("gather-near-position e mesmo o que o mod usa para despachar",
+	(panel.match(/gather-near-position/g) || []).length >= 5);
+// Quem ataca ou guarnece continua fora: recrutar dali seria tirar unidade de combate.
+check("ordem que nao e coleta continua fora",
+	/\} else if \(ord\) \{[\s\S]{0,120}?continue;/.test(sim));
+
+// ── Nenhuma saida silenciosa ──────────────────────────────────────────────────────────
+// O log mostrava "serie iniciada" e mais nada, para sempre. Silencio nao e neutro: ele
+// transforma um bug de dez minutos num de dois dias.
+check("existe um caminho unico de parada, que registra o motivo",
+	/const parar = function\(motivo, extra\)/.test(panel));
+const paradas = (panel.match(/parar\(/g) || []).length;
+check("e todas as saidas passam por ele", paradas >= 4, paradas);
+check("o log e limitado, para nao inundar a tela",
+	/agora - \(g_PudimQuartelLogAt \|\| 0\) > 15000/.test(panel));
+for (const motivo of ["o jogador apagou uma obra", "obra em andamento",
+                      "sem trabalhador livre", "posicoes foi aceita pelo motor"])
+	check('diz "' + motivo.slice(0, 28) + '"', panel.indexOf(motivo) > 0);
+
 // ── A equipe ───────────────────────────────────────────────────────────────────────────
 const EQUIPE = +/const PUDIM_QUARTEL_EQUIPE = (\d+);/.exec(sim)[1];
 check("são 5 trabalhadores por obra, como pedido", EQUIPE === 5, EQUIPE);
@@ -170,8 +203,15 @@ check("civilização sem o edifício é avisada, não ignorada",
 // ── Multiplayer ────────────────────────────────────────────────────────────────────────
 check("a função está registrada na lista de chamadas permitidas",
 	/"pudim_GetBarracksBuildData": 1/.test(sim));
-check("o painel escreve só por PostNetworkCommand",
-	/pudim_ProcessQuartel[\s\S]{0,4000}?Engine\.PostNetworkCommand\(\{\s*\n\s*"type": "construct"/.test(panel));
+// Sem janela de distancia: ela so media quantos comentarios ha entre a funcao e o
+// comando, e quebrava toda vez que o codigo ganhava explicacao. O que importa e que o
+// comando saia DEPOIS do comeco da funcao, e por PostNetworkCommand.
+check("o painel escreve só por PostNetworkCommand", (function() {
+	const i = panel.indexOf("function pudim_ProcessQuartel");
+	const j = panel.indexOf('"entities": d.builderIds');
+	return i > 0 && j > i &&
+		/Engine\.PostNetworkCommand/.test(panel.slice(i, j + 60));
+})());
 check("e o estado da série vive só na GUI",
 	/var g_PudimQuartelAtivo = false;/.test(panel) && !/g_PudimQuartelAtivo/.test(sim));
 

@@ -78,8 +78,14 @@ const EQUIPE = +/const PUDIM_PALICADA_EQUIPE = (\d+);/.exec(sim)[1];
 check("são 3 construtores, como pedido", EQUIPE === 3, EQUIPE);
 check("ocioso primeiro, depois quem colhe",
 	/ociosos\.concat\(colhendo\)/.test(sim));
-check("quem já está numa obra não é recrutado",
-	/if \(!ord\) ociosos\.push\(ent\);\s*\n\s*else if \(ord\.type === "Gather"\) colhendo\.push\(ent\);/.test(sim));
+// "Esta coletando" nao e so Gather: o mod despacha com gather-near-position
+// (GatherNearPosition) e quem volta com a carga esta em ReturnResource. Aceitar so
+// "Gather" deixava a lista de candidatos praticamente vazia — foi o que travou a serie
+// de quarteis, e o mesmo erro estava aqui.
+check("as tres ordens de coleta contam como recrutavel",
+	/else if \(PUDIM_ORDENS_COLETA\[ord\.type\]\) colhendo\.push\(ent\);/.test(sim));
+check("e quem nao tem ordem nenhuma entra como ocioso",
+	/if \(!ord\) ociosos\.push\(ent\);/.test(sim));
 check("nem quem recebeu ordem do jogador",
 	/if \(ordenados\[ent\]\) continue;/.test(sim));
 

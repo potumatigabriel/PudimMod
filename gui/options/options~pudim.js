@@ -36,18 +36,20 @@ pudim_patchApplyN("init", function(target, that, args) {
 				idioma = forcado;
 			else
 			{
-				// 2) Locale do jogo. A chave ja mudou de nome entre versoes, entao tenta
-				//    todas, igual ao modulo.
-				for (const chave of ["locale", "language", "gui.locale"])
-				{
-					const loc = Engine.ConfigDB_GetValue("user", chave) || "";
-					if (loc && loc.toLowerCase().indexOf("pt") === 0) { idioma = "pt"; break; }
-				}
-				// 3) Sonda o dicionario do proprio jogo. "Madeira"/"Madera" distingue
-				//    portugues de espanhol; "Cancel" nao serviria, vira "Cancelar" nos dois.
-				if (idioma !== "pt" && typeof translate === "function" &&
-				    (translate("Wood") === "Madeira" || translate("Stone") === "Pedra"))
-					idioma = "pt";
+				// 2) O LOCALE DO JOGO, pela API do motor — a mesma fonte de pudim_Lang().
+				//    O 0 A.D. usa o locale do sistema e nao grava nada no user.cfg quando o
+				//    jogador nunca escolheu idioma na mao, entao procurar por chave de
+				//    configuracao falha justamente no caso mais comum.
+				const lang = Engine.GetLocaleLanguage(Engine.GetCurrentLocale());
+				if (lang)
+					idioma = (lang === "pt") ? "pt" : "en";
+				else
+					// 3) Sem a API: as chaves de configuracao, se existirem.
+					for (const chave of ["locale", "language", "gui.locale"])
+					{
+						const loc = Engine.ConfigDB_GetValue("user", chave) || "";
+						if (loc) { idioma = loc.toLowerCase().indexOf("pt") === 0 ? "pt" : "en"; break; }
+					}
 			}
 		} catch (e) { }
 

@@ -18,37 +18,41 @@ var g_PudimLang = null;
 function pudim_Lang()
 {
 	// Só memoriza resposta POSITIVA. Memorizar o padrão "en" era um bug: a primeira
-	// chamada vem de pudim_Init(), que pode rodar antes de o dicionário de tradução do
-	// jogo estar carregado — a sonda falhava, travava em inglês e nunca mais reavaliava.
-	// Sem cache do negativo, a próxima chamada tenta de novo e acerta.
+	// chamada pode vir antes de o resto da GUI estar pronta, travaria em inglês e nunca
+	// mais reavaliaria.
 	if (g_PudimLang) return g_PudimLang;
 
-	// 1) Preferência explícita do jogador, se ele quiser forçar um idioma para o mod.
+	// 1) Preferência explícita do jogador, se ele quiser forçar um idioma só para o mod.
 	try {
 		const forced = Engine.ConfigDB_GetValue("user", "pudim.lang");
 		if (forced === "pt" || forced === "en") { g_PudimLang = forced; return g_PudimLang; }
 	} catch(e) {}
 
-	// 2) Locale configurado no jogo (ex.: "pt_BR", "pt_PT"). Tentamos mais de uma chave
-	//    porque a config do 0AD já mudou de nome entre versões.
+	// 2) O LOCALE DO JOGO, pela API do motor.
+	//
+	// Esta é a fonte certa e demorou a entrar aqui. A versão anterior procurava o idioma
+	// em chaves de configuração ("locale", "language", "gui.locale") e caía numa sondagem
+	// de translate(). Nenhuma das duas funciona quando o jogador nunca escolheu idioma na
+	// mão: o 0 A.D. usa o locale do sistema e NÃO grava nada no user.cfg. Conferido no
+	// user.cfg do jogador — não havia chave nenhuma de idioma, e o mod inteiro saía em
+	// inglês num jogo em pt-BR.
+	//
+	// Engine.GetCurrentLocale() devolve "pt_BR"; GetLocaleLanguage reduz para "pt". São as
+	// mesmas funções que o próprio motor usa em gui/common/hotkeys.js e gui/locale/, e as
+	// mesmas que o PudimTranslate já usava para acertar o idioma do chat — ou seja, havia
+	// um exemplo funcionando ao lado o tempo todo.
+	try {
+		const lang = Engine.GetLocaleLanguage(Engine.GetCurrentLocale());
+		if (lang) { g_PudimLang = (lang === "pt") ? "pt" : "en"; return g_PudimLang; }
+	} catch(e) {}
+
+	// 3) Sem a API (versão diferente do motor): as chaves de configuração, se o jogador
+	//    tiver escolhido um idioma na mão em algum momento.
 	for (const key of ["locale", "language", "gui.locale"]) {
 		let loc = "";
 		try { loc = Engine.ConfigDB_GetValue("user", key) || ""; } catch(e) {}
-		if (loc && loc.toLowerCase().indexOf("pt") === 0) { g_PudimLang = "pt"; return g_PudimLang; }
+		if (loc) { g_PudimLang = loc.toLowerCase().indexOf("pt") === 0 ? "pt" : "en"; return g_PudimLang; }
 	}
-
-	// 3) Sonda o dicionário do próprio jogo. Usamos palavras cuja tradução distingue
-	//    português de espanhol — "Madeira"/"Madera" e "Pedra"/"Piedra". "Cancel" não
-	//    serviria: vira "Cancelar" nos dois idiomas. Basta uma bater.
-	try {
-		if (typeof translate === "function" &&
-		    (translate("Wood") === "Madeira" || translate("Stone") === "Pedra" ||
-		     translate("Food") === "Comida" && translate("Wood") !== "Madera"))
-		{
-			g_PudimLang = "pt";
-			return g_PudimLang;
-		}
-	} catch(e) {}
 
 	// Nada conclusivo AINDA: devolve inglês sem memorizar, para reavaliar na próxima vez.
 	return "en";

@@ -59,8 +59,36 @@ check("o padrão é inglês quando a detecção não decide",
 // carregar, e travar em inglês para sempre seria pior que reavaliar.
 check("e o resultado negativo não é memorizado",
 	/Só memoriza resposta POSITIVA/.test(i18n));
-check("as duas telas usam os MESMOS três passos",
-	["pudim.lang", "gui.locale", "Madeira"].every(x => optsJs.indexOf(x) >= 0 && i18n.indexOf(x) >= 0));
+// A FONTE DO IDIOMA. Isto quebrou em jogo: o mod inteiro saiu em inglês num jogo em pt-BR.
+//
+// A detecção procurava o idioma em chaves de configuração ("locale", "language",
+// "gui.locale") e caía numa sondagem de translate(). Nenhuma das duas funciona quando o
+// jogador nunca escolheu idioma na mão — o 0 A.D. usa o locale do SISTEMA e não grava nada
+// no user.cfg. Conferido no user.cfg do jogador: não havia chave nenhuma de idioma.
+//
+// Engine.GetCurrentLocale() é a fonte certa, usada pelo próprio motor em
+// gui/common/hotkeys.js e gui/locale/ — e o PudimTranslate já a usava ao lado, acertando o
+// idioma do chat o tempo todo.
+check("o locale do motor é a fonte primária, não a configuração",
+	/Engine\.GetLocaleLanguage\(Engine\.GetCurrentLocale\(\)\)/.test(i18n));
+// Comparar contra o CÓDIGO, não contra a primeira aparição do texto: o comentário que
+// explica por que as chaves não servem cita as chaves, e vem antes.
+check("e vem ANTES das chaves de configuração",
+	i18n.indexOf("Engine.GetLocaleLanguage(Engine.GetCurrentLocale())") <
+	i18n.indexOf('for (const key of ["locale", "language", "gui.locale"])'));
+check("as chaves de configuração ficam só como reserva",
+	/3\) Sem a API/.test(i18n));
+check("a tela de opções usa a MESMA fonte primária",
+	/Engine\.GetLocaleLanguage\(Engine\.GetCurrentLocale\(\)\)/.test(optsJs));
+check("e a mesma ordem: preferência explícita, locale, configuração",
+	optsJs.indexOf("pudim.lang") <
+	optsJs.indexOf("Engine.GetLocaleLanguage(Engine.GetCurrentLocale())") &&
+	optsJs.indexOf("Engine.GetLocaleLanguage(Engine.GetCurrentLocale())") <
+	optsJs.indexOf('"gui.locale"'));
+// A sondagem de translate() saiu: ela dependia de o catálogo do jogo ter aquele msgid
+// naquele contexto, o que não é garantido, e mascarava a ausência da fonte de verdade.
+check("a sondagem frágil de translate() saiu da decisão",
+	i18n.indexOf('translate("Wood") === "Madeira"') < 0);
 
 // ── Os rótulos, que era o que faltava ──────────────────────────────────────────────────
 check("existe um mapa de rótulos, irmão do de tooltips",

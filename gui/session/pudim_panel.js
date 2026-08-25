@@ -2191,8 +2191,21 @@ function pudim_ProcessAutoQueue()
 			// decidido por pudim_ComputeAffordableCount logo abaixo — "faz o que da e depois
 			// volta ao normal" continua valendo para a QUANTIDADE; o que nunca muda e o TIPO.)
 			const defaultCount = b.isCC ? 3 : 1;
-			const desiredCount = g_PudimPlayerQueueCount[b.ent] ||
-			                     g_PudimAutoQueueDesiredCount[b.ent] || defaultCount;
+			// COM PROPORÇÃO CONFIGURADA, o lote manda; com tudo zerado, nada muda.
+			//
+			// "se estiver tudo zerado essa parte não faz nada, mas respeita o sistema atual
+			// de auto fila... se não estiver zerado esse sistema se sobrepõe o auto fila".
+			// Mexer no tamanho do lote sem o jogador ter pedido nada seria mudar o
+			// comportamento dele sem aviso — por isso a chave é a proporção estar ativa.
+			//
+			// O que ele pôs na fila DAQUELE edifício continua vindo antes de tudo: essa
+			// regra já custou caro quando 5 guerreiros voltavam como 2 aldeões.
+			let desiredCount = g_PudimPlayerQueueCount[b.ent] ||
+			                   g_PudimAutoQueueDesiredCount[b.ent] || defaultCount;
+			if (!g_PudimPlayerQueueCount[b.ent] && pudim_ProporcaoAtiva())
+				desiredCount = pudim_LoteIdeal(
+					g_PudimPlayerQueueTpl[b.ent] || g_PudimAutoQueueTemplates[b.ent],
+					res, buildings.length);
 
 			if (!b.queueEmpty) {
 				// REGRA: a auto-fila mantém NO MÁXIMO UM lote. Um lote degradado por escassez
@@ -4274,6 +4287,50 @@ function pudim_UnidadeMaisAtrasada()
 }
 
 var g_PudimUnitTodas = [];
+
+/** Há alguma proporção configurada? Com tudo zerado, este sistema inteiro fica fora. */
+function pudim_ProporcaoAtiva()
+{
+	for (const tpl in g_PudimUnitPesos)
+		if (g_PudimUnitPesos[tpl] > 0) return true;
+	return false;
+}
+
+// Teto do lote. O ganho por unidade continua subindo além de 10 (0,44x em 15, 0,41x em 20),
+// mas duas coisas pioram junto: o lote inteiro só ENTREGA quando termina, então um lote de
+// 20 segura a primeira unidade por 8,14 tempos de treino; e ele tranca os recursos enquanto
+// isso, inclusive os que as fazendas — prioridade máxima — podem precisar.
+const PUDIM_LOTE_MAX = 10;
+
+/**
+ * Tamanho do lote de treino.
+ *
+ * Pedido de 25/08: "sempre treine em lotes, se tiver recursos, assim a proporção
+ * tempo/unidades é mais rapido. faça o tamanho do lote de treinamento proporcional a
+ * quantidade de locais que podem treinar e a quantidade de recursos disponiveis".
+ *
+ * O ganho é real e está no motor, não é impressão: Trainer.GetBatchTime devolve
+ * `batchSize ^ BatchTimeModifier`, com o modificador em 0.7 por padrão
+ * (simulation/components/Trainer.js). Ou seja, o tempo TOTAL de um lote de N é N^0,7 vezes o
+ * tempo de uma — e o tempo POR UNIDADE cai como N^-0,3:
+ *
+ *     lote  2  ->  0,81x por unidade   (19% mais rápido)
+ *     lote  5  ->  0,62x               (38%)
+ *     lote 10  ->  0,50x               (50%)
+ *
+ * Dividir pelo número de edifícios é o que impede o primeiro a ser atendido de comer o
+ * estoque inteiro: todos enfileiram no mesmo tique, então cada um pode contar com a sua
+ * fatia, não com o total.
+ *
+ * `res` já vem com a madeira reservada para as fazendas descontada, então o lote cede
+ * sozinho quando a comida está atrasada — sem precisar saber que a regra existe.
+ */
+function pudim_LoteIdeal(template, res, numEdificios)
+{
+	const cabe = pudim_ComputeAffordableCount(template, PUDIM_LOTE_MAX, res || {});
+	const porEdificio = Math.floor(cabe / Math.max(1, numEdificios || 1));
+	return Math.max(1, Math.min(PUDIM_LOTE_MAX, porEdificio));
+}
 
 
 function pudim_ProcessAutoKite()

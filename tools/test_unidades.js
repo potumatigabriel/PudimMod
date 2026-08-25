@@ -140,6 +140,72 @@ check("só escolhe unidade que AQUELE edifício treina",
 check("e respeita o teto de mulheres",
 	/if \(!\(atFemaleCap && isFemaleTemplate\(atrasada\.tpl\)\)\)/.test(panel));
 
+// ── Lote de treino ─────────────────────────────────────────────────────────────────────
+//
+// "sempre treine em lotes, se tiver recursos, assim a proporção tempo/unidades é mais
+//  rapido. faça o tamanho do lote de treinamento proporcional a quantidade de locais que
+//  podem treinar e a quantidade de recursos disponiveis"
+//
+// O ganho é real e está no motor: Trainer.GetBatchTime devolve `batchSize ^
+// BatchTimeModifier`, com o modificador em 0.7 por padrão
+// (simulation/components/Trainer.js). O tempo POR UNIDADE cai como N^-0,3.
+console.log("");
+console.log("lote de treino");
+
+const MOD = 0.7;   // BatchTimeModifier padrão do motor
+const porUnidade = n => Math.pow(n, MOD) / n;
+
+check("o lote de 2 já é ~19% mais rápido por unidade",
+	Math.abs(porUnidade(2) - 0.81) < 0.01, porUnidade(2).toFixed(2));
+check("o de 5, ~38%", Math.abs(porUnidade(5) - 0.62) < 0.01, porUnidade(5).toFixed(2));
+check("o de 10, ~50%", Math.abs(porUnidade(10) - 0.50) < 0.01, porUnidade(10).toFixed(2));
+check("e o ganho é sempre decrescente — cada unidade a mais rende menos",
+	[2, 3, 5, 8, 10].every((n, i, a) =>
+		i === 0 || (porUnidade(n) < porUnidade(a[i - 1]) &&
+		            porUnidade(a[i - 1]) - porUnidade(n) < 0.2)));
+
+const TETO = +/const PUDIM_LOTE_MAX = (\d+);/.exec(panel)[1];
+check("existe teto para o lote", TETO >= 5 && TETO <= 20, TETO);
+// O lote inteiro só ENTREGA quando termina: um lote de 20 segura a primeira unidade por
+// 8,14 tempos de treino. E tranca recursos que as fazendas podem precisar.
+check("o teto mantém a espera pela primeira unidade sob controle",
+	Math.pow(TETO, MOD) <= 6, Math.pow(TETO, MOD).toFixed(2));
+check("o porquê do teto está escrito, não é número solto",
+	/o lote inteiro só ENTREGA quando termina/i.test(panel) ||
+	/só ENTREGA quando termina/.test(panel));
+
+// A regra, espelhada.
+function lote(cabe, numEdificios) {
+	return Math.max(1, Math.min(TETO, Math.floor(cabe / Math.max(1, numEdificios))));
+}
+check("com recursos de sobra e um edifício, vai no teto", lote(40, 1) === TETO);
+check("o estoque é dividido entre os edifícios que treinam",
+	lote(12, 4) === 3, lote(12, 4));
+check("sem recursos, o lote é 1 — nunca zero, senão nada é treinado",
+	lote(0, 3) === 1, lote(0, 3));
+check("um edifício a mais reduz o lote de cada um",
+	lote(20, 2) > lote(20, 5));
+check("e nunca passa do teto, por mais recurso que haja", lote(9999, 1) === TETO);
+
+check("o lote sai de pudim_ComputeAffordableCount, não de um palpite",
+	/pudim_ComputeAffordableCount\(template, PUDIM_LOTE_MAX, res \|\| \{\}\)/.test(panel));
+// res já vem com a madeira das fazendas descontada, então o lote cede sozinho quando a
+// comida está atrasada — sem precisar saber que a regra existe.
+check("e respeita a reserva das fazendas sem saber que ela existe",
+	/res\.wood = Math\.max\(0, \(\+res\.wood \|\| 0\) - g_PudimMadeiraReservada\);/.test(panel));
+
+// ── Zerado não faz nada; configurado se sobrepõe ───────────────────────────────────────
+check("há uma chave para 'a proporção está ativa'",
+	/function pudim_ProporcaoAtiva\(\)/.test(panel));
+check("com tudo zerado ela é falsa",
+	/for \(const tpl in g_PudimUnitPesos\)[\s\S]{0,40}?if \(g_PudimUnitPesos\[tpl\] > 0\) return true;/.test(panel));
+check("o lote só entra com a proporção ativa",
+	/if \(!g_PudimPlayerQueueCount\[b\.ent\] && pudim_ProporcaoAtiva\(\)\)/.test(panel));
+check("e o que o jogador enfileirou naquele edifício continua vindo antes",
+	/g_PudimPlayerQueueCount\[b\.ent\] \|\|/.test(panel));
+check("os pesos começam todos em zero",
+	/var g_PudimUnitPesos = \{\};/.test(panel));
+
 // ── Estimador colapsável ───────────────────────────────────────────────────────────────
 console.log("\nestimador que colapsa");
 

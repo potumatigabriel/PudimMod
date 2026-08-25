@@ -44,12 +44,20 @@ JANELA = 30          # segundos por janela de analise
 MIN_COMBATE = 300    # valor minimo trocado para a janela contar como combate
 MIN_ATAQUES = 5      # ordens de ataque para dizer que o mod estava comandando
 
-# Linha de base: as duas partidas com combate real anteriores as mudancas de
-# 24/08. Servem de referencia — se o numero novo nao sair daqui, a mudanca nao
-# mexeu no que se propunha a mexer.
+# Linha de base. "rel" e a troca dividida pela mediana do lobby daquela partida, e e o
+# unico numero comparavel entre jogos: a troca absoluta cai so por o lobby ser mais forte.
+#
+# As tres de baixo sao o periodo com o kite quebrado — a viabilidade comparava o ponto de
+# parada com o GATILHO do inimigo em vez do ALCANCE da arma dele, o que desligou o recuo
+# contra cavalaria justamente num exercito de dardeiros. Ficam guardadas de proposito: sao
+# a referencia do que nao pode se repetir, e mostram que a queda apareceu no relativo
+# (1,96x -> 0,52x) antes de eu conseguir explica-la.
 BASE = {
-    "2026-08-23_0003": {"troca": 2.28, "comandando": None, "calado": None},
-    "2026-08-24_0003": {"troca": 1.94, "comandando": 1.75, "calado": 2.15},
+    "2026-08-23_0003": {"troca": 2.28, "rel": 1.90, "comandando": None, "calado": None},
+    "2026-08-24_0003": {"troca": 1.94, "rel": 1.96, "comandando": 1.75, "calado": 2.15},
+    "2026-08-24_0004": {"troca": 0.76, "rel": 0.88, "comandando": 0.77, "calado": 0.60},
+    "2026-08-24_0005": {"troca": 0.67, "rel": 0.86, "comandando": 0.71, "calado": 0.48},
+    "2026-08-24_0006": {"troca": 0.53, "rel": 0.52, "comandando": 0.58, "calado": 0.29},
 }
 
 # Alcances dos templates do jogo, para anotar a composicao.
@@ -154,6 +162,16 @@ def main():
     minha = next(x for x in linhas if x[1].startswith(args.jogador))
     print("\n  posicao: %d de %d" % (linhas.index(minha) + 1, len(linhas)))
 
+    # Relativo a mediana do lobby: e o unico numero comparavel entre partidas. A troca
+    # absoluta cai so por o lobby ser mais forte; dividir pela mediana desconta isso, e
+    # foi essa conta que revelou a queda real de 24/08 (1,96x -> 0,52x) que a troca
+    # absoluta sozinha nao distinguia de "adversario melhor".
+    trocas = sorted(x[0] for x in linhas)
+    mediana = trocas[len(trocas) // 2]
+    rel = minha[0] / mediana if mediana else 0
+    print("  mediana do lobby: %.2f   ->  seu relativo: %.2fx  %s" % (
+        mediana, rel, "(acima da media)" if rel >= 1 else "(ABAIXO da media)"))
+
     # ── Desvantagem numerica ───────────────────────────────────────────────────
     print("\nPOPULACAO (a vitoria veio da micro ou de ter mais gente?)")
     pops = {p["name"][:12]: p["sequences"]["populationCount"] for p in jogadores}
@@ -235,11 +253,12 @@ def main():
     # ── Comparacao com a linha de base ─────────────────────────────────────────
     print("\nCOMPARACAO COM A LINHA DE BASE (antes das mudancas de 24/08)")
     for nome, b in sorted(BASE.items()):
-        print("  %s  troca %.2f%s" % (nome, b["troca"],
+        if nome == nome_replay: continue
+        print("  %s  troca %.2f  rel %.2fx%s" % (nome, b["troca"], b.get("rel", 0),
               ("   comandando %.2f / calado %.2f" % (b["comandando"], b["calado"]))
               if b["comandando"] else ""))
-    print("  %s  troca %.2f%s   <<< esta partida"
-          % (nome_replay, minha[0],
+    print("  %s  troca %.2f  rel %.2fx%s   <<< esta partida"
+          % (nome_replay, minha[0], rel,
              ("   comandando %.2f / calado %.2f" % (tc, tq)) if tc and tq else ""))
     if tc and tq:
         print()

@@ -2209,6 +2209,54 @@ function pudim_ProcessAutoQueue()
 					g_PudimPlayerQueueTpl[b.ent] || g_PudimAutoQueueTemplates[b.ent],
 					res, buildings.length);
 
+			// ── PROPORCAO COM A FILA CHEIA ──────────────────────────────────────────
+			//
+			// "ainda continua fazendo so mulheres", pela terceira vez. As duas tentativas
+			// anteriores erraram o lugar:
+			//
+			//   1a — liguei a proporcao no caminho da SEMEADURA, que so roda com fila vazia.
+			//        A fila nunca esvaziava.
+			//   2a — liguei na troca de lote, que e guardada por `trainingQueue.length === 1`.
+			//        A fila do centro civico tinha QUINZE lotes.
+			//
+			// A fila cheia e o caso normal, nao a excecao: a auto-fila nativa do motor repoe
+			// sozinha. Entao a proporcao precisa de um caminho que funcione COM ela cheia, e
+			// esse caminho e cancelar o que ainda nao comecou.
+			//
+			// A trava continua sendo a mesma de sempre, e e o que separa isto de atropelar o
+			// jogador: so cancela lote cujo template bate com a ULTIMA SEMEADURA DO PROPRIO
+			// MOD. Lote de outro tipo e ordem dele e nao se toca; lote que ja comecou tambem
+			// nao, porque cancelar jogaria fora o tempo investido (sem progresso, o
+			// cancelamento devolve os recursos e a troca sai de graca).
+			if (pudim_ProporcaoAtiva() && b.trainingQueue && b.trainingQueue.length) {
+				const seededTpl = g_PudimQueueSeededTpl[b.ent];
+				const alvo = pudim_UnidadeMaisAtrasada();
+				if (seededTpl && alvo && alvo.tpl !== seededTpl &&
+				    (b.trainerEntities || []).indexOf(alvo.tpl) >= 0 &&
+				    !(atFemaleCap && isFemaleTemplate(alvo.tpl)))
+				{
+					let cancelados = 0;
+					for (const item of b.trainingQueue) {
+						if (item.unitTemplate !== seededTpl) continue;   // do jogador
+						if ((item.progress || 0) > 0) continue;          // ja comecou
+						if (item.id === undefined) continue;
+						Engine.PostNetworkCommand({ "type": "stop-production",
+							"entity": b.ent, "id": item.id });
+						cancelados++;
+					}
+					if (cancelados > 0) {
+						// A semeadura passa a ser o alvo: no ciclo seguinte a fila estara
+						// vazia e o caminho normal repoe com a unidade certa.
+						g_PudimQueueSeededTpl[b.ent] = alvo.tpl;
+						pudim_Log("INFO", "QUEUE", "edifício " + b.ent + ": " + cancelados +
+							" lote(s) de " + seededTpl.split("/").pop() +
+							" cancelado(s) para " + alvo.tpl.split("/").pop() +
+							" (proporção de unidades)");
+						continue;
+					}
+				}
+			}
+
 			if (!b.queueEmpty) {
 				// REGRA: a auto-fila mantém NO MÁXIMO UM lote. Um lote degradado por escassez
 				// (ticket 6278) loopa para sempre no autoqueue nativo — o motor re-enfileira o
@@ -2374,7 +2422,8 @@ function pudim_ProcessAutoQueue()
 			// itens (leitura errada) ou se cada semeadura viu vazio de verdade (corrida).
 			pudim_Log("INFO", "QUEUE", "fila semeada em " + b.ent + " x" + affordable + " " +
 				template.split("/").pop() + (doJogador ? " (escolha do jogador)" : "") +
-				" qlen=" + ((b.trainingQueue && b.trainingQueue.length) || 0));
+				" qlen=" + ((b.trainingQueue && b.trainingQueue.length) || 0) +
+				(g_PudimShowDebug ? " | " + pudim_LoteDiag(template, res, buildings.length) : ""));
 		}
 
 		if (atFemaleCap && !g_PudimFemaleCapLogged) {
@@ -2582,6 +2631,15 @@ function pudim_ProcessFarms()
 	try {
 		// builderOrigin: mesma memória de função usada pelo auto-work. Sem ela, quem está
 		// construindo some do censo de comida deste sistema e o déficit vira fantasma.
+		// A RESERVA ZERA ANTES DE QUALQUER SAIDA CEDO.
+		//
+		// Ela e recalculada la embaixo, depois de a simulacao responder. Toda saida daqui
+		// para cima deixava o valor ANTIGO de pe — e como a auto-fila desconta a reserva do
+		// estoque antes de decidir o tamanho do lote, uma reserva velha de 200 ou 300 de
+		// madeira estrangula o treino para sempre, sem nada na tela dizendo por que.
+		g_PudimMadeiraReservada = 0;
+		g_PudimFarmUrgente = false;
+
 		if (pudim_ObrasPausadas()) return;
 		const farmData = Engine.GuiInterfaceCall("pudim_GetFarmBuildData",
 			{ "weights": g_PudimResourceWeights, "builderOrigin": g_PudimGathererRes });
@@ -4671,6 +4729,26 @@ const PUDIM_LOTE_MAX = 10;
  * `res` já vem com a madeira reservada para as fazendas descontada, então o lote cede
  * sozinho quando a comida está atrasada — sem precisar saber que a regra existe.
  */
+/**
+ * Por que o lote deu esse tamanho. So para o log; nao decide nada.
+ *
+ * Existe porque "esta treinando de 1 em 1" nao da para diagnosticar por inspecao: o tamanho
+ * sai de quatro coisas (estoque, reserva das fazendas, numero de edificios, proporcao ligada
+ * ou nao) e so o numero final aparecia no log.
+ */
+function pudim_LoteDiag(template, res, numEdificios)
+{
+	try {
+		const cabe = pudim_ComputeAffordableCount(template, PUDIM_LOTE_MAX, res || {});
+		return "lote=" + pudim_LoteIdeal(template, res, numEdificios) +
+			" cabe=" + cabe + " edif=" + numEdificios +
+			" prop=" + (pudim_ProporcaoAtiva() ? "on" : "off") +
+			" reserva=" + g_PudimMadeiraReservada +
+			" w=" + Math.round(+(res && res.wood) || 0) +
+			" f=" + Math.round(+(res && res.food) || 0);
+	} catch (e) { return "diag?"; }
+}
+
 function pudim_LoteIdeal(template, res, numEdificios)
 {
 	const cabe = pudim_ComputeAffordableCount(template, PUDIM_LOTE_MAX, res || {});

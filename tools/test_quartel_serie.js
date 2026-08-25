@@ -107,6 +107,23 @@ for (const motivo of ["o jogador apagou uma obra", "obra em andamento",
                       "sem trabalhador livre", "posicoes foi aceita pelo motor"])
 	check('diz "' + motivo.slice(0, 28) + '"', panel.indexOf(motivo) > 0);
 
+// ── O tamanho do mapa vem do componente certo ─────────────────────────────────────────
+//
+// GetMapSize vive em IID_Terrain, NAO em IID_RangeManager. Eu escrevi RangeManager nas duas
+// funcoes novas e o `? :` caia sempre no fallback de 512 — o resto do mod ja usava
+// cmpTerrain.GetMapSize() em oito lugares.
+//
+// O estrago era invisivel em mapa pequeno e TOTAL em mapa grande: no log do jogador as obras
+// saiam em (951,1027), entao toda posicao candidata caia no teste `cx > mapSize - 10` com
+// mapSize=512. A serie parava com "cands=0", que so deu para ver depois que as saidas
+// silenciosas ganharam log.
+check("o tamanho do mapa vem de IID_Terrain",
+	/const cmpTerrainMapa = Engine\.QueryInterface\(SYSTEM_ENTITY, IID_Terrain\);/.test(sim));
+check("e nenhuma funcao pede GetMapSize ao RangeManager",
+	sim.indexOf("cmpRangeManager.GetMapSize") < 0);
+check("o mod inteiro usa a mesma fonte",
+	(sim.match(/IID_Terrain\)/g) || []).length >= 8);
+
 // ── A equipe ───────────────────────────────────────────────────────────────────────────
 const EQUIPE = +/const PUDIM_QUARTEL_EQUIPE = (\d+);/.exec(sim)[1];
 check("são 5 trabalhadores por obra, como pedido", EQUIPE === 5, EQUIPE);

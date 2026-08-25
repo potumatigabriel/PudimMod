@@ -3473,7 +3473,16 @@ GuiInterface.prototype.pudim_GetBarracksBuildData = function(player, data)
 	// ── Onde: espiral em volta do centro cívico, dentro do território ────────────────
 	// Longe o bastante para não entupir o centro, perto o bastante para as unidades
 	// treinadas nascerem na base e não no meio do mapa.
-	const mapSize = cmpRangeManager.GetMapSize ? cmpRangeManager.GetMapSize() : 512;
+	// GetMapSize vive em IID_Terrain, NAO em IID_RangeManager. Escrevi RangeManager nas duas
+	// funcoes novas e o `? :` caia sempre no fallback de 512 — o resto do mod ja usava
+	// cmpTerrain.GetMapSize() em oito lugares.
+	//
+	// O estrago era invisivel em mapa pequeno e total em mapa grande: no log do jogador as
+	// obras saiam em (951,1027) e (860,1042), entao TODA posicao candidata caia no teste
+	// `cx > mapSize - 10` com mapSize=512. A serie de quarteis parava com "cands=0", que so
+	// deu para ver depois que as saidas silenciosas ganharam log.
+	const cmpTerrainMapa = Engine.QueryInterface(SYSTEM_ENTITY, IID_Terrain);
+	const mapSize = cmpTerrainMapa ? cmpTerrainMapa.GetMapSize() : 512;
 	const candidatos = [];
 	for (let r = PUDIM_QUARTEL_RAIO_MIN; r <= PUDIM_QUARTEL_RAIO_MAX; r += PUDIM_QUARTEL_PASSO) {
 		const passos = Math.max(8, Math.round(2 * Math.PI * r / 24));
@@ -3745,7 +3754,16 @@ GuiInterface.prototype.pudim_GetPalicadaData = function(player, data)
 	// ── Até onde vai o território, direção por direção ───────────────────────────────
 	// Sonda do centro para fora e guarda o último ponto ainda nosso. É isso que faz a
 	// espiral acompanhar o formato da base em vez de um círculo teórico.
-	const mapSize = cmpRangeManager.GetMapSize ? cmpRangeManager.GetMapSize() : 512;
+	// GetMapSize vive em IID_Terrain, NAO em IID_RangeManager. Escrevi RangeManager nas duas
+	// funcoes novas e o `? :` caia sempre no fallback de 512 — o resto do mod ja usava
+	// cmpTerrain.GetMapSize() em oito lugares.
+	//
+	// O estrago era invisivel em mapa pequeno e total em mapa grande: no log do jogador as
+	// obras saiam em (951,1027) e (860,1042), entao TODA posicao candidata caia no teste
+	// `cx > mapSize - 10` com mapSize=512. A serie de quarteis parava com "cands=0", que so
+	// deu para ver depois que as saidas silenciosas ganharam log.
+	const cmpTerrainMapa = Engine.QueryInterface(SYSTEM_ENTITY, IID_Terrain);
+	const mapSize = cmpTerrainMapa ? cmpTerrainMapa.GetMapSize() : 512;
 	const borda = [];
 	for (let i = 0; i < PUDIM_PALICADA_DIRECOES; i++) {
 		const ang = (i * 2 * Math.PI) / PUDIM_PALICADA_DIRECOES;

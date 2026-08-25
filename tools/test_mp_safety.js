@@ -124,6 +124,10 @@ check("Math.atan2 continua liberado (a engine o substitui)",
 // ── 7. Comandos de rede: so os do jogo base ────────────────────────────────────────────
 // Um tipo de comando proprio seria ignorado por quem nao tem o mod — divergencia imediata.
 const VANILLA = new Set(["attack", "autoqueue-on", "autoqueue-off", "barter", "construct",
+	// construct-wall: tratado por TryConstructWall em simulation/helpers/Commands.js, do
+	// jogo BASE, igual em todos os clientes — mesma classe de seguranca que "construct".
+	// Entrou com a palicada, em 25/08.
+	"construct-wall",
 	"delete-entities", "garrison", "gather", "gather-near-position", "repair", "research",
 	"stop", "stop-production", "train", "unload", "walk", "returnresource", "formation",
 	"promote", "set-rallypoint", "unload-all"]);
@@ -145,7 +149,16 @@ check("o mod realmente envia comandos (o teste acima nao passou por vazio)",
 // ── 8. GuiInterfaceCall do jogo base: so os que nao mudam estado sincronizado ──────────
 // SetBuildingPlacementPreview cria entidade LOCAL (Engine.AddLocalEntity) e guarda o id em
 // this.placementEntity do GuiInterface — e a serializacao pula os dois. Por isso e seguro.
-const SEGUROS = new Set(["GetNeededResources", "SetBuildingPlacementPreview"]);
+//
+// SetWallPlacementPreview entrou em 25/08, com a palicada, e foi conferido do mesmo jeito:
+// em GuiInterface.js as pecas nascem de Engine.AddLocalEntity("preview|" + tpl) e ficam em
+// this.placementWallEntities. Entidade local nao e serializada — ComponentManagerSerialization
+// .cpp pula ENTITY_IS_LOCAL, e m_NextLocalEntityId tambem nao entra no estado. Chamar de um
+// cliente so nao diverge nada.
+//
+// Este teste PEGOU as duas quando elas apareceram, que e exatamente o que se espera dele.
+const SEGUROS = new Set(["GetNeededResources", "SetBuildingPlacementPreview",
+	"SetWallPlacementPreview"]);
 const chamadas = new Set();
 for (const f of guiFiles) {
 	const src = semComentarios(fs.readFileSync(f, "utf8"));

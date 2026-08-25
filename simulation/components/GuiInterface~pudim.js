@@ -3623,6 +3623,155 @@ GuiInterface.prototype.pudim_GetTrainableUnits = function(player, data)
 };
 
 
+// ─── Paliçada em espiral, da borda do território para dentro ──────────────────────────
+//
+// Pedido de 25/08: "tambem palisada, a palisada, é um muro externo, tentando circular a
+// base, esse pegue 3 construtores e vai fazendo circulo espiral da parte mais externa do
+// territory manager pra parte mais interna, a quantidade que a pessoa escolhe, vai a
+// quantidade de voltas completas da espiral... a onde falhar a construção contorna e
+// continua fazendo, por exemplo arvores e etc".
+//
+// Três coisas ficam sabidas do motor, não supostas:
+//
+//   structures/wallset_palisade traz Requirements "-phase_town phase_village", e no sistema
+//   de tokens do 0 A.D. o "-" REMOVE um requisito herdado, não proíbe a fase. O pai
+//   (template_wallset) exige phase_town — muralha de pedra é fase 2 —, e a paliçada tira
+//   essa exigência e fica pedindo só phase_village, que se tem desde o início e nunca se
+//   perde. Ou seja: a paliçada vale em TODAS as fases. Li isso ao contrário da primeira
+//   vez, e o jogador corrigiu.
+//
+//   As peças vêm do WallSet do template (Tower, Gate, WallLong, WallMedium, WallShort), e
+//   palisades_long tem <Length>14</Length>. Quem calcula onde cada peça entra é o motor,
+//   por SetWallPlacementPreview — não este código. Reproduzir esse cálculo à mão seria
+//   inventar a convenção de ângulo e errar em toda curva.
+//
+//   O comando é construct-wall, com a lista de peças que o preview devolveu. É exatamente
+//   o que a interface do jogo faz em gui/session/input.js (tryPlaceWall).
+//
+// O território NÃO é um círculo. Por isso o raio é medido POR DIREÇÃO: cada ponto do anel
+// fica na borda do território naquela direção, e a espiral acompanha o formato real da base
+// em vez de desenhar uma circunferência que sobra de um lado e invade do outro.
+const PUDIM_PALICADA_EQUIPE = 3;      // o número que o jogador pediu
+const PUDIM_PALICADA_DIRECOES = 48;   // pontos por volta: 7,5° entre eles
+const PUDIM_PALICADA_MARGEM = 6;      // recuo da borda, para a peça caber dentro
+const PUDIM_PALICADA_PASSO = 18;      // quanto cada volta entra para dentro
+const PUDIM_PALICADA_SONDA = 6;       // resolução da sonda de território
+const PUDIM_PALICADA_RAIO_MAX = 220;  // teto da sonda; além disso não é mais "a base"
+
+/**
+ * Pontos da espiral, na ordem em que devem ser ligados, e quem constrói.
+ *
+ * data.voltas         quantas voltas completas (o que o jogador escolheu)
+ * data.playerOrdered  ids sob ordem do jogador — nunca recrutados
+ */
+GuiInterface.prototype.pudim_GetPalicadaData = function(player, data)
+{
+	const result = { "pontos": [], "builderIds": [], "template": "", "disponivel": false,
+	                 "_dbg": { "reason": "init" } };
+	const cmpRangeManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_RangeManager);
+	const cmpTerritoryManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_TerritoryManager);
+	if (!cmpRangeManager || !cmpTerritoryManager) { result._dbg.reason = "sem_managers"; return result; }
+
+	const voltas = Math.max(1, Math.min(10, (data && data.voltas) || 1));
+	const ordenados = (data && data.playerOrdered) ? data.playerOrdered : {};
+	const allEnts = cmpRangeManager.GetEntitiesByPlayer(player);
+
+	// ── Centro da base ───────────────────────────────────────────────────────────────
+	let ccX = 0, ccZ = 0, temCC = false;
+	for (const ent of allEnts) {
+		const cmpId = Engine.QueryInterface(ent, IID_Identity);
+		if (!cmpId || !cmpId.HasClass("CivCentre")) continue;
+		if (Engine.QueryInterface(ent, IID_Foundation)) continue;
+		const p = Engine.QueryInterface(ent, IID_Position);
+		if (!p || !p.IsInWorld()) continue;
+		const q = p.GetPosition2D();
+		ccX = q.x; ccZ = q.y; temCC = true;
+		break;
+	}
+	if (!temCC) { result._dbg.reason = "sem_cc"; return result; }
+
+	// ── Construtores: três, como pedido ──────────────────────────────────────────────
+	// Ocioso primeiro; depois quem colhe. Nunca quem já está numa obra — puxá-lo dali é o
+	// desperdício que o resto do mod passa o tempo todo evitando.
+	const ociosos = [], colhendo = [];
+	for (const ent of allEnts) {
+		if (ordenados[ent]) continue;
+		const cmpB = Engine.QueryInterface(ent, IID_Builder);
+		if (!cmpB) continue;
+		const cmpId = Engine.QueryInterface(ent, IID_Identity);
+		if (!cmpId || cmpId.HasClass("FastMoving")) continue;
+		const p = Engine.QueryInterface(ent, IID_Position);
+		if (!p || !p.IsInWorld()) continue;
+
+		if (!result.template && cmpB.GetEntitiesList) {
+			for (const tpl of cmpB.GetEntitiesList())
+				if (tpl.substr(tpl.lastIndexOf("/") + 1) === "wallset_palisade") {
+					result.template = tpl;
+					result.disponivel = true;
+					break;
+				}
+		}
+
+		const cmpAI = Engine.QueryInterface(ent, IID_UnitAI);
+		const ord = cmpAI && cmpAI.orderQueue && cmpAI.orderQueue.length ? cmpAI.orderQueue[0] : null;
+		if (!ord) ociosos.push(ent);
+		else if (ord.type === "Gather") colhendo.push(ent);
+	}
+	if (!result.template) { result._dbg.reason = "civ_sem_palicada"; return result; }
+
+	for (const e of ociosos.concat(colhendo)) {
+		result.builderIds.push(e);
+		if (result.builderIds.length >= PUDIM_PALICADA_EQUIPE) break;
+	}
+	if (!result.builderIds.length) { result._dbg.reason = "sem_trabalhador"; return result; }
+
+	// ── Até onde vai o território, direção por direção ───────────────────────────────
+	// Sonda do centro para fora e guarda o último ponto ainda nosso. É isso que faz a
+	// espiral acompanhar o formato da base em vez de um círculo teórico.
+	const mapSize = cmpRangeManager.GetMapSize ? cmpRangeManager.GetMapSize() : 512;
+	const borda = [];
+	for (let i = 0; i < PUDIM_PALICADA_DIRECOES; i++) {
+		const ang = (i * 2 * Math.PI) / PUDIM_PALICADA_DIRECOES;
+		const dx = Math.cos(ang), dz = Math.sin(ang);
+		let r = 0;
+		for (let d = PUDIM_PALICADA_SONDA; d <= PUDIM_PALICADA_RAIO_MAX; d += PUDIM_PALICADA_SONDA) {
+			const tx = ccX + dx * d, tz = ccZ + dz * d;
+			if (tx < 8 || tz < 8 || tx > mapSize - 8 || tz > mapSize - 8) break;
+			if (cmpTerritoryManager.GetOwner(tx, tz) !== player) break;
+			r = d;
+		}
+		borda.push(r);
+	}
+	const maiorBorda = Math.max.apply(null, borda);
+	result._dbg.borda = Math.round(maiorBorda);
+	if (maiorBorda < PUDIM_PALICADA_PASSO * 2) { result._dbg.reason = "territorio_pequeno"; return result; }
+
+	// ── A espiral ────────────────────────────────────────────────────────────────────
+	// Volta 0 na borda; cada volta seguinte entra PUDIM_PALICADA_PASSO para dentro. Os
+	// pontos saem em ordem, e o painel liga um ao seguinte — quando um trecho não couber,
+	// ele pula e emenda no próximo, que é o "contorna e continua" do pedido.
+	for (let volta = 0; volta < voltas; volta++) {
+		const recuo = PUDIM_PALICADA_MARGEM + volta * PUDIM_PALICADA_PASSO;
+		for (let i = 0; i <= PUDIM_PALICADA_DIRECOES; i++) {
+			const idx = i % PUDIM_PALICADA_DIRECOES;
+			const raio = borda[idx] - recuo;
+			// Direção onde o território é raso demais para esta volta: sem ponto, e o painel
+			// simplesmente emenda o trecho seguinte por cima do vão.
+			if (raio < PUDIM_PALICADA_PASSO) continue;
+			const ang = (idx * 2 * Math.PI) / PUDIM_PALICADA_DIRECOES;
+			result.pontos.push({
+				x: ccX + Math.cos(ang) * raio,
+				z: ccZ + Math.sin(ang) * raio,
+				volta: volta
+			});
+		}
+	}
+	result._dbg.pontos = result.pontos.length;
+	result._dbg.reason = result.pontos.length ? "ok" : "sem_pontos";
+	return result;
+};
+
+
 GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 	const cmpPlayerManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_PlayerManager);
 	const playerEnt = cmpPlayerManager.GetPlayerByID(player);
@@ -6398,6 +6547,7 @@ var pudim_exposedFunctions = {
 	"pudim_GetHeroAuraData": 1,
 	"pudim_GetBarracksBuildData": 1,
 	"pudim_GetTrainableUnits": 1,
+	"pudim_GetPalicadaData": 1,
   	"pudim_GetScoutStatus": 1,
   	"pudim_GetAutoKiteData": 1,
   	"pudim_GetCombatEstimation": 1,

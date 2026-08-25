@@ -97,6 +97,8 @@ const PUDIM_STRINGS = {
 	"cap.house":         ["House", "Casa"],
 	"cap.forge":         ["Forge", "Forja"],
 	"cap.tower":         ["Tower", "Torre"],
+	"cap.palisade":      ["Palisade", "Paliçada"],
+	"cap.laps":          ["lap(s)", "volta(s)"],
 	"cap.backToWork":    ["Back to Work", "Voltar ao Trabalho"],
 	"cap.situation":     ["Situation", "Situação"],
 	"cap.calm":          ["Calm", "Calma"],

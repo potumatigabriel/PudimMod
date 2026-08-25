@@ -136,6 +136,7 @@ const PUDIM_LOG_LEVEL_COLORS = {
 };
 const PUDIM_LOG_CAT_COLORS = {
 	"CASAS":  "255 230 100", "DROP":   "100 230 255", "FARM":  "140 255 150",
+	"PALICADA": "200 180 140",
 	"QUARTEL": "200 160 255",
 	"OBRA":   "255 180 120",
 	"HEROI":  "255 200 255",
@@ -1954,6 +1955,7 @@ function pudim_Tick(dt)
 	{
 		g_PudimQuartelAccum = 0;
 		pudim_ProcessQuartel();
+		try { pudim_ProcessPalicada(); } catch (e) { pudim_Log("ERROR", "PALICADA", "" + e); }
 	}
 
 	// Sistema de Pânico: a cada 1.5 segundos
@@ -3841,7 +3843,7 @@ function pudim_ProcessHeroAura()
 //
 // E por que a exceção dele é certa: perto do teto de população o gargalo deixa de ser
 // recurso e passa a ser quantos lugares treinam ao mesmo tempo. Aí paralelo ganha.
-const PUDIM_QUARTEL_TIPOS = ["quartel", "estabulo", "casa", "forja", "torre"];
+const PUDIM_QUARTEL_TIPOS = ["quartel", "estabulo", "casa", "forja", "torre", "palicada"];
 // Os nomes saem do dicionário, não de literais: o dropdown e o botão têm de falar a
 // mesma língua do resto do painel.
 const PUDIM_QUARTEL_CHAVES = {
@@ -3849,7 +3851,8 @@ const PUDIM_QUARTEL_CHAVES = {
 	estabulo: "cap.stable",
 	casa:     "cap.house",
 	forja:    "cap.forge",
-	torre:    "cap.tower"
+	torre:    "cap.tower",
+	palicada: "cap.palisade"
 };
 function pudim_QuartelNome(tipo) {
 	return pudim_T(PUDIM_QUARTEL_CHAVES[tipo] || "cap.barracks");
@@ -3905,6 +3908,11 @@ function pudim_QuartelSetQtd()
 /** Botão: liga a série, ou cancela a que estiver rodando. */
 function pudim_QuartelToggle()
 {
+	// A palicada nao e "mais um edificio da serie": e um muro tracado em espiral, com
+	// equipe propria e comando proprio (construct-wall). O dropdown e o mesmo por
+	// conveniencia — o numero ali passa a significar VOLTAS em vez de quantidade.
+	if (g_PudimQuartelTipo === "palicada") { pudim_PalicadaToggle(); return; }
+
 	if (g_PudimQuartelAtivo) {
 		g_PudimQuartelAtivo = false;
 		// Cancelar devolve a equipe ao trabalho na hora. Deixá-los parados seria pior do
@@ -3943,6 +3951,13 @@ function pudim_QuartelAtualizarLabel()
 	const lbl = Engine.GetGUIObjectByName("pudim_quartelBtnLabel");
 	if (!lbl) return;
 	const nome = pudim_QuartelNome(g_PudimQuartelTipo);
+	if (g_PudimQuartelTipo === "palicada") {
+		const dd = Engine.TryGetGUIObjectByName("pudim_quartelQtd");
+		const voltas = g_PudimPalicadaAtiva ? g_PudimPalicadaVoltas : ((dd ? dd.selected : 0) + 1);
+		lbl.caption = (g_PudimPalicadaAtiva ? pudim_T("cap.serieStop") : pudim_T("cap.serieBuild")) +
+			" " + nome + ": " + voltas + " " + pudim_T("cap.laps");
+		return;
+	}
 	lbl.caption = g_PudimQuartelAtivo
 		? pudim_T("cap.serieStop") + " " + g_PudimQuartelAlvo + " " + nome
 		: pudim_T("cap.serieBuild") + " " + g_PudimQuartelAlvo + " " + nome;
@@ -4002,6 +4017,167 @@ function pudim_QuartelInit()
 	}
 	pudim_QuartelAtualizarLabel();
 }
+
+// ─── Paliçada: liga os pontos da espiral, um trecho por vez ───────────────────────────
+//
+// Quem calcula ONDE cada peça entra é o motor, não este código. SetWallPlacementPreview
+// recebe início e fim e devolve a lista de peças com posição e ângulo já resolvidos —
+// incluindo as curvas, que é onde qualquer cálculo próprio erraria. Depois é só mandar
+// construct-wall com essa lista, exatamente como gui/session/input.js faz em tryPlaceWall.
+//
+// "a onde falhar a construção contorna e continua fazendo, por exemplo arvores e etc": um
+// trecho que o preview recusa é pulado, e o próximo começa do ponto seguinte. A paliçada
+// fica com um vão ali e segue em frente, que é o que dá para fazer — derrubar a árvore para
+// fechar o muro seria decidir sozinho jogar madeira fora.
+const PUDIM_PALICADA_INTERVALO = 1200;   // entre trechos; obra é lenta, não precisa correr
+
+var g_PudimPalicadaAtiva = false;
+var g_PudimPalicadaVoltas = 1;
+var g_PudimPalicadaPontos = [];
+var g_PudimPalicadaIdx = 0;
+var g_PudimPalicadaUltima = 0;
+var g_PudimPalicadaEquipe = [];
+var g_PudimPalicadaAccum = 0;
+var g_PudimPalicadaVaos = 0;
+
+function pudim_PalicadaToggle()
+{
+	if (g_PudimPalicadaAtiva) {
+		g_PudimPalicadaAtiva = false;
+		for (const id of g_PudimPalicadaEquipe) pudim_ProtectBuilder(id, 0);
+		g_PudimPalicadaEquipe = [];
+		pudim_Log("INFO", "PALICADA", "cancelada pelo jogador");
+	} else {
+		const dd = Engine.TryGetGUIObjectByName("pudim_quartelQtd");
+		g_PudimPalicadaVoltas = dd ? dd.selected + 1 : 1;
+		g_PudimPalicadaAtiva = true;
+		g_PudimPalicadaPontos = [];
+		g_PudimPalicadaIdx = 0;
+		g_PudimPalicadaVaos = 0;
+		g_PudimPalicadaUltima = 0;
+		pudim_Log("INFO", "PALICADA", "iniciada: " + g_PudimPalicadaVoltas + " volta(s)");
+	}
+	pudim_QuartelAtualizarLabel();
+}
+
+function pudim_ProcessPalicada()
+{
+	if (!g_PudimPalicadaAtiva) return;
+	const agora = Date.now();
+	if (agora - g_PudimPalicadaUltima < PUDIM_PALICADA_INTERVALO) return;
+	if (pudim_ObrasPausadas()) return;
+	g_PudimPalicadaUltima = agora;
+
+	// Traça a espiral uma vez, no começo. Retraçá-la a cada trecho faria o muro se deslocar
+	// junto com o território, que cresce durante a partida.
+	if (!g_PudimPalicadaPontos.length) {
+		let d;
+		try {
+			d = Engine.GuiInterfaceCall("pudim_GetPalicadaData",
+				{ "voltas": g_PudimPalicadaVoltas, "playerOrdered": pudim_GetPlayerOrderedIds() });
+		} catch (e) { return; }
+		if (!d) return;
+		if (!d.disponivel) {
+			// A paliçada vale em TODAS as fases, e isso merece a explicação porque eu li
+			// errado da primeira vez: structures/wallset_palisade traz
+			// Requirements "-phase_town phase_village", e no sistema de tokens do 0 A.D. o
+			// "-" REMOVE um requisito herdado. O pai (template_wallset) exige phase_town —
+			// muralha de pedra é fase 2 —, e a paliçada tira essa exigência e fica pedindo
+			// só phase_village, que se tem desde o início e nunca se perde.
+			//
+			// Então cair aqui não é "mudou de fase": é civilização que não constrói paliçada,
+			// ou nenhum trabalhador disponível para perguntar.
+			pudim_Log("WARN", "PALICADA", "esta civilização não constrói paliçada — cancelada");
+			g_PudimPalicadaAtiva = false;
+			pudim_QuartelAtualizarLabel();
+			return;
+		}
+		if (!d.pontos || d.pontos.length < 2 || !d.builderIds.length) {
+			pudim_Log("WARN", "PALICADA", "sem caminho para traçar (" +
+				((d._dbg && d._dbg.reason) || "?") + ") — cancelada");
+			g_PudimPalicadaAtiva = false;
+			pudim_QuartelAtualizarLabel();
+			return;
+		}
+		// O wallSet vem do template, igual a gui/session/input.js: "wallSet = templateData.wallSet".
+		// Sem ele o preview nao tem como saber quais pecas existem.
+		try {
+			const td = GetTemplateData(d.template);
+			g_PudimPalicadaWallSet = td && td.wallSet ? td.wallSet : null;
+		} catch (e) { g_PudimPalicadaWallSet = null; }
+		if (!g_PudimPalicadaWallSet) {
+			pudim_Log("WARN", "PALICADA", "template " + d.template + " sem wallSet — cancelada");
+			g_PudimPalicadaAtiva = false;
+			pudim_QuartelAtualizarLabel();
+			return;
+		}
+
+		g_PudimPalicadaPontos = d.pontos;
+		g_PudimPalicadaTemplate = d.template;
+		g_PudimPalicadaEquipe = d.builderIds.slice();
+		for (const id of d.builderIds) pudim_ProtectBuilder(id, agora + 300000);
+		pudim_Log("INFO", "PALICADA", "traçada: " + d.pontos.length + " pontos, " +
+			g_PudimPalicadaVoltas + " volta(s), borda a " + ((d._dbg && d._dbg.borda) || "?") + "m");
+	}
+
+	if (g_PudimPalicadaIdx >= g_PudimPalicadaPontos.length - 1) {
+		pudim_Log("SUCCESS", "PALICADA", "terminada" +
+			(g_PudimPalicadaVaos ? " — " + g_PudimPalicadaVaos + " trecho(s) sem passagem, contornados" : ""));
+		g_PudimPalicadaAtiva = false;
+		for (const id of g_PudimPalicadaEquipe) pudim_ProtectBuilder(id, 0);
+		g_PudimPalicadaEquipe = [];
+		pudim_QuartelAtualizarLabel();
+		return;
+	}
+
+	const a = g_PudimPalicadaPontos[g_PudimPalicadaIdx];
+	const b = g_PudimPalicadaPontos[g_PudimPalicadaIdx + 1];
+	g_PudimPalicadaIdx++;
+
+	// Pontos de voltas diferentes não se ligam: o fim de uma volta e o começo da seguinte
+	// estão a uma volta inteira de distância, e ligá-los cortaria a base ao meio.
+	if (a.volta !== b.volta) return;
+
+	let info = null;
+	try {
+		info = Engine.GuiInterfaceCall("SetWallPlacementPreview", {
+			"wallSet": g_PudimPalicadaWallSet,
+			"start": { "x": a.x, "z": a.z },
+			"end": { "x": b.x, "z": b.z },
+			"snapEntities": []
+		});
+	} catch (e) { info = null; }
+
+	// SEMPRE limpar. SetWallPlacementPreview cria entidades locais no motor (ver
+	// placementWallEntities em GuiInterface.js); chamar sem wallSet as destroi. Deixar de
+	// limpar acumularia peças fantasma no mapa a cada trecho.
+	const limpar = function() {
+		try { Engine.GuiInterfaceCall("SetWallPlacementPreview", {}); } catch (e) {}
+	};
+
+	if (!info || !info.pieces || !info.pieces.length) {
+		// Árvore, rocha, terreno íngreme: o motor recusou o trecho. Conta e segue.
+		limpar();
+		g_PudimPalicadaVaos++;
+		return;
+	}
+
+	Engine.PostNetworkCommand({
+		"type": "construct-wall",
+		"entities": g_PudimPalicadaEquipe,
+		"wallSet": g_PudimPalicadaWallSet,
+		"pieces": info.pieces,
+		"startSnappedEntity": info.startSnappedEnt,
+		"endSnappedEntity": info.endSnappedEnt,
+		"autorepair": true,
+		"autocontinue": true,
+		"queued": true
+	});
+	limpar();
+}
+
+var g_PudimPalicadaTemplate = "";
+var g_PudimPalicadaWallSet = null;
 
 function pudim_ProcessQuartel()
 {

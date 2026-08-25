@@ -488,6 +488,15 @@ O **mercado inteligente** troca o que está sobrando pelo que está faltando.
   recurso e passa a ser quantos lugares treinam ao mesmo tempo. Civilização que não tem o
   edifício é avisada em vez de o mod tentar em silêncio.
 
+- **Paliçada em espiral.** Escolha "Paliçada" e o número passa a significar **voltas**. Três
+  construtores traçam um muro externo que começa na borda do território e entra para dentro a
+  cada volta. O raio é medido **direção por direção** com o TerritoryManager, então a espiral
+  acompanha o formato real da base em vez de desenhar uma circunferência que sobra de um lado e
+  invade do outro. Onde não passa — árvore, rocha, terreno íngreme — o trecho é pulado e o
+  próximo emenda adiante; o log diz quantos vãos ficaram. Quem calcula onde cada peça entra é o
+  motor (`SetWallPlacementPreview`), não o mod: reproduzir esse cálculo à mão significaria
+  inventar a convenção de ângulo e errar em toda curva.
+
 - **Casa nunca no corredor de coleta.** O edifício vira obstáculo de pathfinding, então casa pousada
   entre o recurso e o dropsite faz cada viagem contornar — por carga, para o resto da partida, sem
   aparecer em lugar nenhum da interface. Cada recurso sendo colhido define um segmento até o dropsite

@@ -1516,7 +1516,12 @@ GuiInterface.prototype.pudim_GetPanicData = function(player, data)
 {
 	const result = {
 		underAttack: false,
-		isLargeArmy: false,
+		// Tropa NOSSA em combate agora, em qualquer lugar do mapa. Separado de
+		// underAttack de proposito: aquele olha o entorno da base, este olha a
+		// batalha. Quando a briga se desloca — a gente avança, ou o inimigo recua
+		// puxando nosso exercito atras — a base fica calma e underAttack cai,
+		// mesmo com a batalha rolando. Era o que soltava todo mundo no meio dela.
+		emCombate: false,
 		enemyCount: 0,
 		alliedMilitaryNearby: 0,
 		atRiskWorkers: [],
@@ -1656,6 +1661,25 @@ GuiInterface.prototype.pudim_GetPanicData = function(player, data)
 			}
 		}
 	}
+
+	// Combate de verdade: unidade nossa com ordem de Attack, ou inimigo com ordem de
+	// Attack mirando algo nosso. Ler a ordem e direto e barato — a mesma leitura que
+	// pudimIsHostile ja faz para os inimigos.
+	for (const ent of myEnts) {
+		const cmpAI = Engine.QueryInterface(ent, IID_UnitAI);
+		if (!cmpAI || !cmpAI.GetOrders) continue;
+		const ord = cmpAI.GetOrders()[0];
+		if (ord && ord.type === "Attack") { result.emCombate = true; break; }
+	}
+	if (!result.emCombate)
+		for (const e of enemyNear) {
+			const cmpEAI = Engine.QueryInterface(e, IID_UnitAI);
+			if (!cmpEAI || !cmpEAI.GetOrders) continue;
+			const o = cmpEAI.GetOrders()[0];
+			if (!o || o.type !== "Attack" || !o.data || !o.data.target) continue;
+			const own = Engine.QueryInterface(o.data.target, IID_Ownership);
+			if (own && own.GetOwner() === player) { result.emCombate = true; break; }
+		}
 
 	if (enemyNear.length === 0) return result;
 

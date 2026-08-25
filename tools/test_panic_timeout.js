@@ -34,6 +34,10 @@ const sandbox = {
 	GetEntityState: () => null,
 	Date: Date, Object: Object, Math: Math,
 	// Globais que a função lê/escreve
+	// A soltura ganhou a trava de batalha (ver test_combate_trava.js); aqui ela fica
+	// desligada, para este teste seguir medindo só a válvula de 120s.
+	g_PudimEmCombate: false,
+	g_PudimHoldCombateLogged: false,
 	g_PudimNoCivCentre: false,
 	g_PudimSheltersUnderSiege: 0,
 	g_PudimHoldGarrisonLogged: false,
@@ -59,6 +63,8 @@ console.log("válvula de segurança do pânico");
 
 function reset(estado) {
 	Object.assign(sandbox, {
+		g_PudimEmCombate: false,
+		g_PudimHoldCombateLogged: false,
 		g_PudimNoCivCentre: false,
 		g_PudimSheltersUnderSiege: 0,
 		g_PudimHoldGarrisonLogged: false,

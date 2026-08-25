@@ -1590,6 +1590,11 @@ var g_PudimShelterLogAt = 0;
 /** Última ordem de fuga por unidade — evita reemitir walk a cada ciclo (id → ms) */
 var g_PudimFleeAt = {};
 
+/** Tropa nossa lutando agora, em qualquer lugar do mapa (vem de pudim_GetPanicData) */
+var g_PudimEmCombate = false;
+/** Para a linha de log da trava sair uma vez por batalha, não a cada tique */
+var g_PudimHoldCombateLogged = false;
+
 var g_PudimDropsiteRally = {};
 /** Janela de validade do rally. Acima disso a âncora provavelmente já não faz sentido. */
 const PUDIM_RALLY_WINDOW = 180000;
@@ -3095,6 +3100,17 @@ function pudim_ReturnPanicUnitsToWork(manual)
 	//       entregar as unidades. Só o jogador decide a hora de sair; ou
 	//   (b) há abrigo ocupado com inimigo a ≤80m (cerco em andamento).
 	// Foi exatamente isso que despejou as unidades no meio do exército inimigo.
+	// Enquanto houver tropa lutando, ninguém sai do abrigo nem volta a colher por conta do
+	// mod. O jogador continua podendo soltar pelo botão "Voltar ao Trabalho".
+	if (!manual && g_PudimEmCombate) {
+		if (!g_PudimHoldCombateLogged) {
+			g_PudimHoldCombateLogged = true;
+			pudim_Log("INFO", "PANIC", "batalha em curso — segurando as unidades abrigadas");
+		}
+		return false;
+	}
+	g_PudimHoldCombateLogged = false;
+
 	if (!manual && (g_PudimNoCivCentre || g_PudimSheltersUnderSiege > 0)) {
 		if (!g_PudimHoldGarrisonLogged) {
 			g_PudimHoldGarrisonLogged = true;
@@ -3203,6 +3219,14 @@ function pudim_ProcessPanic()
 		panicData = Engine.GuiInterfaceCall("pudim_GetPanicData");
 	} catch(e) { return; }
 	if (!panicData) return;
+
+	// Batalha em curso trava a soltura, mesmo com a base calma.
+	//
+	// A liberação olhava só o entorno da base: 10s sem inimigo perto e todo mundo voltava
+	// ao trabalho. Quando a briga se desloca — a gente avança, ou o inimigo recua puxando
+	// nosso exército — a base fica calma com a batalha rolando. No log de 24/08 isso
+	// devolveu 152 unidades ao trabalho 57s depois de "defendendo com 28 inimigo(s)".
+	g_PudimEmCombate = !!panicData.emCombate;
 
 	// Estado que trava o desguarnecimento automático (ver pudim_ReturnPanicUnitsToWork)
 	g_PudimNoCivCentre = !!panicData.noCivCentre;

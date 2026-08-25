@@ -136,6 +136,7 @@ const PUDIM_LOG_LEVEL_COLORS = {
 };
 const PUDIM_LOG_CAT_COLORS = {
 	"CASAS":  "255 230 100", "DROP":   "100 230 255", "FARM":  "140 255 150",
+	"HEROI":  "255 200 255",
 	"SCOUT":  "210 160 255", "GAR":    "255 170 100", "FOCUS": "255 120 130",
 	"BARTER": "220 205 130", "PANIC":  "255 100 80",  "WORK":  "180 245 210",
 	"MOD":    "190 190 190"
@@ -1780,6 +1781,15 @@ function pudim_Tick(dt)
 	{
 		g_PudimKiteAccum = 0;
 		pudim_ProcessAutoKite();
+	}
+
+	// Herói na aura: a cada 1.2s. Mais lento que o kite de propósito — a posição dele muda
+	// devagar (a luta é que se move), e ordem repetida cancelaria a caminhada anterior.
+	g_PudimHeroAccum += dt;
+	if (g_PudimHeroAccum >= 1200 && g_PudimCombatAssistsEnabled)
+	{
+		g_PudimHeroAccum = 0;
+		pudim_ProcessHeroAura();
 	}
 
 	// Sistema de Pânico: a cada 1.5 segundos
@@ -3487,6 +3497,66 @@ function pudim_ProcessPanic()
  * Faz infantaria ranged fugir de inimigos corpo-a-corpo que chegam perto.
  * Limpa entradas antigas do dicionário de kiting a cada ciclo.
  */
+/**
+ * Mantém o herói passivo dentro do alcance da própria aura e fora do alcance das armas
+ * inimigas — nessa ordem de prioridade quando os dois não cabem juntos.
+ *
+ * O trabalho de decidir ONDE é do lado da simulação (pudim_GetHeroAuraData), que é onde
+ * estão os componentes. Aqui só se emite a ordem e se respeita o intervalo entre ordens.
+ */
+let g_PudimHeroAccum = 0;
+let g_PudimHeroLastAt = 0;
+let g_PudimHeroLogAt = 0;
+
+function pudim_ProcessHeroAura()
+{
+	const agora = Date.now();
+	// 4s entre ordens. Sem isso, com a luta se movendo, o herói recebe um walk novo a cada
+	// ciclo e nunca chega a lugar nenhum — foi exatamente o que aconteceu com o kite antes
+	// do cooldown de 6s, e não há motivo para repetir o erro aqui.
+	if (agora - g_PudimHeroLastAt < 4000) return;
+
+	let d;
+	try {
+		d = Engine.GuiInterfaceCall("pudim_GetHeroAuraData",
+			{ "playerOrdered": pudim_GetPlayerOrderedIds() });
+	} catch (e) { return; }
+	if (!d) return;
+
+	if (g_PudimShowDebug && agora - g_PudimHeroLogAt > 15000) {
+		g_PudimHeroLogAt = agora;
+		const g = d._dbg || {};
+		pudim_Log("DEBUG", "HEROI", "acao=" + d.action + " motivo=" + (g.reason || "?") +
+			" raio=" + (g.raio || 0) + " lutando=" + (g.lutando || 0) +
+			" ameacas=" + (g.ameacas || 0) + " mover=" + (g.mover || 0) + "m");
+	}
+
+	if (d.action !== "posicionar" || !d.heroId) {
+		// "aura_toda_exposta" merece registro mesmo sem debug: significa que a tropa está
+		// lutando SEM o bônus, por decisão deliberada de preservar o herói.
+		if (d.action === "recuar" && agora - g_PudimHeroLogAt > 15000) {
+			g_PudimHeroLogAt = agora;
+			pudim_Log("INFO", "HEROI", "aura toda dentro do alcance inimigo — heroi fica fora, tropa luta sem bonus");
+		}
+		return;
+	}
+
+	g_PudimHeroLastAt = agora;
+	Engine.PostNetworkCommand({
+		"type": "walk",
+		"entities": [d.heroId],
+		"x": d.x,
+		"z": d.z,
+		"queued": false
+	});
+	// Protege contra outros sistemas (pânico, abrigo, despacho) reclamarem o herói durante
+	// a caminhada. Mesmo mecanismo já usado pelos construtores.
+	pudim_ProtectBuilder(d.heroId, agora + 4000);
+	pudim_Log("INFO", "HEROI", "posicionado na aura em (" + d.x.toFixed(0) + "," + d.z.toFixed(0) +
+		") raio=" + ((d._dbg && d._dbg.raio) || "?") + " andou=" + ((d._dbg && d._dbg.mover) || "?") + "m");
+}
+
+
 function pudim_ProcessAutoKite()
 {
 	const now = Date.now();

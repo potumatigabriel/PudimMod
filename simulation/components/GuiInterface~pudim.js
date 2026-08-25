@@ -3834,6 +3834,211 @@ const PUDIM_KITE_MARGEM_RANGED = 3;
  */
 const PUDIM_KITE_SEG_APROXIMACAO = 1;
 
+// ─── Herói na aura, fora do alcance ────────────────────────────────────────────────────
+//
+// Pedido de 25/08: "o heroi normalmente aumenta a forca das unidades, ou cura, ou traz
+// bonus... entao se ele estiver em modo passivo (fuja se atacado), ele tem que ficar bem
+// proximo as unidades que estao lutando, pra elas ficar dentro da aura dele, mas sem se
+// expor, pra nunca morrer".
+//
+// São dois objetivos que brigam entre si, e a ordem de prioridade entre eles o jogador
+// deixou explícita: "pra NUNCA morrer" vem primeiro. Herói morto não dá aura nenhuma, e
+// ainda entrega uma pilha de pontos de experiência e de saque para o adversário.
+//
+// APIs conferidas na fonte do motor (binaries/data/mods/public/simulation/components):
+//   Auras.js    GetAuraNames() / IsRangeAura(n) / GetRange(n) / GetClasses(n).
+//               GetRange devolve undefined quando a aura NÃO é do tipo "range" — auras
+//               globais valem no mapa inteiro e não pedem aproximação nenhuma.
+//   UnitAI.js   GetStanceName() devolve a string do stance. "passive" é o nome na lista
+//               g_Stances, e é o que a interface chama de "fuja se atacado".
+//   Attack.js   GetFullAttackRange() → {min,max}, já com as tecnologias aplicadas.
+//
+// Raios reais, levantados dos 151 arquivos de simulation/data/auras: vão de 30 a 100, com
+// a maior parte dos heróis em 60. É espaço de sobra — o herói quase sempre consegue cobrir
+// a luta de um ponto que nenhuma arma inimiga alcança.
+const PUDIM_HEROI_FOLGA_AURA = 6;    // margem para dentro da aura, absorve o passo dele
+const PUDIM_HEROI_MARGEM_ARMA = 12;  // margem sobre o alcance inimigo
+const PUDIM_HEROI_PASSOS = 16;       // direções testadas em volta da luta
+const PUDIM_HEROI_MIN_MOVER = 10;    // não emite ordem por menos que isto
+
+GuiInterface.prototype.pudim_GetHeroAuraData = function(player, data)
+{
+	const result = { "action": "none", "heroId": 0, "x": 0, "z": 0, "_dbg": { "reason": "init" } };
+	const cmpRangeManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_RangeManager);
+	if (!cmpRangeManager) { result._dbg.reason = "no_rangemanager"; return result; }
+
+	const ordenados = (data && data.playerOrdered) ? data.playerOrdered : {};
+	const allEnts = cmpRangeManager.GetEntitiesByPlayer(player);
+
+	// ── Achar o herói ────────────────────────────────────────────────────────────────
+	let heroi = 0, heroiPos = null, cmpAuras = null;
+	for (const ent of allEnts) {
+		const cmpId = Engine.QueryInterface(ent, IID_Identity);
+		if (!cmpId || !cmpId.HasClass("Hero")) continue;
+		// Ordem do jogador manda mais que o mod. Regra antiga da casa, vale aqui também.
+		if (ordenados[ent]) { result._dbg.reason = "ordem_do_jogador"; return result; }
+		const cmpAI = Engine.QueryInterface(ent, IID_UnitAI);
+		if (!cmpAI || !cmpAI.GetStanceName) continue;
+		// SÓ em passivo. Nos outros stances o jogador quer o herói lutando, e mexer nele
+		// seria o mesmo "auto serviço no meio da luta" que já foi proibido para as tropas.
+		if (cmpAI.GetStanceName() !== "passive") { result._dbg.reason = "stance_nao_passivo"; continue; }
+		const p = Engine.QueryInterface(ent, IID_Position);
+		if (!p || !p.IsInWorld()) continue;
+		const a = Engine.QueryInterface(ent, IID_Auras);
+		if (!a || !a.GetAuraNames) { result._dbg.reason = "heroi_sem_auras"; continue; }
+		heroi = ent; heroiPos = p.GetPosition2D(); cmpAuras = a;
+		break;
+	}
+	if (!heroi) { if (result._dbg.reason === "init") result._dbg.reason = "sem_heroi"; return result; }
+	result.heroId = heroi;
+
+	// ── Onde está a luta ─────────────────────────────────────────────────────────────
+	// Só conta quem está REALMENTE trocando golpes: ordem de Attack na frente da fila. Um
+	// exército parado em posição não precisa do herói colado nele.
+	let sx = 0, sz = 0, n = 0;
+	const classesEmLuta = {};
+	for (const ent of allEnts) {
+		if (ent === heroi) continue;
+		const cmpAI = Engine.QueryInterface(ent, IID_UnitAI);
+		if (!cmpAI || !cmpAI.orderQueue || !cmpAI.orderQueue.length) continue;
+		if (cmpAI.orderQueue[0].type !== "Attack") continue;
+		const p = Engine.QueryInterface(ent, IID_Position);
+		if (!p || !p.IsInWorld()) continue;
+		const q = p.GetPosition2D();
+		sx += q.x; sz += q.y; n++;
+		const cid = Engine.QueryInterface(ent, IID_Identity);
+		if (cid && cid.GetClassesList)
+			for (const c of cid.GetClassesList()) classesEmLuta[c] = true;
+	}
+	if (n === 0) { result._dbg.reason = "ninguem_lutando"; return result; }
+	const lutaX = sx / n, lutaZ = sz / n;
+	result._dbg.lutando = n;
+
+	// ── Qual raio precisa ser respeitado ─────────────────────────────────────────────
+	// A aura útil é a de MENOR raio entre as que afetam alguma classe que está lutando:
+	// respeitando a menor, todas as outras vêm junto. Aura global não entra na conta — ela
+	// já vale no mapa inteiro, então não é motivo para o herói chegar perto de nada.
+	let raio = Infinity, quantas = 0;
+	for (const nome of cmpAuras.GetAuraNames()) {
+		if (!cmpAuras.IsRangeAura || !cmpAuras.IsRangeAura(nome)) continue;
+		const r = +cmpAuras.GetRange(nome);
+		if (!(r > 0)) continue;
+		const afeta = cmpAuras.GetClasses ? cmpAuras.GetClasses(nome) : null;
+		if (afeta && afeta.length) {
+			let serve = false;
+			for (const c of afeta) if (classesEmLuta[c]) { serve = true; break; }
+			if (!serve) continue;
+		}
+		quantas++;
+		if (r < raio) raio = r;
+	}
+	result._dbg.auras = quantas;
+	if (quantas === 0) { result._dbg.reason = "so_aura_global"; return result; }
+	result._dbg.raio = Math.round(raio);
+
+	// ── O que atira, e até onde ──────────────────────────────────────────────────────
+	const inimigos = (function() {
+		const pe = Engine.QueryInterface(SYSTEM_ENTITY, IID_PlayerManager).GetPlayerByID(player);
+		const cd = Engine.QueryInterface(pe, IID_Diplomacy);
+		return cd && cd.GetEnemies ? cd.GetEnemies().filter(id => id > 0) : [];
+	})();
+	const ameacas = [];
+	if (inimigos.length) {
+		let perto = [];
+		try {
+			perto = cmpRangeManager.ExecuteQueryAroundPos(
+				{ x: lutaX, y: lutaZ }, 0, raio + 160, inimigos, IID_Attack, false);
+		} catch (e) { perto = []; }
+		for (const e of perto) {
+			const cmpAtk = Engine.QueryInterface(e, IID_Attack);
+			if (!cmpAtk || !cmpAtk.GetFullAttackRange) continue;
+			const p = Engine.QueryInterface(e, IID_Position);
+			if (!p || !p.IsInWorld()) continue;
+			let rng = 0;
+			try { rng = +cmpAtk.GetFullAttackRange().max || 0; } catch (e2) { continue; }
+			if (rng <= 0) continue;
+			// Margem sobre o alcance: quem anda fecha distância enquanto o herói se
+			// posiciona, então quem anda assusta mais. Prédio não persegue ninguém.
+			let margem = PUDIM_HEROI_MARGEM_ARMA;
+			const cmpMot = Engine.QueryInterface(e, IID_UnitMotion);
+			if (cmpMot && cmpMot.GetWalkSpeed) {
+				try { margem += 2 * (+cmpMot.GetWalkSpeed() || 0); } catch (e2) {}
+			}
+			const q = p.GetPosition2D();
+			ameacas.push({ x: q.x, z: q.y, alcance: rng + margem });
+		}
+	}
+	result._dbg.ameacas = ameacas.length;
+
+	const exposto = function(px, pz) {
+		for (const a of ameacas) {
+			const dx = px - a.x, dz = pz - a.z;
+			if (dx*dx + dz*dz < a.alcance * a.alcance) return true;
+		}
+		return false;
+	};
+
+	// ── Escolher onde ele fica ───────────────────────────────────────────────────────
+	// Anéis de fora para dentro: começa no limite da aura e só encosta mais se precisar.
+	// Ficar longe é sempre melhor quando o efeito é o mesmo — dentro da aura, 20m e 55m
+	// valem igual para as tropas, e valem muito diferente para a vida do herói.
+	const alvoRaio = Math.max(0, raio - PUDIM_HEROI_FOLGA_AURA);
+	let melhor = null, melhorScore = -Infinity;
+	for (let anel = 0; anel < 4; anel++) {
+		const d = alvoRaio * (1 - anel * 0.22);
+		for (let i = 0; i < PUDIM_HEROI_PASSOS; i++) {
+			const ang = (i * 2 * Math.PI) / PUDIM_HEROI_PASSOS;
+			const px = lutaX + Math.cos(ang) * d;
+			const pz = lutaZ + Math.sin(ang) * d;
+			if (exposto(px, pz)) continue;
+			// Entre os pontos seguros, o melhor é o mais LONGE da ameaça mais próxima. Isso
+			// empurra o herói para trás da própria linha sozinho, sem ninguém precisar
+			// calcular onde é a retaguarda: a retaguarda é, por definição, o lado de onde
+			// as armas inimigas estão mais distantes.
+			let folga = Infinity;
+			for (const a of ameacas) {
+				const dx = px - a.x, dz = pz - a.z;
+				const f = Math.sqrt(dx*dx + dz*dz) - a.alcance;
+				if (f < folga) folga = f;
+			}
+			if (folga === Infinity) folga = 1000;
+			// Desempate leve por proximidade da luta, para ele não vagar pela borda.
+			const score = folga - d * 0.05;
+			if (score > melhorScore) { melhorScore = score; melhor = { x: px, z: pz, d: d }; }
+		}
+		if (melhor) break;   // achou no anel mais afastado: não precisa chegar mais perto
+	}
+
+	if (!melhor) {
+		// Nenhum ponto da aura está fora do alcance inimigo. Aqui a regra do jogador manda:
+		// "pra nunca morrer" ganha da aura. Ele recua e a tropa luta sem o bônus.
+		result._dbg.reason = "aura_toda_exposta";
+		result.action = "recuar";
+		return result;
+	}
+
+	// Já está coberto e seguro: não mexe. Ordem à toa interrompe o que ele estiver fazendo
+	// e é exatamente o "passeio" que o jogador reclamou nas tropas.
+	const dLuta = Math.sqrt((heroiPos.x - lutaX) * (heroiPos.x - lutaX) +
+	                        (heroiPos.y - lutaZ) * (heroiPos.y - lutaZ));
+	if (dLuta <= alvoRaio && !exposto(heroiPos.x, heroiPos.y)) {
+		result._dbg.reason = "ja_cobre_e_seguro";
+		return result;
+	}
+
+	const dx = melhor.x - heroiPos.x, dz = melhor.z - heroiPos.y;
+	const mover = Math.sqrt(dx*dx + dz*dz);
+	result._dbg.mover = Math.round(mover);
+	if (mover < PUDIM_HEROI_MIN_MOVER) { result._dbg.reason = "ja_esta_bom"; return result; }
+
+	result.action = "posicionar";
+	result.x = melhor.x;
+	result.z = melhor.z;
+	result._dbg.reason = "ok";
+	return result;
+};
+
+
 GuiInterface.prototype.pudim_GetAutoKiteData = function(player, data)
 {
 	const result = [];
@@ -5751,6 +5956,7 @@ GuiInterface.prototype.pudim_GetDropsiteFoundationData = function(player, data)
 var pudim_exposedFunctions = {
   	"pudim_GetAllyStats": 1,
  	"pudim_GetAutoHouseData": 1,
+	"pudim_GetHeroAuraData": 1,
   	"pudim_GetScoutStatus": 1,
   	"pudim_GetAutoKiteData": 1,
   	"pudim_GetCombatEstimation": 1,

@@ -6297,12 +6297,52 @@ GuiInterface.prototype.pudim_GetDropsiteFoundationData = function(player, data)
 		allDropsites.push({ x: dp.x, z: dp.y, types: cmpDs.GetTypes() || [] });
 	}
 
-	// ── Passo 2: Dropsites concluídos (estavam em prevSet, saíram de fundação) ──
+	// ── Passo 2: obras que sairam de fundacao ──
+	//
+	// A FUNDACAO NAO VIRA O PREDIO: ELA E SUBSTITUIDA.
+	//
+	// Foundation.js chama ChangeEntityTemplate, que faz Engine.AddEntity(novoTemplate) — id
+	// NOVO — e destroi a fundacao (simulation/helpers/Transform.js). Ou seja, ao concluir, a
+	// entidade da fundacao deixa de existir.
+	//
+	// Isso torna "a entidade sumiu" ambiguo: acontece igual quando o predio fica pronto e
+	// quando o jogador apaga. O teste antigo era `if (!cmpId) continue`, que descartava os
+	// dois casos juntos — e por isso a lista de concluidas que eu adicionei ontem nunca
+	// disparava. O jogador viu o sintoma: 16 "jogador apagou" numa partida em que ele nao
+	// apagou nada, cada um ligando a pausa global de 10s, e a serie de quarteis travada.
+	//
+	// O que distingue os dois e o LUGAR. Predio pronto fica no mesmo ponto da fundacao;
+	// cancelamento nao deixa nada. Entao a pergunta certa nao e "esta entidade existe?" e
+	// sim "existe um predio meu aqui agora?".
+	//
+	// Isto conserta tambem o `completions` de dropsite, que tinha o mesmo furo desde sempre
+	// e por isso quase nunca redirecionava ninguem.
+	const prevPos = (data && data.prevFoundationPos) ? data.prevFoundationPos : {};
+	const predioAqui = function(x, z) {
+		let perto = [];
+		try {
+			perto = cmpRangeManager.ExecuteQueryAroundPos({ x: x, y: z }, 0, 4, [player], IID_Identity, false);
+		} catch (e) { return 0; }
+		for (const e of perto) {
+			if (Engine.QueryInterface(e, IID_Foundation)) continue;  // outra obra em andamento
+			const ci = Engine.QueryInterface(e, IID_Identity);
+			if (!ci || !ci.HasClass("Structure")) continue;
+			return e;
+		}
+		return 0;
+	};
+
 	for (const prevId of prevSet) {
 		if (currentFoundations.has(prevId)) continue; // ainda é fundação
-		const cmpId = Engine.QueryInterface(prevId, IID_Identity);
-		if (!cmpId) continue; // entidade destruída (cancelado)
 		if (Engine.QueryInterface(prevId, IID_Foundation)) continue; // ainda fundação?
+
+		// A fundacao sumiu. Terminou, ou foi apagada? Quem responde e o terreno.
+		const pp = prevPos[prevId];
+		const novo = pp ? predioAqui(pp.x, pp.z) : 0;
+		if (!novo) continue;   // nada ali: foi cancelamento, e o painel trata
+
+		const cmpId = Engine.QueryInterface(novo, IID_Identity);
+		if (!cmpId) continue;
 
 		// CHEGOU AQUI = A OBRA TERMINOU. A entidade existe e nao e mais fundacao; isso e
 		// conclusao, nunca cancelamento.
@@ -6321,7 +6361,7 @@ GuiInterface.prototype.pudim_GetDropsiteFoundationData = function(player, data)
 		const isStorehouse = cmpId.HasClass("Storehouse") || cmpId.HasClass("DropsiteWood");
 		const isFarmstead  = cmpId.HasClass("Farmstead")  || cmpId.HasClass("DropsiteFood");
 		if (!isStorehouse && !isFarmstead) continue;
-		const cmpPos = Engine.QueryInterface(prevId, IID_Position);
+		const cmpPos = Engine.QueryInterface(novo, IID_Position);
 		if (!cmpPos || !cmpPos.IsInWorld()) continue;
 		const p = cmpPos.GetPosition2D();
 		const resourceType = isStorehouse ? "wood" : "food";

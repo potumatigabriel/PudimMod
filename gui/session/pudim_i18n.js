@@ -278,7 +278,10 @@ const PUDIM_CAPTION_MAP = {
 	// "Property 'caption' does not exist!" na tela do jogador a CADA QUADRO, porque este
 	// aplicador roda no laco de atualizacao. O texto ficava num objeto sem nome; agora ele
 	// tem nome, que e o que permite traduzi-lo.
-	"pudim_combatHeader":       "cap.combatHeader",
+	// pudim_combatHeader NAO entra aqui. Ele virou BOTAO, e o texto dele vem do rotulo filho
+	// (pudim_combatHeaderLabel) — escrever caption no botao desenha um SEGUNDO texto por cima
+	// do primeiro, que foi o "Estimador de Estimador de Combate" que apareceu na tela.
+	// Quem escreve esse rotulo e pudim_AplicarCombatBox, que precisa por a seta junto.
 	"pudim_combatRefreshBtn":   "cap.combatRefresh",
 	"pudim_autoWorkHeader":     "cap.autoWorkHeader",
 	"pudim_autoWorkDesc":       "cap.autoWorkDesc",

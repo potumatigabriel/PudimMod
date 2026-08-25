@@ -157,8 +157,12 @@ check("o mod realmente envia comandos (o teste acima nao passou por vazio)",
 // cliente so nao diverge nada.
 //
 // Este teste PEGOU as duas quando elas apareceram, que e exatamente o que se espera dele.
+// AreRequirementsMet entrou em 25/08, com o filtro de unidades treinaveis. Conferido em
+// GuiInterface.js: o corpo inteiro e um `return RequirementsHelper.AreRequirementsMet(...)`.
+// Le e devolve, nao escreve nada. E o que a propria interface do jogo usa para cinzar botao
+// de treino (gui/session/selection_panels.js).
 const SEGUROS = new Set(["GetNeededResources", "SetBuildingPlacementPreview",
-	"SetWallPlacementPreview"]);
+	"SetWallPlacementPreview", "AreRequirementsMet"]);
 const chamadas = new Set();
 for (const f of guiFiles) {
 	const src = semComentarios(fs.readFileSync(f, "utf8"));

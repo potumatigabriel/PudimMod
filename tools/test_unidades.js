@@ -56,6 +56,30 @@ check("a FILA continua vindo de ProductionQueue — a divisao e essa",
 	/const cmpPQ = Engine\.QueryInterface\(ent, IID_ProductionQueue\);[\s\S]{0,120}?cmpPQ\.GetQueue\(\)/.test(sim));
 check("e o centro civico entra junto, como o jogador pediu",
 	/O CENTRO CIVICO entra por aqui/.test(sim));
+
+// SÓ O QUE DÁ PARA TREINAR AGORA. Trainer.GetEntitiesList devolve TUDO que o edifício pode
+// treinar algum dia: CalculateEntitiesMap só trata substituição de civ e templates
+// desabilitados, não fase nem tecnologia. Quem cinza o botão na interface do jogo é
+// AreRequirementsMet, e era ela que faltava — o jogador via campeão na lista aos cinco
+// minutos e ajustava uma proporção que não ia sair.
+check("a lista é filtrada por requisito atendido",
+	/Engine\.GuiInterfaceCall\("AreRequirementsMet",/.test(panel));
+check("usando template.requirements, como a interface do jogo faz",
+	/"requirements": td\.requirements, "player": jogador/.test(panel));
+check("e na dúvida MOSTRA — esconder demais é pior que mostrar demais",
+	/catch \(e\) \{ return true; \}/.test(panel));
+check("AreRequirementsMet foi auditada no teste de multiplayer",
+	fs.readFileSync(path.join(base, "tools", "test_mp_safety.js"), "utf8")
+		.indexOf('"AreRequirementsMet"') > 0);
+
+// NOME TRADUZIDO E SEM AMBIGUIDADE. Eu lia Identity.GenericName do template CRU, que é o
+// texto-fonte em inglês; e nomes genéricos SE REPETEM de propósito no 0 A.D. (várias
+// unidades romanas se chamam "Plebeu"), então duas linhas iguais apareciam na tela.
+check("o nome vem de GetTemplateData, que é traduzido",
+	/const td = GetTemplateData\(u\.tpl\);/.test(panel) &&
+	/td\.name\.generic/.test(panel));
+check("e o específico entra quando o genérico se repete",
+	/nomes\[u\.nomeGenerico\] > 1 && u\.nomeEspecifico/.test(panel));
 check("fundação não conta — ela ainda não treina nada",
 	/if \(Engine\.QueryInterface\(ent, IID_Foundation\)\) continue;[\s\S]{0,120}?_dbg\.edificios/.test(sim));
 check("o que já está na fila conta como 'vai existir'",

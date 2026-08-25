@@ -2448,6 +2448,10 @@ function pudim_ProcessDropsiteFoundations()
 		const prevIds = Object.keys(g_PudimDropsiteFoundations).map(Number);
 		const data = Engine.GuiInterfaceCall("pudim_GetDropsiteFoundationData", {
 			prevFoundationIds: prevIds,
+			// A simulacao precisa das POSICOES para distinguir obra concluida de obra
+			// apagada: a fundacao e SUBSTITUIDA por uma entidade nova ao terminar, entao o
+			// id sozinho nao diz nada. Ver o comentario no Passo 2 daquela funcao.
+			prevFoundationPos: g_PudimDropsiteFoundationPos,
 			modBuiltPositions: g_PudimModBuiltPositions,
 			protectedIds: pudim_GetProtectedBuilderIds(),
 			// separado de protectedIds: estes são liberados assim que ficarem ociosos
@@ -4439,12 +4443,71 @@ function pudim_AtualizarUnidades()
 
 	// Cabem sete linhas. Com mais tipos disponíveis, os que o jogador já pesou vêm primeiro
 	// — esconder justamente o que ele configurou seria o pior corte possível.
-	const lista = d.unidades.slice();
+	let lista = d.unidades.slice();
 	lista.sort(function(a, b) {
 		const pa = g_PudimUnitPesos[a.tpl] || 0, pb = g_PudimUnitPesos[b.tpl] || 0;
 		if (pa !== pb) return pb - pa;
 		return a.tpl < b.tpl ? -1 : (a.tpl > b.tpl ? 1 : 0);
 	});
+	// NOME TRADUZIDO, E SEM AMBIGUIDADE.
+	//
+	// Dois problemas que o jogador viu na mesma tela: "os nomes das unidades esta em ingles"
+	// e "Plebeian esta 2x".
+	//
+	// O primeiro: eu lia Identity.GenericName do template CRU, que e o texto-fonte em
+	// ingles. GetTemplateData devolve o nome ja traduzido — e o proprio mod ja usava esse
+	// caminho em outro lugar, no aviso de "sem recursos para repetir a construcao".
+	//
+	// O segundo: nomes genericos SE REPETEM de proposito no 0 A.D. Varias unidades romanas
+	// se chamam "Plebeu"; o que as distingue e o nome especifico. Entao quando o generico
+	// aparece mais de uma vez, o especifico entra junto — mostrar duas linhas identicas e
+	// pior do que nao mostrar nada, porque o jogador clica numa achando que e a outra.
+	// SÓ O QUE DÁ PARA TREINAR AGORA.
+	//
+	// Relato do jogador, com apenas um centro cívico: "está mostrando unidades que ainda não
+	// podemos construir". Ele tem razão, e a causa está no motor: Trainer.GetEntitiesList()
+	// devolve TUDO que o edifício pode treinar algum dia — CalculateEntitiesMap só trata
+	// substituição de civ e templates desabilitados, não fase nem tecnologia. Quem cinza os
+	// botões na interface do jogo é outra checagem, AreRequirementsMet, e é ela que falta
+	// aqui (gui/session/selection_panels.js usa exatamente assim).
+	//
+	// Sem esse filtro o jogador vê campeão na lista aos cinco minutos e ajusta uma proporção
+	// que não vai sair.
+	const jogador = Engine.GetPlayerID();
+	const disponivel = function(tpl) {
+		try {
+			const td = GetTemplateData(tpl);
+			if (!td) return false;
+			if (!td.requirements) return true;
+			return !!Engine.GuiInterfaceCall("AreRequirementsMet",
+				{ "requirements": td.requirements, "player": jogador });
+		} catch (e) { return true; }   // na dúvida, mostra: esconder demais é pior
+	};
+	const antes = lista.length;
+	lista = lista.filter(u => disponivel(u.tpl));
+	if (g_PudimShowDebug && antes !== lista.length)
+		pudim_Log("DEBUG", "UNIDADES", (antes - lista.length) + " tipo(s) fora por requisito");
+
+	// NOME TRADUZIDO, E SEM AMBIGUIDADE. Ver o comentário abaixo.
+	const nomes = {};
+	for (const u of lista) {
+		let g = u.nome, e = "";
+		try {
+			const td = GetTemplateData(u.tpl);
+			if (td && td.name) {
+				if (td.name.generic) g = td.name.generic;
+				if (td.name.specific) e = td.name.specific;
+			}
+		} catch (err) {}
+		u.nomeGenerico = g;
+		u.nomeEspecifico = e;
+		nomes[g] = (nomes[g] || 0) + 1;
+	}
+	for (const u of lista)
+		u.nome = (nomes[u.nomeGenerico] > 1 && u.nomeEspecifico && u.nomeEspecifico !== u.nomeGenerico)
+			? u.nomeGenerico + " (" + u.nomeEspecifico + ")"
+			: u.nomeGenerico;
+
 	g_PudimUnitLista = lista.slice(0, PUDIM_UNIT_LINHAS);
 	g_PudimUnitTodas = lista;
 	pudim_DesenharUnidades();

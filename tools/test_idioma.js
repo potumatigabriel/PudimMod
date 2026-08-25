@@ -110,9 +110,22 @@ check("o lado inglês não tem acento português",
 // ── Nada de texto fixo escapando no painel ─────────────────────────────────────────────
 // O caso concreto: os nomes de Quartel/Estábulo eram literais e apareceriam em português
 // num jogo em inglês, mesmo com todo o resto traduzido.
-check("os nomes de Quartel/Estábulo saem do dicionário",
+// Os cinco tipos da série saem do dicionário. Eram literais em JS e apareceriam em
+// português num jogo em inglês mesmo com todo o resto traduzido.
+check("os nomes dos edifícios da série saem do dicionário",
 	/function pudim_QuartelNome\(tipo\)/.test(panel) &&
-	/pudim_T\(tipo === "estabulo" \? "cap\.stable" : "cap\.barracks"\)/.test(panel));
+	/pudim_T\(PUDIM_QUARTEL_CHAVES\[tipo\] \|\| "cap\.barracks"\)/.test(panel));
+check("todo tipo da série tem chave, e toda chave existe no dicionário", (function() {
+	const tipos = /const PUDIM_QUARTEL_TIPOS = \[([^\]]*)\]/.exec(panel)[1]
+		.split(",").map(s => s.trim().replace(/"/g, "")).filter(Boolean);
+	const mapa = /const PUDIM_QUARTEL_CHAVES = \{([\s\S]*?)\};/.exec(panel)[1];
+	return tipos.every(t => {
+		// Escape dobrado de propósito: isto é uma STRING que vira regex, então "\\s" na
+		// string produz "\s" no padrão. Com "\s" direto, o literal vira só "s".
+		const m = new RegExp(t + ':\\s*"(cap\\.[a-z]+)"').exec(mapa);
+		return m && i18n.indexOf('"' + m[1] + '":') >= 0;
+	});
+})());
 check("e o botão da série monta o texto com pudim_T",
 	/pudim_T\("cap\.serieStop"\)/.test(panel) && /pudim_T\("cap\.serieBuild"\)/.test(panel));
 

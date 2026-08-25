@@ -1689,6 +1689,26 @@ var g_PudimFemaleCapLogged = false;
 /** Acumulador de tempo para verificar construção de fazendas */
 var g_PudimFarmAccum = 0;
 
+/**
+ * Fazenda em atraso: falta comida e o mod ainda não conseguiu erguer os campos.
+ *
+ * Pedido de 25/08: "quando acaba as frutas demora pra fazer todas as fazendas, tem sempre
+ * que respeitar a proporção... isso é prioridade máxima, a segunda prioridade é construir
+ * unidades".
+ *
+ * Duas consequências, e a segunda é a que não é óbvia:
+ *   1. o ciclo de fazendas acelera de 5s para 1,5s enquanto o atraso durar;
+ *   2. a auto-fila para de gastar a madeira que os campos precisam.
+ *
+ * Sem a (2) a (1) não adianta: o mod construiria mais rápido e a auto-fila comeria o
+ * estoque antes, e o campo continuaria não saindo. As duas prioridades brigam pelo MESMO
+ * recurso, e é por isso que o jogador precisou dizer qual vem primeiro.
+ */
+var g_PudimFarmUrgente = false;
+
+/** Madeira que os campos pendentes vão consumir. A auto-fila desconta isto do estoque. */
+var g_PudimMadeiraReservada = 0;
+
 /** Acumulador de tempo para pesquisa automática de tecnologias */
 var g_PudimResearchAccum = 0;
 
@@ -1946,7 +1966,12 @@ function pudim_Tick(dt)
 	// 5s para pegar novos workers logo após nascerem; guard interno evita spam de construção.
 	if (g_PudimAdvancedAIEnabled["dropsites"]) {
 		g_PudimFarmAccum += dt;
-		if (g_PudimFarmAccum >= 5000)
+		// 5s quando esta tudo em ordem; 1,5s enquanto falta comida.
+		//
+		// "isso e prioridade maxima" — pedido do jogador. Com a fruta esgotada, cada ciclo
+		// perdido e capacidade de comida que nao sobe, enquanto o auto-trabalho (500ms)
+		// segue mandando gente para a madeira por falta de vaga em comida.
+		if (g_PudimFarmAccum >= (g_PudimFarmUrgente ? 1500 : 5000))
 		{
 			g_PudimFarmAccum = 0;
 			pudim_ProcessFarms();
@@ -2007,7 +2032,19 @@ function pudim_ProcessAutoQueue()
 		const buildings = aqData.buildings;
 		const femaleCount = aqData.femaleCount || 0;
 		const atFemaleCap = femaleCount >= 50;
-		const res = aqData.resources || {};
+		// SEGUNDA PRIORIDADE. A madeira que os campos pendentes vão consumir sai da conta
+		// antes de a auto-fila decidir se pode pagar uma unidade. Sem isso as duas
+		// prioridades disputam o mesmo estoque e a que roda mais vezes por segundo ganha —
+		// que é a auto-fila, não a fazenda.
+		const resBruto = aqData.resources || {};
+		const res = {};
+		for (const k in resBruto) res[k] = resBruto[k];
+		if (g_PudimMadeiraReservada > 0) {
+			res.wood = Math.max(0, (+res.wood || 0) - g_PudimMadeiraReservada);
+			if (g_PudimShowDebug && res.wood === 0)
+				pudim_Log("DEBUG", "QUEUE", "treino em espera: " + g_PudimMadeiraReservada +
+					" de madeira reservados para campos de comida");
+		}
 		// No teto de população o motor recusa ligar a auto-fila e imprime
 		// "Não foi possível definir auto-fila para a unidade, desativando" em cima da tela.
 		// Insistir a cada 3s só produz spam: a fila volta sozinha quando abrir vaga.
@@ -2504,6 +2541,16 @@ function pudim_ProcessFarms()
 			pudim_Log("INFO", "FARM", "soldado " + ev.soldierId + " → madeira (vaga p/ aldeão na fazenda " + ev.farmId + ")");
 		}
 
+		// Atraso de comida: quantos trabalhadores a cota pede a mais do que existe.
+		// edf é o déficit já descontado de quem está nascendo — se ele é positivo, há campo
+		// para erguer e a comida está atrás da proporção.
+		const atraso = (farmData._dbg && farmData._dbg.edf) || 0;
+		g_PudimFarmUrgente = atraso > 0;
+		// Cada campo comporta 5 e custa 100 de madeira. Reservar só o que ainda falta erguer
+		// evita a auto-fila gastar o estoque antes do campo.
+		g_PudimMadeiraReservada = g_PudimFarmUrgente
+			? Math.ceil(atraso / 5) * 100 : 0;
+
 		if (farmData.action === "none") return;
 
 		// ── Fazenda existente tem espaço: enviar worker para colher lá ───────────────────
@@ -2562,6 +2609,14 @@ function pudim_ProcessFarms()
 				break; // Sem mais posições válidas
 			}
 
+			// A madeira e o unico limite, e ela e conferida a cada campo: o estoque cai
+			// 100 por fundacao colocada, e colocar mais do que o estoque paga so faria o
+			// motor recusar em silencio.
+			if (farmsBuilt >= (farmData.camposPagaveis || 0)) {
+				pudim_Log("INFO", "FARM", "parou em " + farmsBuilt +
+					" campo(s): madeira acabou — o resto sai assim que tiver");
+				break;
+			}
 			Engine.PostNetworkCommand({
 				"type": "construct",
 				"entities": group,
@@ -3739,11 +3794,18 @@ function pudim_ProcessHeroAura()
 //
 // E por que a exceção dele é certa: perto do teto de população o gargalo deixa de ser
 // recurso e passa a ser quantos lugares treinam ao mesmo tempo. Aí paralelo ganha.
-const PUDIM_QUARTEL_TIPOS = ["quartel", "estabulo"];
+const PUDIM_QUARTEL_TIPOS = ["quartel", "estabulo", "casa", "forja", "torre"];
 // Os nomes saem do dicionário, não de literais: o dropdown e o botão têm de falar a
 // mesma língua do resto do painel.
+const PUDIM_QUARTEL_CHAVES = {
+	quartel:  "cap.barracks",
+	estabulo: "cap.stable",
+	casa:     "cap.house",
+	forja:    "cap.forge",
+	torre:    "cap.tower"
+};
 function pudim_QuartelNome(tipo) {
-	return pudim_T(tipo === "estabulo" ? "cap.stable" : "cap.barracks");
+	return pudim_T(PUDIM_QUARTEL_CHAVES[tipo] || "cap.barracks");
 }
 const PUDIM_QUARTEL_INTERVALO = 2500;   // entre tentativas; obra é lenta, não precisa correr
 const PUDIM_QUARTEL_MAX_PARALELO = 3;   // teto do regime paralelo, para não virar spam

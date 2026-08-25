@@ -2397,7 +2397,7 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 // ─── Fazendas ────────────────────────────────────────────────────
 GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 {
-	const result = { "action": "none", "builderId": null, "template": null, "candidatePositions": [], "workersToRedirect": [], "ccX": 0, "ccZ": 0, "soldierEvictions": [], "_dbg": { "fc": 0, "nfc": 0, "fbc": 0, "tg": 0, "cfm": 0, "df": 0, "wp": 0, "fwc": 0, "fmc": 0, "ocio": 0, "reason": "init" } };
+	const result = { "action": "none", "builderId": null, "template": null, "candidatePositions": [], "workersToRedirect": [], "ccX": 0, "ccZ": 0, "soldierEvictions": [], "_dbg": { "fc": 0, "nfc": 0, "fbc": 0, "tg": 0, "cfm": 0, "df": 0, "wp": 0, "fwc": 0, "fmc": 0, "ocio": 0, "pag": 0, "reason": "init" } };
 	
 	const cmpPlayerManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_PlayerManager);
 	const playerEnt = cmpPlayerManager.GetPlayerByID(player);
@@ -2456,7 +2456,13 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	if (farmCount >= PUDIM_MAX_FARMS || ccPositions.length === 0) { result._dbg.reason = "limit"; return result; }
 
 	const resCounts = cmpPlayer.GetResourceCounts();
-	const hasWoodForFarm = resCounts.wood >= 100;
+	// 100 de madeira e o custo de um campo, conferido em
+	// simulation/templates/template_structure_resource_field.xml: <wood>100</wood>.
+	const PUDIM_CUSTO_CAMPO = 100;
+	const hasWoodForFarm = resCounts.wood >= PUDIM_CUSTO_CAMPO;
+	// Quantos campos o estoque paga AGORA. Vai para o painel, que corta a lista por ele —
+	// "so nao fazer se nao tiver madeira disponivel, mas assim que tiver faz".
+	result.camposPagaveis = Math.floor(resCounts.wood / PUDIM_CUSTO_CAMPO);
 	if (!hasWoodForFarm) { result._dbg.reason = "nowood"; return result; }
 
 	// Freio por ESTOQUE: a proporção de coleta distribui por peso, não por necessidade, e
@@ -2748,7 +2754,23 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 		// que é exatamente o "cada fazenda comporta 5 trabalhadores". O desconto por
 		// trainingCount continua valendo, então a regra de esperar quem está nascendo é
 		// preservada — o que muda é o teto quando NÃO há ninguém nascendo.
-		effDeficit = Math.min(deficit - trainingCount, PUDIM_FIELD_CAPACITY);
+		// O TETO DE UM CAMPO POR CICLO SAIU. Ele era o gargalo que o jogador descreveu:
+		// "quando acaba as frutas demora pra fazer todas as fazendas".
+		//
+		// Com a fruta esgotada, a capacidade de comida é SÓ fazenda. Um campo por ciclo de
+		// 5s, com 50s de construção cada, significa que voltar de 10 para 25 trabalhadores
+		// em comida levava minutos — e nesse tempo o auto-trabalho, que roda a cada 500ms,
+		// despejava todo mundo na madeira porque comida não tinha vaga. Foi assim que a
+		// partida chegou a 47 em comida contra 131 em madeira, com a cota mandando 3/4.
+		//
+		// O teto existia para não construir demais, mas os freios de verdade já são outros
+		// e continuam: PUDIM_MAX_FARMS (9 campos), o freio por estoque de comida, e o
+		// desconto de quem está nascendo (trainingCount). Nenhum deles depende deste.
+		//
+		// Quem limita agora é a MADEIRA, que é exatamente o que o jogador pediu: "só não
+		// fazer se não tiver madeira disponível, mas assim que tiver faz". O painel corta a
+		// lista pelo que o estoque paga.
+		effDeficit = deficit - trainingCount;
 	}
 	result._dbg.edf = effDeficit;
 
@@ -3262,8 +3284,25 @@ GuiInterface.prototype.pudim_GetBarracksBuildData = function(player, data)
 	const cmpTerritoryManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_TerritoryManager);
 	if (!cmpRangeManager) { result._dbg.reason = "no_rangemanager"; return result; }
 
+	// Nomes conferidos em simulation/templates/structures/ da instalacao: barracks, stable,
+	// house, forge e defense_tower existem em todas as 15 civilizacoes. Nao sao chutes.
+	//
+	// O nome do template e comparado por IGUALDADE no fim do caminho, nao por "contem": a
+	// civilizacao tem storehouse, warehouse, lighthouse e ice_house, e um indexOf("house")
+	// pegaria o primeiro da lista em vez da casa.
+	const PUDIM_SERIE = {
+		"quartel":  { classe: "Barracks", tpl: "barracks",      anel: false },
+		"estabulo": { classe: "Stable",   tpl: "stable",        anel: false },
+		"casa":     { classe: "House",    tpl: "house",         anel: false },
+		"forja":    { classe: "Forge",    tpl: "forge",         anel: false },
+		// Torre em ANEL: o pedido foi "as torres circulando o centro civico, pra proteger a
+		// base". Um anel cobre as aproximacoes por igual; a espiral normal agruparia as
+		// primeiras todas de um lado, deixando o resto da base descoberto ate a ultima.
+		"torre":    { classe: "Tower",    tpl: "defense_tower", anel: true }
+	};
 	const tipo = (data && data.tipo) || "quartel";
-	const classe = tipo === "estabulo" ? "Stable" : "Barracks";
+	const spec = PUDIM_SERIE[tipo] || PUDIM_SERIE["quartel"];
+	const classe = spec.classe;
 	const ordenados = (data && data.playerOrdered) ? data.playerOrdered : {};
 	const allEnts = cmpRangeManager.GetEntitiesByPlayer(player);
 
@@ -3296,7 +3335,7 @@ GuiInterface.prototype.pudim_GetBarracksBuildData = function(player, data)
 	// de nomes no código. Estábulo não existe em toda civ — quando não existe, o painel
 	// recebe template vazio e avisa em vez de tentar e falhar em silêncio.
 	let template = "";
-	const marcador = tipo === "estabulo" ? "stable" : "barracks";
+	const marcador = spec.tpl;
 
 	// ── Quem constrói: os 5 mais próximos, do recurso mais abundante ─────────────────
 	// "Do recurso mais abundante" é o pedido, e a razão é boa: tirar gente de onde já
@@ -3314,8 +3353,12 @@ GuiInterface.prototype.pudim_GetBarracksBuildData = function(player, data)
 
 		if (!template) {
 			const lista = cmpBuilder.GetEntitiesList ? cmpBuilder.GetEntitiesList() : [];
-			for (const tpl of lista)
-				if (tpl.indexOf(marcador) !== -1) { template = tpl; break; }
+			for (const tpl of lista) {
+				// Igualdade no ULTIMO segmento: "structures/gaul/house" casa com "house",
+				// mas "structures/gaul/storehouse" nao. Com indexOf, casaria.
+				const base = tpl.substr(tpl.lastIndexOf("/") + 1);
+				if (base === marcador) { template = tpl; break; }
+			}
 		}
 
 		const cmpAI = Engine.QueryInterface(ent, IID_UnitAI);
@@ -3386,6 +3429,40 @@ GuiInterface.prototype.pudim_GetBarracksBuildData = function(player, data)
 			candidatos.push({ x: cx, z: cz });
 		}
 	}
+	// TORRE EM ANEL: reordena os candidatos para que cada torre nova va para o setor MENOS
+	// coberto pelas que ja existem. Sem isso a espiral entrega as primeiras posicoes todas
+	// juntas, e um anel de 6 torres sairia como um arco de 6 num lado so.
+	if (spec.anel) {
+		const jaTem = [];
+		for (const ent of allEnts) {
+			const cid = Engine.QueryInterface(ent, IID_Identity);
+			if (!cid || !cid.HasClass(classe)) continue;
+			const pp = Engine.QueryInterface(ent, IID_Position);
+			if (!pp || !pp.IsInWorld()) continue;
+			const q = pp.GetPosition2D();
+			jaTem.push(Math.atan2(q.y - ccZ, q.x - ccX));
+		}
+		const separacao = function(c) {
+			const a = Math.atan2(c.z - ccZ, c.x - ccX);
+			let pior = Math.PI;
+			for (const b of jaTem) {
+				let d = Math.abs(a - b);
+				if (d > Math.PI) d = 2 * Math.PI - d;
+				if (d < pior) pior = d;
+			}
+			return pior;   // sem torre nenhuma, todos empatam em PI e a ordem original vale
+		};
+		// Anel de raio parecido: torre serve para cobrir a borda, nao para encher o centro.
+		const raioTorre = (PUDIM_QUARTEL_RAIO_MIN + PUDIM_QUARTEL_RAIO_MAX) / 2;
+        candidatos.sort(function(a, b) {
+			const sa = separacao(a), sb = separacao(b);
+			if (Math.abs(sa - sb) > 0.15) return sb - sa;   // mais longe das existentes
+			const ra = Math.abs(Math.sqrt((a.x-ccX)*(a.x-ccX) + (a.z-ccZ)*(a.z-ccZ)) - raioTorre);
+			const rb = Math.abs(Math.sqrt((b.x-ccX)*(b.x-ccX) + (b.z-ccZ)*(b.z-ccZ)) - raioTorre);
+			return ra - rb;                                 // e mais perto do raio do anel
+		});
+	}
+
 	result.candidatePositions = candidatos;
 	result._dbg.reason = "ok";
 	result._dbg.cands = candidatos.length;

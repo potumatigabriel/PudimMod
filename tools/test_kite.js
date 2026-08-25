@@ -108,6 +108,30 @@ check("o cooldown do kite subiu de 3s para 6s",
 check("animal e barco de pesca nao contam como ameaca",
 	/cmpId\.HasClass\("Animal"\) \|\| cmpId\.HasClass\("FishingBoat"\)/.test(SIM));
 
+// ── 5. Recua E ataca: o ciclo tem de se fechar ────────────────────────────────────────
+// "tem que manter distancia segura, mas atacando tambem, retrai e ataca, retrai e ataca."
+// O recuo so serve se a unidade voltar a atirar ao chegar; senao vira fuga.
+check("o ataque e enfileirado DEPOIS do recuo, nao no lugar dele",
+	/"type": "attack",[\s\S]{0,140}"queued": true/.test(PANEL));
+check("o recuo em si nao e enfileirado (cancela o que estava fazendo e ja sai)",
+	/"type": "walk",[\s\S]{0,140}"queued": false/.test(PANEL));
+check("o alvo do ataque e a propria ameaca da qual recuou",
+	/"enemyTarget": pior\.id/.test(SIM));
+
+// O destino tem de deixar a unidade DENTRO do proprio alcance, senao ela chega e nao
+// alcanca ninguem — recuaria de novo no ciclo seguinte sem nunca atirar.
+for (const caso of [["arqueiro", 60, LANCEIRO], ["fundeiro", 45, ESPADACHIM],
+                    ["dardeiro", 30, LANCEIRO], ["arqueiro", 60, FUNDEIRO]]) {
+	const nome = caso[0], alc = caso[1], ameaca = caso[2];
+	const destino = kite(alc, ameaca, gatilho(ameaca) - 1);
+	check(nome + " para dentro do proprio alcance (atira ao chegar)",
+		destino !== null && destino < alc, destino + " < " + alc);
+}
+// E fora do alcance de quem o perseguia — as duas coisas ao mesmo tempo.
+const destFundeiro = kite(60, FUNDEIRO, 40);
+check("arqueiro fica fora do alcance do fundeiro e dentro do seu",
+	destFundeiro > FUNDEIRO.alcance && destFundeiro < 60, destFundeiro);
+
 console.log("\ncombatente nao trabalha durante batalha");
 
 check("existe a guarda de batalha no auto-trabalho",

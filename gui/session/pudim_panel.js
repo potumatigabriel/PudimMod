@@ -136,6 +136,7 @@ const PUDIM_LOG_LEVEL_COLORS = {
 };
 const PUDIM_LOG_CAT_COLORS = {
 	"CASAS":  "255 230 100", "DROP":   "100 230 255", "FARM":  "140 255 150",
+	"OBRA":   "255 180 120",
 	"HEROI":  "255 200 255",
 	"SCOUT":  "210 160 255", "GAR":    "255 170 100", "FOCUS": "255 120 130",
 	"BARTER": "220 205 130", "PANIC":  "255 100 80",  "WORK":  "180 245 210",
@@ -357,13 +358,40 @@ function pudim_MarkModBuilt(x, z) {
  * Permanente na sessão: cancelar é decisão explícita do jogador.
  */
 var g_PudimCancelledPositions = [];
+
+/**
+ * Depois que o jogador apaga uma obra do mod, NENHUMA obra nova sai por 10 segundos.
+ *
+ * Pedido de 25/08: "quando tenta fazer alguma construcao, se eu deleto, espera 10s antes de
+ * tentar novamente, e antes de fazer, verifique se ainda precisa".
+ *
+ * A quarentena por posicao sozinha nao resolve o que ele descreve. Ela impede refazer NO
+ * MESMO PONTO, mas o mod continua livre para pousar a 45m dali no ciclo seguinte — e
+ * enquanto ele repoe a cada poucos segundos, o jogador nao consegue nem chegar a escolher o
+ * lugar bom. Apagar e um sinal de "para", nao so de "ali nao".
+ *
+ * Dez segundos e o numero que ele pediu, e e o certo: da tempo de posicionar a construcao a
+ * mao sem parar o mod por tempo demais. E ao voltar, cada sistema refaz a propria conta de
+ * necessidade — se o jogador ja construiu no lugar melhor, o mod simplesmente nao precisa
+ * mais, e nao constroi.
+ */
+const PUDIM_PAUSA_APOS_APAGAR = 10000;
+var g_PudimObrasPausadasAte = 0;
+
+function pudim_ObrasPausadas() {
+	return Date.now() < g_PudimObrasPausadasAte;
+}
+
 function pudim_MarkCancelled(x, z) {
+	g_PudimObrasPausadasAte = Date.now() + PUDIM_PAUSA_APOS_APAGAR;
 	for (const p of g_PudimCancelledPositions) {
 		const dx = p.x - x, dz = p.z - z;
 		if (dx*dx + dz*dz <= 12*12) return; // já registrado
 	}
 	g_PudimCancelledPositions.push({ x: x, z: z });
-	pudim_Log("INFO", "DROP", "construção cancelada pelo jogador em (" + x.toFixed(0) + "," + z.toFixed(0) + ") — não será refeita ali");
+	pudim_Log("INFO", "DROP", "construção cancelada pelo jogador em (" + x.toFixed(0) + "," +
+		z.toFixed(0) + ") — não será refeita ali, e nenhuma obra nova por " +
+		(PUDIM_PAUSA_APOS_APAGAR / 1000) + "s");
 }
 /**
  * Pontos onde uma fundação DECAIU sem nenhum construtor encostar. Diferente de
@@ -1631,6 +1659,26 @@ var g_PudimQueueNoTplLogged = {};
 var g_PudimAutoQueueManagedByMod = new Set();
 /** Edifícios que o usuário desativou manualmente — Pudim não reativa */
 var g_PudimAutoQueueUserDisabled = new Set();
+
+/**
+ * Quando cada edifício teve a auto-fila desligada. { ent: [timestamps recentes] }
+ *
+ * Relato de 25/08: "no quartel nao consigo desabilitar o treinamento automatico das
+ * unidades, quando coloco, o mod habilita novamente".
+ *
+ * O mod tentava adivinhar QUEM desligou olhando se havia recursos naquele instante: com
+ * recursos, foi o jogador; sem recursos, foi o motor (que desliga sozinho quando não dá para
+ * pagar). A heurística é razoável e mesmo assim perde — o estoque oscila o tempo todo, e o
+ * jogador que desliga num vale de recursos é lido como o motor e tem a fila religada.
+ *
+ * Adivinhar quem clicou é impossível: o comando chega igual dos dois. Mas não é preciso
+ * adivinhar. O motor desliga UMA vez e volta a funcionar quando há recurso; o jogador que
+ * quer a fila desligada desliga DE NOVO. Duas desativações na mesma janela são intenção,
+ * não coincidência — e aí a decisão é dele, sem mais discussão.
+ */
+var g_PudimQueueOffAt = {};
+const PUDIM_QUEUE_OFF_JANELA = 30000;   // duas desativações aqui dentro = decisão do jogador
+const PUDIM_QUEUE_ESPERA_RELIGAR = 10000; // e o mod nunca religa antes disto
 /** Flag para logar uma vez quando o limite de 50 mulheres for atingido */
 var g_PudimFemaleCapLogged = false;
 
@@ -2002,6 +2050,10 @@ function pudim_ProcessAutoQueue()
 					const tplCheck = g_PudimPlayerQueueTpl[b.ent] || g_PudimAutoQueueTemplates[b.ent];
 					const podePagar = tplCheck ? pudim_ComputeAffordableCount(tplCheck, 1, res) >= 1 : true;
 					if (popCheio || !podePagar) continue;
+					// Nunca religa logo depois de ter sido desligado: dá tempo de o jogador
+					// desligar de novo e o mod entender que é decisão dele.
+					const ultimoOff = (g_PudimQueueOffAt[b.ent] || []).slice(-1)[0] || 0;
+					if (Date.now() - ultimoOff < PUDIM_QUEUE_ESPERA_RELIGAR) continue;
 					toEnable.push(b.ent);
 					g_PudimAutoQueueManagedByMod.add(b.ent);
 					g_PudimAutoQueueUserDisabled.delete(b.ent);
@@ -2009,13 +2061,30 @@ function pudim_ProcessAutoQueue()
 					// Pudim tinha ativado, agora está off. Só é o USUÁRIO se havia recursos
 					// suficientes pro template — senão é o bug nativo do motor (falta de
 					// recursos/limite de treino) desligando sozinho: reativa sem penalizar.
-					const cachedTpl = g_PudimAutoQueueTemplates[b.ent];
-					const affordableNow = cachedTpl ? pudim_ComputeAffordableCount(cachedTpl, 1, res) : 1;
-					if (affordableNow < 1) {
-						toEnable.push(b.ent);
-					} else {
+					const agoraQ = Date.now();
+					const historico = (g_PudimQueueOffAt[b.ent] || [])
+						.filter(t => agoraQ - t < PUDIM_QUEUE_OFF_JANELA);
+					historico.push(agoraQ);
+					g_PudimQueueOffAt[b.ent] = historico;
+
+					if (historico.length >= 2) {
+						// Desligou de novo dentro da janela: é decisão, não escassez.
 						g_PudimAutoQueueUserDisabled.add(b.ent);
-						pudim_Log("INFO", "QUEUE", "edifício " + b.ent + " desativado pelo usuário");
+						pudim_Log("INFO", "QUEUE", "edifício " + b.ent +
+							" desativado pelo usuário (2ª vez em " +
+							(PUDIM_QUEUE_OFF_JANELA / 1000) + "s) — o mod não religa mais");
+					} else {
+						const cachedTpl = g_PudimAutoQueueTemplates[b.ent];
+						const affordableNow = cachedTpl ? pudim_ComputeAffordableCount(cachedTpl, 1, res) : 1;
+						if (affordableNow >= 1) {
+							// Havia recurso: o motor não tinha motivo para desligar, então foi
+							// o jogador. Isto sozinho já resolve o caso comum, na primeira vez.
+							g_PudimAutoQueueUserDisabled.add(b.ent);
+							pudim_Log("INFO", "QUEUE", "edifício " + b.ent + " desativado pelo usuário");
+						}
+						// Sem recurso: provavelmente foi o motor. Mesmo assim NÃO religa agora —
+						// religar no mesmo tique é o que atropelava o clique do jogador. Espera,
+						// e se ele desligar de novo nesse meio-tempo, o ramo acima decide.
 					}
 				} else if (!g_PudimAutoQueueManagedByMod.has(b.ent) && !g_PudimAutoQueueUserDisabled.has(b.ent)) {
 					// Novo edifício nunca gerenciado
@@ -2310,8 +2379,11 @@ function pudim_ProcessDropsiteFoundations()
 			if (stillFoundation.has(idNum) || completedIds.has(idNum)) continue;
 			const pos = g_PudimDropsiteFoundationPos[idNum];
 			if (pos) {
-				if ((g_PudimFoundationProgress[idNum] || 0) > 0)
+				if ((g_PudimFoundationProgress[idNum] || 0) > 0) {
+					pudim_Log("INFO", "OBRA", "jogador apagou " + (pos.classe || "obra") +
+						" em (" + pos.x.toFixed(0) + "," + pos.z.toFixed(0) + ")");
 					pudim_MarkCancelled(pos.x, pos.z);
+				}
 				else {
 					g_PudimDecayedSpots.push({ x: pos.x, z: pos.z, until: Date.now() + 90000 });
 					pudim_Log("WARN", "DROP", "fundação em (" + pos.x.toFixed(0) + "," + pos.z.toFixed(0) +
@@ -2327,7 +2399,7 @@ function pudim_ProcessDropsiteFoundations()
 		g_PudimDropsiteFoundations = {};
 		for (const f of (data.foundations || [])) {
 			g_PudimDropsiteFoundations[f.id] = true;
-			g_PudimDropsiteFoundationPos[f.id] = { x: f.x, z: f.z };
+			g_PudimDropsiteFoundationPos[f.id] = { x: f.x, z: f.z, classe: f.classe };
 			g_PudimFoundationProgress[f.id] = f.progress || 0;
 		}
 
@@ -2370,6 +2442,7 @@ function pudim_ProcessFarms()
 	try {
 		// builderOrigin: mesma memória de função usada pelo auto-work. Sem ela, quem está
 		// construindo some do censo de comida deste sistema e o déficit vira fantasma.
+		if (pudim_ObrasPausadas()) return;
 		const farmData = Engine.GuiInterfaceCall("pudim_GetFarmBuildData",
 			{ "weights": g_PudimResourceWeights, "builderOrigin": g_PudimGathererRes });
 		if (!farmData) return;
@@ -2553,7 +2626,9 @@ function pudim_ProcessAdvancedAI()
 	// a população cresce rápido, e o intervalo de 5s/30s antigo deixava a folga (ex: "faltando 3")
 	// já consumida até 1 pelo tempo da próxima checagem. O cap de 2 fundações simultâneas
 	// continua sendo o freio real contra spam de casas.
-	if (g_PudimAutoHouseThreshold > 0 && nowTimer - g_LastAutoHouseCheck > 3000) {
+	// Apagar uma obra do mod pausa TODAS as obras por 10s — ver PUDIM_PAUSA_APOS_APAGAR.
+	if (g_PudimAutoHouseThreshold > 0 && !pudim_ObrasPausadas() &&
+	    nowTimer - g_LastAutoHouseCheck > 3000) {
 	g_LastAutoHouseCheck = nowTimer;
 	// Cooldown reduz de 12s para 6s quando há barracas (pop cresce mais rápido com mais edifícios de produção)
 	const autoHouseCooldown = (g_PudimLastHouseProdCount > 1) ? 6000 : 12000;
@@ -2652,7 +2727,8 @@ function pudim_ProcessAdvancedAI()
 		const wdDt = g_PudimLastDropsiteTimeByRes.wood ? Math.round((_nowDrop - g_PudimLastDropsiteTimeByRes.wood) / 1000) + "s" : "never";
 		pudim_Log("DEBUG", "DROP", "GATE on=" + g_PudimAdvancedAIEnabled["dropsites"] + " food_dt=" + fdDt + " wood_dt=" + wdDt);
 	}
-	if (g_PudimAdvancedAIEnabled["dropsites"] && _nowDrop - g_PudimLastDropsiteTime > 5000) {
+	if (g_PudimAdvancedAIEnabled["dropsites"] && !pudim_ObrasPausadas() &&
+	    _nowDrop - g_PudimLastDropsiteTime > 5000) {
 		g_PudimLastDropsiteTime = _nowDrop;
 		try {
 			const dropsiteData = Engine.GuiInterfaceCall("pudim_GetSmartDropsiteData", { protectedIds: pudim_GetProtectedBuilderIds() });

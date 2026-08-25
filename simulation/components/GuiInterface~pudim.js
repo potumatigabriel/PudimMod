@@ -5693,21 +5693,37 @@ GuiInterface.prototype.pudim_GetDropsiteFoundationData = function(player, data)
 		if (!cmpId) continue;
 		const isStorehouse = cmpId.HasClass("Storehouse") || cmpId.HasClass("DropsiteWood");
 		const isFarmstead  = cmpId.HasClass("Farmstead")  || cmpId.HasClass("DropsiteFood");
-		if (!isStorehouse && !isFarmstead) continue;
+		// TODA fundacao do jogador entra na lista, nao so armazem e celeiro.
+		//
+		// Relato de 25/08: "as vezes o mod coloca em um local ruim, eu deleto e coloco em um
+		// local melhor, mas nunca consigo, pq assim que eu deleto, o mod coloca novamente".
+		//
+		// A quarentena de cancelamento existia e funcionava — para dropsite. Este censo era o
+		// unico lugar que detectava fundacao sumindo, e filtrava por Storehouse/Farmstead,
+		// entao casa cancelada nunca chegava a ser registrada como cancelada. O mod
+		// reconstruia no mesmo ponto no ciclo seguinte, e o jogador nao tinha como ganhar
+		// essa disputa: ele apaga uma vez, o mod repoe a cada poucos segundos.
+		const outraObra = !isStorehouse && !isFarmstead;
 		const cmpPos = Engine.QueryInterface(ent, IID_Position);
 		if (!cmpPos || !cmpPos.IsInWorld()) continue;
 		const p = cmpPos.GetPosition2D();
 		const numBuilders = cmpFoundation.GetNumBuilders();
-		const resourceType = isStorehouse ? "wood" : "food";
+		const resourceType = isStorehouse ? "wood" : (isFarmstead ? "food" : null);
 		const isModBuilt = isModBuiltPos(p.x, p.y);
 		// onSite: builders já registrados na fundação — evita contá-los de novo no passe
 		// de "a caminho" (quem constrói também tem ordem Repair pro mesmo alvo)
-		currentFoundations.set(ent, { x: p.x, z: p.y, resourceType, numBuilders, isModBuilt,
-			onSite: new Set(cmpFoundation.GetBuilders()) });
+		// So armazem e celeiro seguem para o resto da funcao (mandar ajuda, redirecionar ao
+		// concluir). As outras obras entram apenas no rastreio de cancelamento acima.
+		if (!outraObra)
+			currentFoundations.set(ent, { x: p.x, z: p.y, resourceType, numBuilders, isModBuilt,
+				onSite: new Set(cmpFoundation.GetBuilders()) });
 		// progress distingue os dois motivos de uma fundação sumir: cancelamento do jogador
 		// (havia obra feita) e decaimento por nunca ter recebido construtor (progresso 0).
 		// O painel tratava os dois como cancelamento e bania o local para sempre.
-		result.foundations.push({ id: ent, x: p.x, z: p.y, resourceType,
+		result.foundations.push({ id: ent, x: p.x, z: p.y, resourceType, outraObra,
+			classe: cmpId.HasClass("House") ? "casa"
+			      : (cmpId.HasClass("Barracks") ? "quartel"
+			      : (cmpId.HasClass("Stable") ? "estabulo" : (resourceType || "outro"))),
 			progress: cmpFoundation.GetBuildProgress ? cmpFoundation.GetBuildProgress() : 0 });
 	}
 

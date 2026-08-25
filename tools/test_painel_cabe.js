@@ -39,14 +39,22 @@ function check(name, cond, extra) {
 console.log("o painel cabe na tela");
 
 // ── A conta ────────────────────────────────────────────────────────────────────────────
-// O painel é ancorado em 50%-514, então numa tela de altura H ele começa em H/2-514 e a
-// borda inferior da tela cai em y = H - (H/2 - 514) nas coordenadas do painel.
+// O painel é ancorado em 50%-N (N lido do XML), então numa tela de altura H ele começa em
+// H/2-N e a borda inferior da tela cai em y = H - (H/2 - N) nas coordenadas do painel.
 //
 // 1067 é a resolução real do monitor do jogador (system_info.txt: 1707x1067). Um monitor
 // menor apertaria mais, mas este é o caso que de fato quebrou, e um teste que fixa o caso
 // real vale mais que um limite inventado.
 const TELA = 1067;
-const ANCORA_TOPO = 514;
+// A ancora vem do XML (ver mAncora abaixo); o corte e calculado depois dela.
+
+// A âncora de cima também muda: o painel desceu para não cobrir os botões do topo. Ler as
+// duas pontas do XML, em vez de cravar a de cima, deixa este teste medir o que ele quer —
+// se o conteúdo cabe — em vez de quebrar toda vez que o painel se move.
+const mAncora = /50%-(\d+) 100%-20 50%\+(\d+)"/.exec(xml);
+const ANCORA_TOPO = +mAncora[1];
+
+const alturaDeclarada = +mAncora[2] + ANCORA_TOPO;
 const CORTE = TELA - (Math.floor(TELA / 2) - ANCORA_TOPO);
 
 const itens = [];
@@ -71,7 +79,6 @@ check("e sobra folga real, não passa raspando", CORTE - fim >= 40,
 
 // A altura declarada do painel tem de acompanhar o conteúdo: painel curto demais corta, e
 // painel longo demais desenha moldura sobre o jogo sem nada dentro.
-const alturaDeclarada = +/50%-514 100%-20 50%\+(\d+)"/.exec(xml)[1] + ANCORA_TOPO;
 check("a altura declarada cobre o conteúdo", alturaDeclarada >= fim,
 	"declarada=" + alturaDeclarada + " conteudo=" + fim);
 check("sem sobra exagerada de moldura vazia", alturaDeclarada - fim <= 60,

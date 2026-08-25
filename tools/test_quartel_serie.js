@@ -65,9 +65,11 @@ check("os dropdowns são populados pela API real (.list/.list_data/.selected)",
 // so faria este teste quebrar por motivo errado. O que importa e que XML e JS concordem —
 // quem garante que a secao esta VISIVEL e o test_painel_cabe.js, que faz a conta da tela.
 check("XML e JS concordam sobre a altura do painel", (function() {
-	const a = /50%-514 100%-20 50%\+(\d+)"/.exec(xml);
-	const b = /50%-514 100%-20 50%\+(\d+)"/.exec(panel);
-	return a && b && a[1] === b[1];
+	// A ancora vertical tambem muda (o painel desceu para nao cobrir os botoes do topo),
+	// entao o padrao captura as duas pontas em vez de cravar a de cima.
+	const a = /50%-(\d+) 100%-20 50%\+(\d+)"/.exec(xml);
+	const b = /50%-(\d+) 100%-20 50%\+(\d+)"/.exec(panel);
+	return a && b && a[1] === b[1] && a[2] === b[2];
 })());
 check("e o init dos dropdowns é chamado de verdade",
 	/pudim_QuartelInit\(\);/.test(panel));
@@ -136,8 +138,16 @@ check("cancelar no meio também devolve a equipe",
 	/g_PudimQuartelAtivo = false;\s*\n\s*\/\/ Cancelar devolve/.test(panel));
 
 // ── Integração com o resto do mod ──────────────────────────────────────────────────────
+// A ordem inverteu de proposito: a lista de tipos disponiveis precisa atualizar mesmo sem
+// serie ativa, para a forja aparecer quando a fase liberar. A pausa continua valendo — ela
+// so e checada depois de ler os dados, e antes de qualquer construcao.
 check("respeita a pausa de 10s depois de o jogador apagar uma obra",
-	/if \(pudim_ObrasPausadas\(\)\) return;[\s\S]{0,200}?pudim_GetBarracksBuildData/.test(panel));
+	/if \(pudim_ObrasPausadas\(\)\) return;/.test(panel) &&
+	panel.indexOf("if (pudim_ObrasPausadas()) return;") <
+	panel.indexOf('"entities": d.builderIds'));
+check("e a lista de tipos atualiza antes de qualquer checagem de serie ativa",
+	panel.indexOf("pudim_QuartelAtualizarLista(d.disponiveis)") <
+	panel.indexOf("if (!g_PudimQuartelAtivo) { g_PudimQuartelUltima = agora; return; }"));
 check("e não constrói onde o jogador já cancelou",
 	/if \(pudim_IsCancelledSpot\(pos\.x, pos\.z\)\) continue;[\s\S]{0,400}?SetBuildingPlacementPreview/.test(panel));
 check("a posição é validada pelo preview do próprio motor",
@@ -148,7 +158,12 @@ check("e o preview é limpo depois, para não ficar fantasma na tela",
 // O template sai do Builder da unidade, então funciona em qualquer civilização sem lista de
 // nomes no código — e civ sem estábulo é detectada em vez de falhar em silêncio.
 check("o template vem do Builder da própria unidade",
-	/cmpBuilder\.GetEntitiesList \? cmpBuilder\.GetEntitiesList\(\) : \[\]/.test(sim));
+	/if \(cmpBuilder\.GetEntitiesList\) \{[\s\S]{0,80}?cmpBuilder\.GetEntitiesList\(\) \|\| \[\]/.test(sim));
+// A trava de fase sai da MESMA fonte: o que o Builder lista e o que da para erguer agora.
+check("e a lista de tipos disponiveis sai da mesma fonte",
+	/result\.disponiveis\.push\(t2\)/.test(sim));
+check("nao ha lista de fases escrita no codigo",
+	sim.indexOf('"forja": 2') < 0 && sim.indexOf("fase === 2") < 0);
 check("civilização sem o edifício é avisada, não ignorada",
 	/civ_sem_/.test(sim) && /esta civilização não constrói/.test(panel));
 

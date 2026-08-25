@@ -2879,11 +2879,40 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	// simultâneas com 1 trabalhador em cada: o custo em madeira sai todo de uma vez, as três
 	// demoram três vezes mais para ficarem prontas e nenhuma produz enquanto isso.
 	// Havendo fundação em aberto, todo mundo vai terminá-la; a próxima só começa depois.
-	if (fieldFoundations.length > 0) {
+	// A trava agora e CONDICIONAL: so segura enquanto as obras abertas ainda tem vaga.
+	//
+	// O motivo original continua valendo — sem trava nenhuma, cada ciclo abria um campo com
+	// 1 construtor e a partida acabava com 3 fazendas pela metade, custo pago e nenhuma
+	// produzindo. Mas a regra absoluta ("qualquer fundacao aberta bloqueia") trocou um
+	// problema por outro.
+	//
+	// Medido no log de 25/08, com 1180 de madeira parada e o deficit crescendo:
+	//
+	//     146s campo #1 (5 workers), campo #2 (2 workers)
+	//     152s fundacao 6123 recebeu 2 construtor(es) — nenhum campo novo neste ciclo
+	//     157s fundacao 6123 recebeu 7 construtor(es) — nenhum campo novo neste ciclo
+	//     162s fundacao 6124 recebeu 9 construtor(es) — nenhum campo novo neste ciclo
+	//     157s BALANCE F8/20 W36/27
+	//
+	// Nove construtores numa fundacao que comporta cinco, com doze de deficit e madeira
+	// sobrando. O excedente nao acelera nada — construtor alem da vaga fica parado — e
+	// enquanto isso a comida despenca.
+	//
+	// A conta certa e por VAGA: enquanto as obras abertas tem lugar para mais gente, todo
+	// mundo vai preenche-las; havendo gente sobrando, ela abre o proximo campo. Isso
+	// preserva o objetivo original (nunca espalhar fino) sem travar a producao.
+	let vagasEmObra = 0;
+	for (const f of fieldFoundations) {
+		const cf = Engine.QueryInterface(f, IID_Foundation);
+		const jaLa = cf && cf.GetNumBuilders ? cf.GetNumBuilders() : 0;
+		vagasEmObra += Math.max(0, PUDIM_FIELD_CAPACITY - jaLa);
+	}
+	result._dbg.vagas = vagasEmObra;
+	if (fieldFoundations.length > 0 && farFoodWorkers.length <= vagasEmObra) {
 		result.action = "assist";
 		result.assistTarget = fieldFoundations[0];
 		result.workersToRedirect = farFoodWorkers;
-		result._dbg.reason = "fundacao_aberta:" + fieldFoundations.length;
+		result._dbg.reason = "fundacao_aberta:" + fieldFoundations.length + " vagas:" + vagasEmObra;
 		return result;
 	}
 
@@ -3277,7 +3306,7 @@ const PUDIM_QUARTEL_PASSO = 12;
 GuiInterface.prototype.pudim_GetBarracksBuildData = function(player, data)
 {
 	const result = { "builderIds": [], "template": "", "candidatePositions": [],
-	                 "emObra": 0, "prontos": 0, "paralelo": false,
+	                 "emObra": 0, "prontos": 0, "paralelo": false, "disponiveis": [],
 	                 "_dbg": { "reason": "init" } };
 
 	const cmpRangeManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_RangeManager);
@@ -3351,13 +3380,26 @@ GuiInterface.prototype.pudim_GetBarracksBuildData = function(player, data)
 		const p = Engine.QueryInterface(ent, IID_Position);
 		if (!p || !p.IsInWorld()) continue;
 
-		if (!template) {
-			const lista = cmpBuilder.GetEntitiesList ? cmpBuilder.GetEntitiesList() : [];
+		// O QUE DA PARA CONSTRUIR AGORA, para o painel desabilitar o resto.
+		//
+		// Pedido de 25/08: "forja e torre, tem que ficar desabilitado, ate poder construir
+		// (fase 2), ai libera sozinho".
+		//
+		// A fonte e a mesma de sempre: Builder.GetEntitiesList() ja devolve so o que a
+		// unidade pode erguer NESTE momento, com fase e tecnologia aplicadas. Nao ha lista
+		// de fases no codigo, e nao pode haver — cada civilizacao libera em momentos
+		// diferentes, e escrever "forja e fase 2" seria certo para umas e errado para
+		// outras. Perguntando, libera sozinho quando o jogo liberar.
+		if (cmpBuilder.GetEntitiesList) {
+			const lista = cmpBuilder.GetEntitiesList() || [];
 			for (const tpl of lista) {
 				// Igualdade no ULTIMO segmento: "structures/gaul/house" casa com "house",
 				// mas "structures/gaul/storehouse" nao. Com indexOf, casaria.
 				const base = tpl.substr(tpl.lastIndexOf("/") + 1);
-				if (base === marcador) { template = tpl; break; }
+				if (!template && base === marcador) template = tpl;
+				for (const t2 in PUDIM_SERIE)
+					if (PUDIM_SERIE[t2].tpl === base && result.disponiveis.indexOf(t2) === -1)
+						result.disponiveis.push(t2);
 			}
 		}
 
@@ -3498,14 +3540,26 @@ GuiInterface.prototype.pudim_GetTrainableUnits = function(player, data)
 	const porTpl = {};
 
 	for (const ent of allEnts) {
-		const cmpPQ = Engine.QueryInterface(ent, IID_ProductionQueue);
-		if (!cmpPQ || !cmpPQ.GetEntitiesList) continue;
+		// GetEntitiesList vive em IID_Trainer, NAO em IID_ProductionQueue. Na 0.28 a
+		// producao foi dividida: ProductionQueue cuida da fila, Trainer sabe o que da para
+		// treinar. Eu escrevi ProductionQueue aqui e a lista veio vazia — o painel dizia
+		// "Nada para treinar ainda" com o centro civico enfileirando aldeas na tela.
+		//
+		// Pior: o proprio mod ja documentava isso em pudim_GetAutoQueueData ("Vive em
+		// IID_Trainer — ProductionQueue NAO tem GetEntitiesList"), do dia em que a auto-fila
+		// nao semeava nada no inicio da partida. O comentario estava a mil linhas daqui e eu
+		// nao olhei.
+		//
+		// O CENTRO CIVICO entra por aqui junto com o resto: ele tem Trainer como qualquer
+		// edificio de producao, e o jogador pediu explicitamente que ele contasse.
+		const cmpTrainer = Engine.QueryInterface(ent, IID_Trainer);
+		if (!cmpTrainer || !cmpTrainer.GetEntitiesList) continue;
 		// Fundação ainda não treina nada; contá-la faria a lista piscar durante a obra.
 		if (Engine.QueryInterface(ent, IID_Foundation)) continue;
 		result._dbg.edificios++;
 
 		let lista = [];
-		try { lista = cmpPQ.GetEntitiesList() || []; } catch (e) { continue; }
+		try { lista = cmpTrainer.GetEntitiesList() || []; } catch (e) { continue; }
 		for (const tpl of lista) {
 			if (!porTpl[tpl]) porTpl[tpl] = { existentes: 0, emFila: 0, edificios: [] };
 			porTpl[tpl].edificios.push(ent);
@@ -3513,8 +3567,11 @@ GuiInterface.prototype.pudim_GetTrainableUnits = function(player, data)
 
 		// O que já está na fila conta como "vai existir": sem isso o balanceador pediria de
 		// novo a mesma unidade a cada ciclo, enquanto a primeira ainda nem saiu.
+		// A FILA continua em ProductionQueue — a divisao e essa: Trainer sabe o que PODE
+		// treinar, ProductionQueue sabe o que ESTA treinando.
+		const cmpPQ = Engine.QueryInterface(ent, IID_ProductionQueue);
 		try {
-			for (const item of cmpPQ.GetQueue())
+			if (cmpPQ) for (const item of cmpPQ.GetQueue())
 				if (item.productiontype === "unit" && item.unitTemplate && porTpl[item.unitTemplate])
 					porTpl[item.unitTemplate].emFila += (item.count || 1);
 		} catch (e) {}
@@ -6020,6 +6077,10 @@ GuiInterface.prototype.pudim_GetDropsiteFoundationData = function(player, data)
 	};
 
 	const result = {
+		// Obras que TERMINARAM neste ciclo, de qualquer tipo. Sem esta lista o painel le
+		// cada predio concluido como "o jogador apagou" — ver o comentario onde ela e
+		// preenchida.
+		"concluidas": [],
 		foundations: [],   // fundações ativas
 		assignments: [],   // workers ociosos → ajudar fundação
 		completions: []    // dropsite concluído → redirecionar workers distantes
@@ -6093,6 +6154,21 @@ GuiInterface.prototype.pudim_GetDropsiteFoundationData = function(player, data)
 		const cmpId = Engine.QueryInterface(prevId, IID_Identity);
 		if (!cmpId) continue; // entidade destruída (cancelado)
 		if (Engine.QueryInterface(prevId, IID_Foundation)) continue; // ainda fundação?
+
+		// CHEGOU AQUI = A OBRA TERMINOU. A entidade existe e nao e mais fundacao; isso e
+		// conclusao, nunca cancelamento.
+		//
+		// Esta lista sai ANTES do filtro de armazem/celeiro abaixo, e e por isso que ela
+		// existe. Quando o censo passou a enxergar TODA fundacao (para detectar casa
+		// apagada), o painel comecou a ler cada casa e cada campo CONCLUIDO como "o jogador
+		// apagou": a fundacao sumia da lista, tinha progresso > 0, e nada dizia que ela
+		// tinha virado predio.
+		//
+		// No log de 25/08 sairam 16 "jogador apagou" numa partida em que ele nao apagou
+		// nada — e cada um disparava a pausa global de 10s, que ficou permanentemente ligada
+		// e travou a serie de quarteis.
+		result.concluidas.push(prevId);
+
 		const isStorehouse = cmpId.HasClass("Storehouse") || cmpId.HasClass("DropsiteWood");
 		const isFarmstead  = cmpId.HasClass("Farmstead")  || cmpId.HasClass("DropsiteFood");
 		if (!isStorehouse && !isFarmstead) continue;

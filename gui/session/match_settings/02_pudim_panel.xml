@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Ancorado à DIREITA da tela (100%-340 .. 100%-20): a esquerda fica livre para o chat
      e para a barra de aliados. Largura de 320 mantida; a JS ajusta só a altura. -->
-<object name="pudim_mainPanel" type="image" size="100%-340 50%-514 100%-20 50%+476" sprite="ModernDarkBoxGold" z="150" hidden="true">
+<object name="pudim_mainPanel" type="image" size="100%-340 50%-494 100%-20 50%+496" sprite="ModernDarkBoxGold" z="150" hidden="true">
   <object name="pudim_header" type="text" style="TitleText" size="50%-80 -16 50%+80 16"><translatableAttribute id="caption">PudimMod</translatableAttribute></object>
   <object name="pudim_compactBtn" type="button" size="4 6 50 28" style="StoneButton" tooltip="Alternar modo compacto"><action on="Press">pudim_ToggleCompact();</action><object name="pudim_compactLabel" type="text" size="0 0 100% 100%" font="sans-bold-13" text_align="center" text_valign="center" textcolor="200 200 200 255" ghost="true"><translatableAttribute id="caption">▼</translatableAttribute></object></object>
   <object name="pudim_logBtn" type="button" size="100%-76 6 100%-32 28" style="StoneButton" tooltip="Abre o painel de debug"><action on="Press">pudim_ToggleLog();</action><translatableAttribute id="caption">Log</translatableAttribute></object>
@@ -23,7 +23,7 @@
   <object name="pudim_enemyDPS" type="text" size="50% 96 100%-8 114" font="sans-13" textcolor="210 210 210 255" ghost="true"><translatableAttribute id="caption">DPS: --</translatableAttribute></object>
   <object name="pudim_allyTypes1" type="text" size="8 116 50% 134" font="sans-11" textcolor="180 220 180 255" ghost="true"><translatableAttribute id="caption">Inf: 0M/0R</translatableAttribute></object>
   <object name="pudim_allyTypes2" type="text" size="8 134 50% 152" font="sans-11" textcolor="180 220 180 255" ghost="true"><translatableAttribute id="caption">Cav: 0 | Cer: 0 | Sup: 0</translatableAttribute></object>
-  <object type="text" size="8 158 100%-8 176" font="sans-bold-13" text_align="center" textcolor="255 255 255 255" ghost="true"><translatableAttribute id="caption">Probabilidade de Vitoria</translatableAttribute></object>
+  <object name="pudim_winChanceLabel" type="text" size="8 158 100%-8 176" font="sans-bold-13" text_align="center" textcolor="255 255 255 255" ghost="true"><translatableAttribute id="caption">Probabilidade de Vitoria</translatableAttribute></object>
   <object name="pudim_winChanceBg" type="image" size="8 178 100%-8 196" sprite="color: 30 30 40 220"/>
   <object name="pudim_winChanceBar" type="image" size="8 178 50% 196" sprite="color: 30 180 60 200"/>
   <object name="pudim_winChancePct" type="text" size="8 178 100%-8 196" font="sans-bold-13" text_align="center" text_valign="center" textcolor="255 255 255 255" ghost="true"><translatableAttribute id="caption">--%</translatableAttribute></object>
@@ -35,7 +35,7 @@
   <object name="pudim_autoWorkDesc" type="text" size="8 260 100%-8 284" font="sans-13" textcolor="180 180 200 255" ghost="true"><translatableAttribute id="caption">Envia cidadaos ociosos para coletar recursos.</translatableAttribute></object>
   <object name="pudim_autoWorkToggle" type="button" size="8 288 100%-8 314" style="StoneButton" tooltip="Ativa auto-trabalho"><action on="Press">pudim_ToggleAutoWork();</action><object name="pudim_autoWorkLabel" type="text" size="0 0 100% 100%" font="sans-bold-13" text_align="center" text_valign="center" textcolor="0 255 0 255" ghost="true"><translatableAttribute id="caption">( LIGADO ) Auto-Trabalho</translatableAttribute></object></object>
   <object name="pudim_autoWorkStatus" type="text" size="8 318 100%-8 338" font="sans-13" text_align="center" textcolor="180 180 200 255" ghost="true"><translatableAttribute id="caption">Status: Desativado</translatableAttribute></object>
-  <object name="pudim_priorityHeaderLabel" type="text" size="8 342 100%-8 360" font="sans-bold-13" text_align="center" textcolor="255 255 255 255" ghost="true"><translatableAttribute id="caption">-- Prioridades de Coleta (recomecam a cada partida) --</translatableAttribute></object>
+  <object name="pudim_priorityHeaderLabel" type="text" size="8 342 100%-8 360" font="sans-bold-13" text_align="center" textcolor="255 255 255 255" ghost="true"><translatableAttribute id="caption">-- Prioridades de Coleta --</translatableAttribute></object>
 
   <object name="pudim_foodLabel" type="text" size="8 364 100 382" font="sans-bold-13" textcolor="255 255 255 255" ghost="true"><translatableAttribute id="caption">Comida</translatableAttribute></object>
   <object name="pudim_foodMinus" type="button" size="100 364 124 382" style="StoneButton"><action on="Press">pudim_AdjustWeight('food', -1);</action><translatableAttribute id="caption">-</translatableAttribute></object>

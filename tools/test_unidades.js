@@ -46,8 +46,16 @@ console.log("proporcao de unidades");
 check("a simulação expõe o que dá para treinar",
 	/GuiInterface\.prototype\.pudim_GetTrainableUnits/.test(sim) &&
 	/"pudim_GetTrainableUnits": 1/.test(sim));
-check("e pergunta aos edifícios, pela API do motor",
-	/cmpPQ\.GetEntitiesList\(\)/.test(sim));
+// GetEntitiesList vive em IID_Trainer, NAO em IID_ProductionQueue. Na 0.28 a producao foi
+// dividida: ProductionQueue cuida da fila, Trainer sabe o que da para treinar. Eu escrevi
+// ProductionQueue e a lista veio vazia — o painel dizia "Nada para treinar ainda" com o
+// centro civico enfileirando aldeas na tela.
+check("e pergunta ao Trainer, que e quem sabe o que da para treinar",
+	/cmpTrainer\.GetEntitiesList\(\)/.test(sim));
+check("a FILA continua vindo de ProductionQueue — a divisao e essa",
+	/const cmpPQ = Engine\.QueryInterface\(ent, IID_ProductionQueue\);[\s\S]{0,120}?cmpPQ\.GetQueue\(\)/.test(sim));
+check("e o centro civico entra junto, como o jogador pediu",
+	/O CENTRO CIVICO entra por aqui/.test(sim));
 check("fundação não conta — ela ainda não treina nada",
 	/if \(Engine\.QueryInterface\(ent, IID_Foundation\)\) continue;[\s\S]{0,120}?_dbg\.edificios/.test(sim));
 check("o que já está na fila conta como 'vai existir'",

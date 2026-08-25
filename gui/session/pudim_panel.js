@@ -280,7 +280,7 @@ function pudim_ApplyCompactMode()
 	const panel = Engine.TryGetGUIObjectByName("pudim_mainPanel");
 	if (panel)
 		// Painel ancorado à direita da tela (ver 02_pudim_panel.xml)
-		panel.size = hidden ? "100%-340 50%-514 100%-20 50%-274" : "100%-340 50%-514 100%-20 50%+476";
+		panel.size = hidden ? "100%-340 50%-494 100%-20 50%-254" : "100%-340 50%-494 100%-20 50%+496";
 	// Atualiza ícone do botão
 	const lbl = Engine.TryGetGUIObjectByName("pudim_compactLabel");
 	if (lbl) lbl.caption = hidden ? "▶" : "▼";
@@ -2465,7 +2465,10 @@ function pudim_ProcessDropsiteFoundations()
 		//
 		// Decaimento agora é quarentena curta: o mod tenta de novo, de preferência com
 		// construtor que chegue lá.
+		// completions cobre so dropsite; concluidas cobre TODA obra que virou predio. Sem a
+		// segunda, casa e campo concluidos eram lidos como apagados pelo jogador.
 		const completedIds = new Set((data.completions || []).map(c => c.id));
+		for (const id of (data.concluidas || [])) completedIds.add(id);
 		const stillFoundation = new Set((data.foundations || []).map(f => f.id));
 		for (const oldId in g_PudimDropsiteFoundations) {
 			const idNum = +oldId;
@@ -2546,7 +2549,7 @@ function pudim_ProcessFarms()
 			const d = farmData._dbg || {};
 			pudim_Log("DEBUG", "FARM", "fc=" + (d.fc||0) + " nfc=" + (d.nfc||0) +
 				" ncap=" + (d.ncap||0) + " tg=" + (d.tg||0) + " cfm=" + (d.cfm||0) +
-				" fwt=" + (d.fwt||0) + " df=" + (d.df||0) + " wp=" + (d.wp||0) + " ocio=" + (d.ocio||0) +
+				" fwt=" + (d.fwt||0) + " df=" + (d.df||0) + " wp=" + (d.wp||0) + " ocio=" + (d.ocio||0) + " vagas=" + (d.vagas||0) + " pag=" + (farmData.camposPagaveis||0) +
 				" fmc=" + (d.fmc||0) + " tffs=" + (d.tffs||0) +
 				// trn = unidades em produção; edf = déficit já descontado delas. Juntos
 				// mostram quando a trava de "espera nascer" está segurando o remanejamento.
@@ -3884,7 +3887,9 @@ function pudim_QuartelSetTipo()
 {
 	const dd = Engine.GetGUIObjectByName("pudim_quartelTipo");
 	if (!dd) return;
-	g_PudimQuartelTipo = PUDIM_QUARTEL_TIPOS[dd.selected] || "quartel";
+	// Le da lista VISIVEL, nao da completa: elas divergem enquanto forja e torre estao
+	// bloqueadas, e ler da completa selecionaria o edificio errado.
+	g_PudimQuartelTipo = g_PudimQuartelDisponiveis[dd.selected] || g_PudimQuartelDisponiveis[0];
 	pudim_QuartelAtualizarLabel();
 }
 
@@ -3943,6 +3948,42 @@ function pudim_QuartelAtualizarLabel()
 		: pudim_T("cap.serieBuild") + " " + g_PudimQuartelAlvo + " " + nome;
 }
 
+/** Tipos que dao para construir AGORA. A lista cresce sozinha durante a partida. */
+var g_PudimQuartelDisponiveis = PUDIM_QUARTEL_TIPOS.slice();
+
+/**
+ * Redesenha o dropdown com o que da para construir neste momento.
+ *
+ * Pedido de 25/08: "forja e torre, tem que ficar desabilitado, ate poder construir (fase 2),
+ * ai libera sozinho".
+ *
+ * Nao ha lista de fases no codigo, e nao pode haver: cada civilizacao libera em momentos
+ * diferentes, e escrever "forja e fase 2" seria certo para umas e errado para outras. A
+ * simulacao pergunta ao Builder do trabalhador, que ja sabe — a mesma fonte que decide quais
+ * botoes de construcao o jogo desenha.
+ *
+ * O tipo escolhido e preservado pelo NOME, nao pelo indice: a lista cresce durante a
+ * partida, e um indice guardado apontaria para outro edificio depois que a forja liberar.
+ */
+function pudim_QuartelAtualizarLista(disponiveis)
+{
+	if (!disponiveis || !disponiveis.length) return;
+	// Ordem fixa, a mesma de PUDIM_QUARTEL_TIPOS: a lista nao pode dancar quando algo libera.
+	const nova = PUDIM_QUARTEL_TIPOS.filter(t => disponiveis.indexOf(t) >= 0);
+	if (nova.join(",") === g_PudimQuartelDisponiveis.join(",")) return;
+	g_PudimQuartelDisponiveis = nova;
+
+	const dd = Engine.TryGetGUIObjectByName("pudim_quartelTipo");
+	if (!dd) return;
+	const escolhido = g_PudimQuartelTipo;
+	dd.list = nova.map(t => pudim_QuartelNome(t));
+	dd.list_data = nova.slice();
+	const idx = nova.indexOf(escolhido);
+	dd.selected = idx >= 0 ? idx : 0;
+	if (idx < 0) g_PudimQuartelTipo = nova[0];
+	pudim_QuartelAtualizarLabel();
+}
+
 function pudim_QuartelInit()
 {
 	const tipo = Engine.GetGUIObjectByName("pudim_quartelTipo");
@@ -3964,12 +4005,8 @@ function pudim_QuartelInit()
 
 function pudim_ProcessQuartel()
 {
-	if (!g_PudimQuartelAtivo) return;
 	const agora = Date.now();
 	if (agora - g_PudimQuartelUltima < PUDIM_QUARTEL_INTERVALO) return;
-
-	// A pausa de "o jogador apagou uma obra" vale aqui também: ele apagou, ele decide.
-	if (pudim_ObrasPausadas()) return;
 
 	let d;
 	try {
@@ -3977,6 +4014,16 @@ function pudim_ProcessQuartel()
 			{ "tipo": g_PudimQuartelTipo, "playerOrdered": pudim_GetPlayerOrderedIds() });
 	} catch (e) { return; }
 	if (!d) return;
+
+	// A LISTA ATUALIZA MESMO SEM SERIE ATIVA. O jogador precisa ver a forja liberar quando
+	// muda de fase, e nao so depois de mandar construir alguma coisa — a checagem de "serie
+	// ativa" vem DEPOIS desta linha de proposito.
+	try { pudim_QuartelAtualizarLista(d.disponiveis); } catch (e) {}
+
+	if (!g_PudimQuartelAtivo) { g_PudimQuartelUltima = agora; return; }
+
+	// A pausa de "o jogador apagou uma obra" vale aqui também: ele apagou, ele decide.
+	if (pudim_ObrasPausadas()) return;
 
 	if (!d.template) {
 		pudim_Log("WARN", "QUARTEL", "esta civilização não constrói " +
@@ -4086,7 +4133,8 @@ const PUDIM_COMBAT_ALTURA = 182;   // 234 (fim do miolo) menos 52 (fim do títul
 const PUDIM_COMBAT_MIOLO = [
 	"pudim_combatFlash", "pudim_allyCount", "pudim_enemyCount", "pudim_allyHP",
 	"pudim_enemyHP", "pudim_allyDPS", "pudim_enemyDPS", "pudim_allyTypes1",
-	"pudim_allyTypes2", "pudim_winChanceBar", "pudim_winChanceBg", "pudim_winChancePct",
+	"pudim_allyTypes2", "pudim_winChanceLabel", "pudim_winChanceBar",
+	"pudim_winChanceBg", "pudim_winChancePct",
 	"pudim_counterHint", "pudim_combatRefreshBtn"
 ];
 

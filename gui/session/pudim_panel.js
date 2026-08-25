@@ -1248,6 +1248,77 @@ function pudim_CanGarrison(entId) {
 	const last = g_PudimLastReleaseTime[entId];
 	return !last || (Date.now() - last) > PUDIM_REGARRISON_COOLDOWN;
 }
+/**
+ * Orçamento de caminhada, compartilhado por todos os sistemas que mandam uma unidade andar.
+ *
+ * O problema, medido no replay de 24/08: 65% das reordenações de kite aconteciam em menos de
+ * 6 s, mesmo com o kite tendo cooldown de 6 s por unidade. O cooldown funcionava — só não
+ * era o único sistema mandando. Kite, fuga do pânico, abrigo e auto-retirada tinham cada um
+ * o SEU mapa de controle, e nenhum enxergava o outro. A unidade recebia um walk do kite e
+ * 1 s depois um walk da fuga, e cada walk cancela o anterior: ela andava para o primeiro
+ * destino por um segundo, virava, e nunca chegava a lugar nenhum.
+ *
+ * É a mesma classe de erro dos três sistemas de economia empurrando o mesmo trabalhador em
+ * direções opostas, e o sintoma na tela é o mesmo que o jogador chama de "bagunçando durante
+ * a luta" e "passeio".
+ *
+ * A solução não pode ser um cooldown único e cego: fugir da morte é mais urgente que
+ * reposicionar. Então cada emissor declara uma PRIORIDADE, e a regra é:
+ *
+ *   - prioridade MAIOR passa na hora, sempre. Salvar a unidade nunca espera.
+ *   - prioridade igual ou menor espera PUDIM_ANDAR_MIN_ENTRE desde a última ordem.
+ *
+ * Os cooldowns próprios de cada sistema continuam existindo e valendo — este aqui só
+ * resolve o que nenhum deles podia ver: o outro sistema.
+ */
+const PUDIM_ANDAR_FUGIR   = 4;  // está prestes a morrer
+const PUDIM_ANDAR_ABRIGO  = 3;  // pânico, sem abrigo livre
+const PUDIM_ANDAR_RETIRAR = 2;  // vida baixa, indo para o curador
+const PUDIM_ANDAR_KITE    = 1;  // reposicionamento tático
+const PUDIM_ANDAR_HEROI   = 0;  // ajuste de posição, nunca urgente
+
+// 2,5 s: tempo de sobra para a unidade sair do lugar e o passo anterior valer alguma coisa,
+// e curto o bastante para não segurar uma reação real. Abaixo disso o walk novo chega antes
+// de o motor terminar de virar a unidade, que é o desperdício que se quer cortar.
+const PUDIM_ANDAR_MIN_ENTRE = 2500;
+
+// { id: { em: timestamp, pri: prioridade } }
+var g_PudimAndarAt = {};
+
+/**
+ * Pode mandar esta unidade andar agora, vindo deste sistema?
+ */
+function pudim_PodeAndar(id, prioridade, agora)
+{
+	const ultimo = g_PudimAndarAt[id];
+	if (!ultimo)
+		return true;
+	if (prioridade > ultimo.pri)
+		return true;   // urgência maior nunca espera
+	return (agora - ultimo.em) >= PUDIM_ANDAR_MIN_ENTRE;
+}
+
+/**
+ * Registra que a ordem saiu. Chamar SEMPRE que um walk for emitido, senão o próximo
+ * sistema não tem como saber que esta unidade acabou de receber destino.
+ */
+function pudim_RegistrarAndada(id, prioridade, agora)
+{
+	g_PudimAndarAt[id] = { "em": agora, "pri": prioridade };
+}
+
+/**
+ * Descarta entradas velhas. Sem isto o mapa cresce por toda a partida com unidades que já
+ * morreram — 200 de população numa partida longa vira memória à toa e um vazamento lento.
+ */
+function pudim_LimparAndadas(agora)
+{
+	for (const id in g_PudimAndarAt)
+		if (agora - g_PudimAndarAt[id].em > 30000)
+			delete g_PudimAndarAt[id];
+}
+
+
 var PUDIM_PANIC_MAX_DURATION = 120000; // 2min: força retorno mesmo se detecção ficar "presa" (ex: inimigo parado perto do CC sem atacar)
 
 
@@ -1282,6 +1353,7 @@ function pudim_GetInFlightBuilderIds() {
 	for (const id in g_PudimBuilderCmdAt) {
 		if (now - g_PudimBuilderCmdAt[id] <= PUDIM_CMD_IN_FLIGHT) ids.push(+id);
 		else if (now - g_PudimBuilderCmdAt[id] > 120000) delete g_PudimBuilderCmdAt[id];
+	pudim_LimparAndadas(now);
 	}
 	return ids;
 }
@@ -2740,7 +2812,7 @@ function pudim_ProcessAdvancedAI()
 							"target": action.target,
 							"queued": true
 						});
-					} else {
+					} else if (pudim_PodeAndar(action.unitId, PUDIM_ANDAR_RETIRAR, Date.now())) {
 						Engine.PostNetworkCommand({
 							"type": "walk",
 							"entities": [action.unitId],
@@ -2748,6 +2820,7 @@ function pudim_ProcessAdvancedAI()
 							"z": action.targetZ,
 							"queued": true
 						});
+						pudim_RegistrarAndada(action.unitId, PUDIM_ANDAR_RETIRAR, Date.now());
 					}
 					g_PudimRetreating[action.unitId] = true;
 				}
@@ -3376,8 +3449,10 @@ function pudim_ProcessPanic()
 					// fora do alcance. Ficar parado apanhando não é opção — foi o relato.
 					// Cooldown por unidade: reemitir walk a cada ciclo reinicia o pathfinder e
 					// a unidade fica tremendo no lugar em vez de andar.
-					if (nowPanic - (g_PudimFleeAt[worker.id] || 0) > 5000) {
+					if (nowPanic - (g_PudimFleeAt[worker.id] || 0) > 5000 &&
+					    pudim_PodeAndar(worker.id, PUDIM_ANDAR_FUGIR, nowPanic)) {
 						g_PudimFleeAt[worker.id] = nowPanic;
+						pudim_RegistrarAndada(worker.id, PUDIM_ANDAR_FUGIR, nowPanic);
 						Engine.PostNetworkCommand({ "type": "walk", "entities": [worker.id],
 							"x": worker.fleeX, "z": worker.fleeZ, "queued": false });
 						fugindo++;
@@ -3445,7 +3520,7 @@ function pudim_ProcessPanic()
 				});
 				g_PudimPanicGarrisoned[worker.id] = { shelterID: shelter.id };
 				shelter.freeSlots--;
-			} else if (rallyCCPos) {
+			} else if (rallyCCPos && pudim_PodeAndar(worker.id, PUDIM_ANDAR_ABRIGO, Date.now())) {
 				// Sem abrigo disponível: mover para perto do CC
 				Engine.PostNetworkCommand({
 					"type": "walk",
@@ -3454,6 +3529,7 @@ function pudim_ProcessPanic()
 					"z": rallyCCPos.z + (Math.random() * 20 - 10),
 					"queued": false
 				});
+				pudim_RegistrarAndada(worker.id, PUDIM_ANDAR_ABRIGO, Date.now());
 				g_PudimPanicGarrisoned[worker.id] = { shelterID: null };
 			}
 		}
@@ -3541,7 +3617,12 @@ function pudim_ProcessHeroAura()
 		return;
 	}
 
+	// Posicionar o heroi nunca e urgente: se ele acabou de receber ordem de qualquer outro
+	// sistema (fuga, retirada), aquilo importa mais e este ciclo passa.
+	if (!pudim_PodeAndar(d.heroId, PUDIM_ANDAR_HEROI, agora))
+		return;
 	g_PudimHeroLastAt = agora;
+	pudim_RegistrarAndada(d.heroId, PUDIM_ANDAR_HEROI, agora);
 	Engine.PostNetworkCommand({
 		"type": "walk",
 		"entities": [d.heroId],
@@ -3583,6 +3664,11 @@ function pudim_ProcessAutoKite()
 
 	for (const item of kiteData)
 	{
+		// O cooldown de 6s do kite so via o proprio kite. Fuga e retirada mandavam walk na
+		// mesma unidade sem que ele soubesse, e cada walk cancela o anterior: 65% das
+		// reordenacoes aconteciam em menos de 6s no replay de 24/08.
+		if (!pudim_PodeAndar(item.ent, PUDIM_ANDAR_KITE, now))
+			continue;
 		Engine.PostNetworkCommand({
 			"type": "walk",
 			"entities": [item.ent],
@@ -3590,6 +3676,7 @@ function pudim_ProcessAutoKite()
 			"z": item.z,
 			"queued": false
 		});
+		pudim_RegistrarAndada(item.ent, PUDIM_ANDAR_KITE, now);
 		// Após reposicionar, retoma ataque ao inimigo mais próximo para não ficar parada
 		if (item.enemyTarget)
 			Engine.PostNetworkCommand({

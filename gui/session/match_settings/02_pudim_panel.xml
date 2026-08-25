@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Ancorado à DIREITA da tela (100%-340 .. 100%-20): a esquerda fica livre para o chat
      e para a barra de aliados. Largura de 320 mantida; a JS ajusta só a altura. -->
-<object name="pudim_mainPanel" type="image" size="100%-340 50%-514 100%-20 50%+550" sprite="ModernDarkBoxGold" z="150" hidden="true">
+<object name="pudim_mainPanel" type="image" size="100%-340 50%-514 100%-20 50%+642" sprite="ModernDarkBoxGold" z="150" hidden="true">
   <object name="pudim_header" type="text" style="TitleText" size="50%-80 -16 50%+80 16"><translatableAttribute id="caption">PudimMod</translatableAttribute></object>
   <object name="pudim_compactBtn" type="button" size="4 6 50 28" style="StoneButton" tooltip="Alternar modo compacto"><action on="Press">pudim_ToggleCompact();</action><object name="pudim_compactLabel" type="text" size="0 0 100% 100%" font="sans-bold-13" text_align="center" text_valign="center" textcolor="200 200 200 255" ghost="true"><translatableAttribute id="caption">▼</translatableAttribute></object></object>
   <object name="pudim_logBtn" type="button" size="100%-76 6 100%-32 28" style="StoneButton" tooltip="Abre o painel de debug"><action on="Press">pudim_ToggleLog();</action><translatableAttribute id="caption">Log</translatableAttribute></object>
@@ -77,5 +77,17 @@
   <object name="pudim_counselorHeader" type="text" size="8 992 100%-8 1014" font="sans-bold-14" textcolor="255 215 0 255" style="ModernLabelText" ghost="true"><translatableAttribute id="caption">Conselheiro Estrategico</translatableAttribute></object>
   <object name="pudim_counselorTip" type="text" size="8 1018 100%-8 1064" font="sans-13" text_align="center" textcolor="220 220 220 255" ghost="true"><translatableAttribute id="caption">Dica: Analisando o mapa...</translatableAttribute></object>
   <object name="pudim_counselorCameraBtn" type="button" size="8 1040 100%-8 1064" style="StoneButton" tooltip="Ver Local" hidden="true"><action on="Press">pudim_CounselorCameraMove();</action><translatableAttribute id="caption">Ver Local no Mapa</translatableAttribute></object>
+
+  <!-- Construcao em serie de quarteis/estabulos.
+       Dois dropdowns e um botao: tipo, quantidade (1 a 10), e liga/desliga a serie.
+       O padrao e SEQUENCIAL — 5 trabalhadores por obra, uma de cada vez — porque cinco
+       obras com um trabalhador cada ficam meio-prontas por muito tempo, com o custo ja
+       pago e nenhuma unidade saindo de nenhuma. Paralelo so com populacao acima de 180 e
+       recurso sobrando, que e quando o gargalo deixa de ser recurso e passa a ser quantos
+       lugares treinam ao mesmo tempo. -->
+  <object name="pudim_quartelHeader" type="text" size="8 1070 100%-8 1090" font="sans-bold-14" textcolor="200 160 255 255" style="ModernLabelText" ghost="true"><translatableAttribute id="caption">Construcao em Serie</translatableAttribute></object>
+  <object name="pudim_quartelTipo" type="dropdown" style="ModernDropDown" size="8 1094 55%-4 1122" tooltip="Quartel ou Estabulo"><action on="SelectionChange">pudim_QuartelSetTipo();</action></object>
+  <object name="pudim_quartelQtd" type="dropdown" style="ModernDropDown" size="55%+4 1094 100%-8 1122" tooltip="Quantos construir (1 a 10)"><action on="SelectionChange">pudim_QuartelSetQtd();</action></object>
+  <object name="pudim_quartelBtn" type="button" size="8 1126 100%-8 1150" style="StoneButton" tooltip="Ergue um de cada vez, com 5 trabalhadores do recurso mais abundante. Eles voltam ao trabalho ao terminar."><action on="Press">pudim_QuartelToggle();</action><object name="pudim_quartelBtnLabel" type="text" size="0 0 100% 100%" font="sans-bold-13" text_align="center" text_valign="center" textcolor="200 160 255 255" ghost="true"><translatableAttribute id="caption">Construir 1 Quartel</translatableAttribute></object></object>
 
 </object>

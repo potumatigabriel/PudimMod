@@ -136,6 +136,7 @@ const PUDIM_LOG_LEVEL_COLORS = {
 };
 const PUDIM_LOG_CAT_COLORS = {
 	"CASAS":  "255 230 100", "DROP":   "100 230 255", "FARM":  "140 255 150",
+	"QUARTEL": "200 160 255",
 	"OBRA":   "255 180 120",
 	"HEROI":  "255 200 255",
 	"SCOUT":  "210 160 255", "GAR":    "255 170 100", "FOCUS": "255 120 130",
@@ -279,7 +280,7 @@ function pudim_ApplyCompactMode()
 	const panel = Engine.TryGetGUIObjectByName("pudim_mainPanel");
 	if (panel)
 		// Painel ancorado à direita da tela (ver 02_pudim_panel.xml)
-		panel.size = hidden ? "100%-340 50%-514 100%-20 50%-274" : "100%-340 50%-514 100%-20 50%+550";
+		panel.size = hidden ? "100%-340 50%-514 100%-20 50%-274" : "100%-340 50%-514 100%-20 50%+642";
 	// Atualiza ícone do botão
 	const lbl = Engine.TryGetGUIObjectByName("pudim_compactLabel");
 	if (lbl) lbl.caption = hidden ? "▶" : "▼";
@@ -432,6 +433,8 @@ function pudim_Init()
 	globalThis.g_PudimPanelInitialized = true;
 
 	pudim_LogInit();
+	// Popula os dropdowns da construcao em serie (tipo e quantidade).
+	try { pudim_QuartelInit(); } catch (e) { pudim_Log("ERROR", "QUARTEL", "init: " + e); }
 	pudim_LogInfo("PudimMod inicializado.");
 
 	// Tooltips de todos os botões, no idioma detectado (pudim_i18n.js). Sobrepõe os
@@ -1910,6 +1913,14 @@ function pudim_Tick(dt)
 	{
 		g_PudimHeroAccum = 0;
 		pudim_ProcessHeroAura();
+	}
+
+	// Série de quartéis/estábulos: a cada 1s; o freio real é PUDIM_QUARTEL_INTERVALO.
+	g_PudimQuartelAccum += dt;
+	if (g_PudimQuartelAccum >= 1000)
+	{
+		g_PudimQuartelAccum = 0;
+		pudim_ProcessQuartel();
 	}
 
 	// Sistema de Pânico: a cada 1.5 segundos
@@ -3711,6 +3722,230 @@ function pudim_ProcessHeroAura()
 	pudim_ProtectBuilder(d.heroId, agora + 4000);
 	pudim_Log("INFO", "HEROI", "posicionado na aura em (" + d.x.toFixed(0) + "," + d.z.toFixed(0) +
 		") raio=" + ((d._dbg && d._dbg.raio) || "?") + " andou=" + ((d._dbg && d._dbg.mover) || "?") + "m");
+}
+
+
+// ─── Construir quartéis / estábulos em série ──────────────────────────────────────────
+//
+// Pedido de 25/08: escolher o tipo, escolher quantos (1 a 10), e o mod ergue um de cada vez
+// com 5 trabalhadores do recurso mais abundante, devolvendo todo mundo ao trabalho no fim.
+// Com muitos recursos e população acima de 180, pode erguer em paralelo.
+//
+// Por que sequencial é o padrão: cinco trabalhadores numa obra terminam ela rápido e voltam
+// a colher; cinco obras com um trabalhador cada ficam meio-prontas por muito tempo, com o
+// custo já pago e nenhuma unidade saindo de nenhuma. É a diferença entre um quartel
+// treinando aos 8 minutos e cinco esqueletos aos 12.
+//
+// E por que a exceção dele é certa: perto do teto de população o gargalo deixa de ser
+// recurso e passa a ser quantos lugares treinam ao mesmo tempo. Aí paralelo ganha.
+const PUDIM_QUARTEL_TIPOS = ["quartel", "estabulo"];
+const PUDIM_QUARTEL_NOMES = { quartel: "Quartel", estabulo: "Estábulo" };
+const PUDIM_QUARTEL_INTERVALO = 2500;   // entre tentativas; obra é lenta, não precisa correr
+const PUDIM_QUARTEL_MAX_PARALELO = 3;   // teto do regime paralelo, para não virar spam
+
+// Estoque a partir do qual "sobra recurso" para o regime paralelo. Um quartel custa da ordem
+// de algumas centenas de madeira; com 1500 sobrando, erguer três de uma vez não compromete
+// nada. Abaixo disso o paralelo tiraria da economia justamente quando ela ainda importa.
+const PUDIM_QUARTEL_FOLGA = 1500;
+
+// A população a partir da qual vale erguer em paralelo, como o jogador pediu. Vive nos DOIS
+// lados (aqui e na simulação) porque painel e simulação são escopos separados no motor —
+// não há como um ler a constante do outro. Se mudar, mude nos dois.
+const PUDIM_QUARTEL_POP_PARALELO = 180;
+
+var g_PudimQuartelTipo = "quartel";
+var g_PudimQuartelAlvo = 1;         // quantos ainda faltam construir
+var g_PudimQuartelAtivo = false;
+var g_PudimQuartelAccum = 0;
+var g_PudimQuartelUltima = 0;
+var g_PudimQuartelEquipe = [];      // quem foi recrutado, para devolver ao trabalho
+var g_PudimQuartelBase = 0;         // quantos já existiam quando a série começou
+
+/** Chamado pelo dropdown de tipo. */
+function pudim_QuartelSetTipo()
+{
+	const dd = Engine.GetGUIObjectByName("pudim_quartelTipo");
+	if (!dd) return;
+	g_PudimQuartelTipo = PUDIM_QUARTEL_TIPOS[dd.selected] || "quartel";
+	pudim_QuartelAtualizarLabel();
+}
+
+/** Chamado pelo dropdown de quantidade. */
+function pudim_QuartelSetQtd()
+{
+	const dd = Engine.GetGUIObjectByName("pudim_quartelQtd");
+	if (!dd) return;
+	if (!g_PudimQuartelAtivo) g_PudimQuartelAlvo = dd.selected + 1;
+	pudim_QuartelAtualizarLabel();
+}
+
+/** Botão: liga a série, ou cancela a que estiver rodando. */
+function pudim_QuartelToggle()
+{
+	if (g_PudimQuartelAtivo) {
+		g_PudimQuartelAtivo = false;
+		// Cancelar devolve a equipe ao trabalho na hora. Deixá-los parados seria pior do
+		// que nunca ter começado.
+		pudim_QuartelLiberarEquipe();
+		pudim_Log("INFO", "QUARTEL", "série cancelada pelo jogador");
+	} else {
+		const dd = Engine.GetGUIObjectByName("pudim_quartelQtd");
+		g_PudimQuartelAlvo = dd ? dd.selected + 1 : 1;
+		g_PudimQuartelAtivo = true;
+		g_PudimQuartelBase = 0;
+		g_PudimQuartelUltima = 0;
+		pudim_Log("INFO", "QUARTEL", "série iniciada: " + g_PudimQuartelAlvo + " " +
+			PUDIM_QUARTEL_NOMES[g_PudimQuartelTipo]);
+	}
+	pudim_QuartelAtualizarLabel();
+}
+
+/**
+ * Solta a proteção da equipe para que o auto-trabalho a recolha.
+ *
+ * "Ao finalizar, eles voltam a trabalhar" — o despacho já manda unidade ociosa para o
+ * recurso mais carente a cada 500ms, então basta parar de protegê-los. Emitir uma ordem de
+ * coleta aqui competiria com esse despacho e cairia no mesmo erro de dois sistemas
+ * mandando na mesma unidade que já custou caro em outras partes do mod.
+ */
+function pudim_QuartelLiberarEquipe()
+{
+	for (const id of g_PudimQuartelEquipe)
+		pudim_ProtectBuilder(id, 0);
+	g_PudimQuartelEquipe = [];
+}
+
+function pudim_QuartelAtualizarLabel()
+{
+	const lbl = Engine.GetGUIObjectByName("pudim_quartelBtnLabel");
+	if (!lbl) return;
+	const nome = PUDIM_QUARTEL_NOMES[g_PudimQuartelTipo];
+	lbl.caption = g_PudimQuartelAtivo
+		? "PARAR — faltam " + g_PudimQuartelAlvo + " " + nome
+		: "Construir " + g_PudimQuartelAlvo + " " + nome;
+}
+
+function pudim_QuartelInit()
+{
+	const tipo = Engine.GetGUIObjectByName("pudim_quartelTipo");
+	if (tipo) {
+		tipo.list = PUDIM_QUARTEL_TIPOS.map(t => PUDIM_QUARTEL_NOMES[t]);
+		tipo.list_data = PUDIM_QUARTEL_TIPOS.slice();
+		tipo.selected = 0;
+	}
+	const qtd = Engine.GetGUIObjectByName("pudim_quartelQtd");
+	if (qtd) {
+		const nums = [];
+		for (let i = 1; i <= 10; i++) nums.push(String(i));
+		qtd.list = nums;
+		qtd.list_data = nums.slice();
+		qtd.selected = 0;
+	}
+	pudim_QuartelAtualizarLabel();
+}
+
+function pudim_ProcessQuartel()
+{
+	if (!g_PudimQuartelAtivo) return;
+	const agora = Date.now();
+	if (agora - g_PudimQuartelUltima < PUDIM_QUARTEL_INTERVALO) return;
+
+	// A pausa de "o jogador apagou uma obra" vale aqui também: ele apagou, ele decide.
+	if (pudim_ObrasPausadas()) return;
+
+	let d;
+	try {
+		d = Engine.GuiInterfaceCall("pudim_GetBarracksBuildData",
+			{ "tipo": g_PudimQuartelTipo, "playerOrdered": pudim_GetPlayerOrderedIds() });
+	} catch (e) { return; }
+	if (!d) return;
+
+	if (!d.template) {
+		pudim_Log("WARN", "QUARTEL", "esta civilização não constrói " +
+			PUDIM_QUARTEL_NOMES[g_PudimQuartelTipo] + " — série cancelada");
+		g_PudimQuartelAtivo = false;
+		pudim_QuartelAtualizarLabel();
+		return;
+	}
+
+	// Na primeira volta, guarda quantos já existiam: o alvo é quantos NOVOS, não um total.
+	if (g_PudimQuartelBase === 0) g_PudimQuartelBase = d.prontos;
+
+	const feitos = Math.max(0, d.prontos - g_PudimQuartelBase);
+	const faltam = g_PudimQuartelAlvo - feitos;
+	if (faltam <= 0) {
+		pudim_Log("SUCCESS", "QUARTEL", g_PudimQuartelAlvo + " " +
+			PUDIM_QUARTEL_NOMES[g_PudimQuartelTipo] + " prontos — equipe volta ao trabalho");
+		g_PudimQuartelAtivo = false;
+		pudim_QuartelLiberarEquipe();
+		pudim_QuartelAtualizarLabel();
+		return;
+	}
+
+	// ── Sequencial ou paralelo ───────────────────────────────────────────────────────
+	// As duas condições do jogador têm de valer JUNTAS: população acima de 180 e recurso
+	// sobrando. Só uma delas não basta — pop alta sem recurso deixaria fundações paradas,
+	// e recurso sobrando com pop baixa é justamente quando terminar rápido importa mais.
+	const estado = GetSimState().players[Engine.GetPlayerID()];
+	const res = estado ? estado.resourceCounts : null;
+	const folgado = !!res && (+res.wood || 0) >= PUDIM_QUARTEL_FOLGA &&
+	                (+res.stone || 0) >= PUDIM_QUARTEL_FOLGA / 3;
+	const popAlta = (d._dbg && d._dbg.pop || 0) > PUDIM_QUARTEL_POP_PARALELO;
+	const paralelo = folgado && popAlta;
+	const tetoObras = paralelo ? Math.min(PUDIM_QUARTEL_MAX_PARALELO, faltam) : 1;
+
+	if (d.emObra >= tetoObras) {
+		// Já há obra em andamento: no regime sequencial isto é o freio inteiro.
+		g_PudimQuartelUltima = agora;
+		return;
+	}
+
+	if (!d.builderIds || d.builderIds.length === 0 ||
+	    !d.candidatePositions || d.candidatePositions.length === 0) {
+		g_PudimQuartelUltima = agora;
+		return;
+	}
+
+	// Valida a posição com o mesmo preview que o jogo usa ao posicionar à mão, então
+	// terreno, sobreposição e território são checados pelo motor e não por conta própria.
+	let escolhida = null;
+	for (const pos of d.candidatePositions) {
+		if (pudim_IsCancelledSpot(pos.x, pos.z)) continue;
+		let r = null;
+		try {
+			r = Engine.GuiInterfaceCall("SetBuildingPlacementPreview", {
+				"template": d.template, "x": pos.x, "z": pos.z, "angle": 0, "actorSeed": 0
+			});
+		} catch (e) {}
+		if (r && r.success) { escolhida = pos; break; }
+	}
+	try { Engine.GuiInterfaceCall("SetBuildingPlacementPreview", { "template": "" }); } catch (e) {}
+	if (!escolhida) { g_PudimQuartelUltima = agora; return; }
+
+	Engine.PostNetworkCommand({
+		"type": "construct",
+		"entities": d.builderIds,
+		"template": d.template,
+		"x": escolhida.x,
+		"z": escolhida.z,
+		"angle": 0,
+		"actorSeed": 0,
+		"autorepair": true,
+		"autocontinue": true,
+		"queued": false
+	});
+	pudim_MarkModBuilt(escolhida.x, escolhida.z);
+	// Protege a equipe enquanto ela constrói, senão o despacho a puxa de volta para o
+	// recurso no tique seguinte e a obra fica sem ninguém.
+	g_PudimQuartelEquipe = d.builderIds.slice();
+	for (const id of d.builderIds)
+		pudim_ProtectBuilder(id, agora + 60000);
+
+	g_PudimQuartelUltima = agora;
+	pudim_Log("SUCCESS", "QUARTEL", PUDIM_QUARTEL_NOMES[g_PudimQuartelTipo] + " em (" +
+		escolhida.x.toFixed(0) + "," + escolhida.z.toFixed(0) + ") com " +
+		d.builderIds.length + " trabalhador(es) — faltam " + faltam +
+		(paralelo ? " [paralelo: pop " + d._dbg.pop + " e recurso sobrando]" : " [em série]"));
 }
 
 

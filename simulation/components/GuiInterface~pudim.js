@@ -3219,6 +3219,180 @@ const PUDIM_CASA_ROTA_FOLGA = 16;
 const PUDIM_CASA_ROTA_ISENCAO = 24;
 const PUDIM_CASA_ROTA_MAX = 120;
 
+// ─── Construção em série de quartéis e estábulos ──────────────────────────────────────
+//
+// Pedido de 25/08: "colocar uma opcao de construir automaticamente quartel ou estabulos...
+// escolho o tipo Quartel/Estabulo, e um drop com a quantidade, de 1 a 10. Dai vai pegar 5
+// trabalhadores/guerreiros do recurso mais abundante, e fazer as construcoes
+// sequencialmente, nao simultaneamente, e ao finalizar, eles voltam a trabalhar. Agora se
+// tiver muitos recursos sobrando, e a populacao maior que 180, pode fazer os
+// quarteis/estabulos simultaneamente."
+//
+// O "sequencialmente" é a parte que importa e é fácil de errar. Cinco trabalhadores numa
+// obra terminam ela rápido e voltam a colher; cinco obras com um trabalhador cada ficam
+// meio-prontas por muito tempo, com o custo já pago e nenhuma unidade saindo de nenhuma.
+// Em jogo isso é a diferença entre ter um quartel treinando aos 8 minutos e ter cinco
+// esqueletos aos 12.
+//
+// A exceção que ele pediu é igualmente concreta: com população perto do teto o gargalo
+// deixa de ser recurso e passa a ser QUANTOS lugares treinam ao mesmo tempo, e aí paralelo
+// ganha. Os dois regimes estão certos, cada um no seu momento.
+const PUDIM_QUARTEL_EQUIPE = 5;      // trabalhadores por obra, o tamanho que ele pediu
+const PUDIM_QUARTEL_POP_PARALELO = 180;
+const PUDIM_QUARTEL_RAIO_MIN = 30;   // não colar no centro cívico
+const PUDIM_QUARTEL_RAIO_MAX = 110;
+const PUDIM_QUARTEL_PASSO = 12;
+
+/**
+ * Onde erguer o próximo quartel/estábulo e quem vai erguê-lo.
+ *
+ * data.tipo         "quartel" | "estabulo"
+ * data.playerOrdered  ids que receberam ordem do jogador — nunca são recrutados
+ *
+ * Devolve emObra > 0 quando já existe fundação do tipo em andamento; o painel usa isso
+ * para respeitar o regime sequencial sem precisar guardar estado da obra.
+ */
+GuiInterface.prototype.pudim_GetBarracksBuildData = function(player, data)
+{
+	const result = { "builderIds": [], "template": "", "candidatePositions": [],
+	                 "emObra": 0, "prontos": 0, "paralelo": false,
+	                 "_dbg": { "reason": "init" } };
+
+	const cmpRangeManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_RangeManager);
+	const cmpTerritoryManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_TerritoryManager);
+	if (!cmpRangeManager) { result._dbg.reason = "no_rangemanager"; return result; }
+
+	const tipo = (data && data.tipo) || "quartel";
+	const classe = tipo === "estabulo" ? "Stable" : "Barracks";
+	const ordenados = (data && data.playerOrdered) ? data.playerOrdered : {};
+	const allEnts = cmpRangeManager.GetEntitiesByPlayer(player);
+
+	// ── Censo: quantos já existem, quantos estão em obra, e onde fica o centro ────────
+	let ccX = 0, ccZ = 0, temCC = false;
+	for (const ent of allEnts) {
+		const cmpId = Engine.QueryInterface(ent, IID_Identity);
+		if (!cmpId) continue;
+		const fundacao = Engine.QueryInterface(ent, IID_Foundation);
+		if (cmpId.HasClass(classe)) {
+			if (fundacao) result.emObra++;
+			else result.prontos++;
+		}
+		if (!temCC && cmpId.HasClass("CivCentre") && !fundacao) {
+			const p = Engine.QueryInterface(ent, IID_Position);
+			if (p && p.IsInWorld()) { const q = p.GetPosition2D(); ccX = q.x; ccZ = q.y; temCC = true; }
+		}
+	}
+	if (!temCC) { result._dbg.reason = "sem_cc"; return result; }
+
+	// ── Regime paralelo: só com população alta E recurso sobrando ────────────────────
+	const cmpPlayerManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_PlayerManager);
+	const playerEnt = cmpPlayerManager.GetPlayerByID(player);
+	const cmpPlayer = Engine.QueryInterface(playerEnt, IID_Player);
+	const popAtual = cmpPlayer && cmpPlayer.GetPopulationCount ? cmpPlayer.GetPopulationCount() : 0;
+	result._dbg.pop = popAtual;
+
+	// ── Template do edifício, tirado de quem pode construí-lo ────────────────────────
+	// Sai do Builder da própria unidade, então serve para qualquer civilização sem lista
+	// de nomes no código. Estábulo não existe em toda civ — quando não existe, o painel
+	// recebe template vazio e avisa em vez de tentar e falhar em silêncio.
+	let template = "";
+	const marcador = tipo === "estabulo" ? "stable" : "barracks";
+
+	// ── Quem constrói: os 5 mais próximos, do recurso mais abundante ─────────────────
+	// "Do recurso mais abundante" é o pedido, e a razão é boa: tirar gente de onde já
+	// sobra custa menos que tirar de onde falta.
+	const contagem = {};
+	const candidatosPorRecurso = {};
+	for (const ent of allEnts) {
+		if (ordenados[ent]) continue;
+		const cmpBuilder = Engine.QueryInterface(ent, IID_Builder);
+		if (!cmpBuilder) continue;
+		const cmpIdU = Engine.QueryInterface(ent, IID_Identity);
+		if (!cmpIdU || cmpIdU.HasClass("FastMoving")) continue;   // cavalaria não constrói aqui
+		const p = Engine.QueryInterface(ent, IID_Position);
+		if (!p || !p.IsInWorld()) continue;
+
+		if (!template) {
+			const lista = cmpBuilder.GetEntitiesList ? cmpBuilder.GetEntitiesList() : [];
+			for (const tpl of lista)
+				if (tpl.indexOf(marcador) !== -1) { template = tpl; break; }
+		}
+
+		const cmpAI = Engine.QueryInterface(ent, IID_UnitAI);
+		const ord = cmpAI && cmpAI.orderQueue && cmpAI.orderQueue.length ? cmpAI.orderQueue[0] : null;
+		// Já construindo alguma coisa: não é candidato — tirá-lo da obra é o desperdício
+		// que se quer evitar, e é a mesma regra do pool de fazendas.
+		if (ord && ord.type === "Repair") continue;
+
+		let recurso = "ocioso";
+		if (ord && ord.type === "Gather") {
+			const alvo = ord.data && ord.data.target;
+			const rs = alvo ? Engine.QueryInterface(alvo, IID_ResourceSupply) : null;
+			if (rs) recurso = rs.GetType().generic;
+			else continue;
+		} else if (ord) {
+			continue;   // ocupado com outra coisa (atacar, guarnecer): não mexer
+		}
+
+		contagem[recurso] = (contagem[recurso] || 0) + 1;
+		if (!candidatosPorRecurso[recurso]) candidatosPorRecurso[recurso] = [];
+		const q = p.GetPosition2D();
+		candidatosPorRecurso[recurso].push({ id: ent, x: q.x, z: q.y });
+	}
+
+	if (!template) { result._dbg.reason = "civ_sem_" + tipo; return result; }
+	result.template = template;
+
+	// Ocioso vem primeiro — custa coleta nenhuma —, depois o recurso com mais gente.
+	const ordemRecursos = Object.keys(contagem).sort(function(a, b) {
+		if (a === "ocioso") return -1;
+		if (b === "ocioso") return 1;
+		return contagem[b] - contagem[a];
+	});
+	result._dbg.pool = ordemRecursos.map(r => r + ":" + contagem[r]).join(",");
+
+	const equipe = [];
+	for (const rec of ordemRecursos) {
+		const lista = candidatosPorRecurso[rec];
+		// Mais perto do centro cívico primeiro: a obra nasce perto dele, então é quem
+		// chega antes e volta antes para o recurso.
+		lista.sort(function(a, b) {
+			const da = (a.x - ccX) * (a.x - ccX) + (a.z - ccZ) * (a.z - ccZ);
+			const db = (b.x - ccX) * (b.x - ccX) + (b.z - ccZ) * (b.z - ccZ);
+			return da - db;
+		});
+		for (const c of lista) {
+			equipe.push(c.id);
+			if (equipe.length >= PUDIM_QUARTEL_EQUIPE) break;
+		}
+		if (equipe.length >= PUDIM_QUARTEL_EQUIPE) break;
+	}
+	if (equipe.length === 0) { result._dbg.reason = "sem_trabalhador_livre"; return result; }
+	result.builderIds = equipe;
+
+	// ── Onde: espiral em volta do centro cívico, dentro do território ────────────────
+	// Longe o bastante para não entupir o centro, perto o bastante para as unidades
+	// treinadas nascerem na base e não no meio do mapa.
+	const mapSize = cmpRangeManager.GetMapSize ? cmpRangeManager.GetMapSize() : 512;
+	const candidatos = [];
+	for (let r = PUDIM_QUARTEL_RAIO_MIN; r <= PUDIM_QUARTEL_RAIO_MAX; r += PUDIM_QUARTEL_PASSO) {
+		const passos = Math.max(8, Math.round(2 * Math.PI * r / 24));
+		for (let i = 0; i < passos; i++) {
+			const ang = (i * 2 * Math.PI) / passos;
+			const cx = ccX + Math.cos(ang) * r;
+			const cz = ccZ + Math.sin(ang) * r;
+			if (cx < 10 || cz < 10 || cx > mapSize - 10 || cz > mapSize - 10) continue;
+			if (cmpTerritoryManager && cmpTerritoryManager.GetOwner(cx, cz) !== player) continue;
+			candidatos.push({ x: cx, z: cz });
+		}
+	}
+	result.candidatePositions = candidatos;
+	result._dbg.reason = "ok";
+	result._dbg.cands = candidatos.length;
+	return result;
+};
+
+
 GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 	const cmpPlayerManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_PlayerManager);
 	const playerEnt = cmpPlayerManager.GetPlayerByID(player);
@@ -5973,6 +6147,7 @@ var pudim_exposedFunctions = {
   	"pudim_GetAllyStats": 1,
  	"pudim_GetAutoHouseData": 1,
 	"pudim_GetHeroAuraData": 1,
+	"pudim_GetBarracksBuildData": 1,
   	"pudim_GetScoutStatus": 1,
   	"pudim_GetAutoKiteData": 1,
   	"pudim_GetCombatEstimation": 1,

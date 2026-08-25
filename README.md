@@ -478,6 +478,16 @@ O **mercado inteligente** troca o que está sobrando pelo que está faltando.
 
 ## Construção
 
+- **Série de quartéis e estábulos.** Escolha o tipo e quantos (1 a 10) e o mod ergue um de cada
+  vez, com 5 trabalhadores tirados do recurso mais abundante — ocioso primeiro, que não custa
+  coleta nenhuma. Ao terminar a série eles voltam ao trabalho sozinhos. **Uma obra por vez é o
+  padrão de propósito**: cinco obras com um trabalhador cada ficam meio-prontas por muito tempo,
+  com o custo já pago e nenhuma unidade saindo de nenhuma — é a diferença entre um quartel
+  treinando aos 8 minutos e cinco esqueletos aos 12. Só com **população acima de 180 E recurso
+  sobrando** ele passa a erguer até três em paralelo, que é quando o gargalo deixa de ser
+  recurso e passa a ser quantos lugares treinam ao mesmo tempo. Civilização que não tem o
+  edifício é avisada em vez de o mod tentar em silêncio.
+
 - **Casa nunca no corredor de coleta.** O edifício vira obstáculo de pathfinding, então casa pousada
   entre o recurso e o dropsite faz cada viagem contornar — por carga, para o resto da partida, sem
   aparecer em lugar nenhum da interface. Cada recurso sendo colhido define um segmento até o dropsite
@@ -543,6 +553,26 @@ Português ou inglês, detectado automaticamente pelo idioma do jogo. Para forç
 ### 25/08/2026
 
 Tudo abaixo saiu de uma partida só, com o jogo aberto e os relatos chegando na hora.
+
+**O jogador manda mais que o mod**
+
+- **Apagar uma obra pausa TODAS as obras por 10 segundos.** A quarentena por posição existia,
+  mas o único lugar que detectava uma fundação sumindo filtrava por armazém e celeiro — casa
+  apagada nunca era registrada como apagada, e o mod reconstruía no mesmo ponto. E quarentena
+  por posição sozinha não bastaria: ela impede refazer *ali*, mas o mod continua livre para
+  pousar a 45 m dali no ciclo seguinte, e enquanto ele repõe a cada poucos segundos o jogador
+  não chega nem a escolher o lugar bom. Ao voltar, cada sistema refaz a própria conta — se você
+  já construiu no lugar melhor, o mod simplesmente não precisa mais.
+- **A auto-fila desligada fica desligada.** O motor desliga a fila sozinho quando não dá para
+  pagar a unidade, e o comando chega igual ao do jogador. O mod chutava pelo estoque naquele
+  instante, e quem desligava num vale de recursos era lido como o motor. Não dá para adivinhar
+  quem clicou, mas não precisa: o motor desliga uma vez e volta quando há recurso; quem quer a
+  fila desligada desliga de novo. Duas desativações em 30 s são decisão. E o mod nunca religa
+  nos 10 s seguintes a uma desativação — religar no mesmo tique era o que atropelava o clique.
+
+**Construção**
+
+- **Série de quartéis/estábulos**, descrita na seção Construção acima.
 
 **Economia**
 

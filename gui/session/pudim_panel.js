@@ -2294,7 +2294,7 @@ function pudim_ProcessFarms()
 			const d = farmData._dbg || {};
 			pudim_Log("DEBUG", "FARM", "fc=" + (d.fc||0) + " nfc=" + (d.nfc||0) +
 				" ncap=" + (d.ncap||0) + " tg=" + (d.tg||0) + " cfm=" + (d.cfm||0) +
-				" fwt=" + (d.fwt||0) + " df=" + (d.df||0) + " wp=" + (d.wp||0) +
+				" fwt=" + (d.fwt||0) + " df=" + (d.df||0) + " wp=" + (d.wp||0) + " ocio=" + (d.ocio||0) +
 				" fmc=" + (d.fmc||0) + " tffs=" + (d.tffs||0) +
 				// trn = unidades em produção; edf = déficit já descontado delas. Juntos
 				// mostram quando a trava de "espera nascer" está segurando o remanejamento.
@@ -2511,7 +2511,12 @@ function pudim_ProcessAdvancedAI()
 						const wdx = foundPos.x - houseData.anchorX, wdz = foundPos.z - houseData.anchorZ;
 						walkTxt = " and=" + Math.round(Math.sqrt(wdx*wdx + wdz*wdz));
 					}
-					pudim_Log("SUCCESS", "CASAS", "build em (" + foundPos.x.toFixed(0) + "," + foundPos.z.toFixed(0) +
+					// rotas/limpos: quantos corredores de coleta existiam e quantos lugares
+					// ficavam fora deles. limpos=0 significa que a casa POUSOU num corredor
+					// por falta de alternativa — é o sinal de que a base ficou apertada.
+					pudim_Log("SUCCESS", "CASAS", "rotas=" + (houseData.rotasEvitadas||0) +
+						" limpos=" + (houseData.candidatosLimpos||0) +
+						" build em (" + foundPos.x.toFixed(0) + "," + foundPos.z.toFixed(0) +
 						") builders=" + houseBuilderIds.length + walkTxt +
 						" de=" + (houseData.fromRes || "-"));
 					Engine.PostNetworkCommand({

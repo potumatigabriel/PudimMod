@@ -398,6 +398,14 @@ GuiInterface.prototype.pudim_GetCombatEstimation = function(player, data)
  * @param {Object} data.weights - Pesos de prioridade { food, wood, stone, metal }
  * @returns {Object} { idleWorkers: number[], bestResource: string }
  */
+// Margem sobre o ponto de empate andar-vs-colher, e piso absoluto em metros.
+//
+// 1.5: agir no empate gera vaivem — ver o comentario dentro do calculo. 55m de piso porque
+// o CC ocupa ~20m de footprint e um arbusto de base fica tipicamente a 40-50m dele; abaixo
+// disso o "conserto" custa mais que o problema.
+const PUDIM_WALK_MARGEM = 1.5;
+const PUDIM_WALK_PISO = 55;
+
 GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, data)
 {
 	// suggestStorehouse/suggestFarmstead são LISTAS: se vários workers forem despachados pra
@@ -1380,17 +1388,27 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 		// 129m. Como sai dos componentes da PRÓPRIA unidade, melhorias de coleta e de
 		// velocidade deslocam o limiar sozinhas.
 		const cmpGath2 = Engine.QueryInterface(ent, IID_ResourceGatherer);
-		let walkThresh = 100;
+		let walkThresh = PUDIM_WALK_MARGEM * 100;
 		if (cmpGath2 && targetResType.specific) {
 			const rates2 = cmpGath2.GetGatherRates ? cmpGath2.GetGatherRates() : null;
 			const rate2 = rates2 ? +rates2[targetResType.generic + "." + targetResType.specific] : 0;
 			const cap2 = cmpGath2.GetCapacity ? +cmpGath2.GetCapacity(targetResType.generic) : 0;
 			const cmpMot2 = Engine.QueryInterface(ent, IID_UnitMotion);
 			const spd2 = cmpMot2 && cmpMot2.GetWalkSpeed ? +cmpMot2.GetWalkSpeed() : 9;
-			// Piso de 35m: abaixo disso a "viagem" é do tamanho do próprio prédio mais o
-			// alcance de coleta, e mexer só geraria vaivém.
+			// O empate NÃO é o ponto de agir. Nele o coletor ainda entrega meia carga por
+			// ciclo, e tirá-lo dali custa uma viagem inteira só para chegar ao destino novo,
+			// sem colher nada no caminho. Agir no empate produziu o vaivém de 25/08: com a
+			// taxa de fruta melhorada o limiar caiu para 35m, e coletores a 42m do CC —
+			// distância banal para um arbusto de base — eram marcados e realocados a cada
+			// ciclo enquanto o despacho mandava outros para a MESMA fruta. Dois sistemas
+			// empurrando gente em direções opostas, que na tela vira passeio.
+			//
+			// A margem afasta o gatilho do empate: só vale mexer quando ele já gasta bem
+			// mais tempo andando do que colhendo (com 1.5, ~40% de eficiência), e aí a
+			// viagem economizada paga a mudança em poucas cargas.
 			if (rate2 > 0 && cap2 > 0 && spd2 > 0)
-				walkThresh = Math.max(35, (cap2 * spd2) / (2 * rate2));
+				walkThresh = Math.max(PUDIM_WALK_PISO,
+					PUDIM_WALK_MARGEM * (cap2 * spd2) / (2 * rate2));
 		}
 		if (nearestDropDist <= walkThresh) continue;
 
@@ -2326,7 +2344,7 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 // ─── Fazendas ────────────────────────────────────────────────────
 GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 {
-	const result = { "action": "none", "builderId": null, "template": null, "candidatePositions": [], "workersToRedirect": [], "ccX": 0, "ccZ": 0, "soldierEvictions": [], "_dbg": { "fc": 0, "nfc": 0, "fbc": 0, "tg": 0, "cfm": 0, "df": 0, "wp": 0, "fwc": 0, "fmc": 0, "reason": "init" } };
+	const result = { "action": "none", "builderId": null, "template": null, "candidatePositions": [], "workersToRedirect": [], "ccX": 0, "ccZ": 0, "soldierEvictions": [], "_dbg": { "fc": 0, "nfc": 0, "fbc": 0, "tg": 0, "cfm": 0, "df": 0, "wp": 0, "fwc": 0, "fmc": 0, "ocio": 0, "reason": "init" } };
 	
 	const cmpPlayerManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_PlayerManager);
 	const playerEnt = cmpPlayerManager.GetPlayerByID(player);
@@ -2681,12 +2699,36 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	}
 	result._dbg.edf = effDeficit;
 
-	if (effDeficit <= 0 || woodWorkerPool.length === 0) {
-		result._dbg.reason = woodWorkerPool.length === 0 ? "nowood2"
+	// QUEM ACABOU DE NASCER VAI PRIMEIRO. Só depois se puxa quem já está produzindo.
+	//
+	// Relato de 25/08: "ao invés de mandar os que nasceram fazer fazendas, tirou os que
+	// estavam nas frutas pra fazer fazenda e os que nasceram foram pras frutas". O
+	// resultado líquido é o mesmo número de gente em cada recurso, só que pago com duas
+	// caminhadas em vez de nenhuma — e com as duas cargas parciais que os deslocados
+	// largaram no chão.
+	//
+	// A causa era esta linha: o pool de construtores de campo saía direto de
+	// woodWorkerPool, gente com ordem de Gather ativa. Um recém-nascido é ocioso, e o
+	// auto-work (que roda a cada 500ms) o pegava antes, mandando-o para o recurso mais
+	// carente — a fruta. Os dois sistemas estavam certos isoladamente e trocavam as
+	// unidades de lugar.
+	//
+	// idleBuilders já é coletado acima (unidade com Builder e fila de ordens vazia), que é
+	// exatamente o estado de quem saiu do CC agora. Pegar dali primeiro custa zero coleta.
+	const ocupados = {};
+	for (const w of woodWorkerPool) ocupados[w] = true;
+	const poolFazenda = [];
+	for (const ib of idleBuilders)
+		if (!ocupados[ib.ent]) poolFazenda.push(ib.ent);
+	result._dbg.ocio = poolFazenda.length;
+	for (const w of woodWorkerPool) poolFazenda.push(w);
+
+	if (effDeficit <= 0 || poolFazenda.length === 0) {
+		result._dbg.reason = poolFazenda.length === 0 ? "nowood2"
 			: (deficit > 0 ? "aguarda_nascimento" : "nodeficit");
 		return result;
 	}
-	farFoodWorkers = woodWorkerPool.slice(0, effDeficit);
+	farFoodWorkers = poolFazenda.slice(0, effDeficit);
 
 	// ── Verificar se fazendas existentes têm capacidade livre ────────────────────────────
 	// (GetMaxGatherers de um campo = 5, conferido no template; GetNumGatherers = atual agora)
@@ -3112,6 +3154,18 @@ GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
     }
     return allies;
 };
+// Geometria da regra "casa nunca entre o coletor e o dropsite".
+//
+// FOLGA 16: a casa gaul ocupa ~20 units, entao 10 de meio-corpo mais 6 de passagem para a
+// fila de coletores contornar sem esbarrar.
+// ISENCAO 24: raio em volta do dropsite onde a regra nao vale — todas as rotas convergem
+// ali e e onde o vilarejo naturalmente cresce.
+// ROTA_MAX 120: acima disso a rota ganha um dropsite proprio pelo sistema de caminhada
+// longa, entao nao vale reservar o corredor.
+const PUDIM_CASA_ROTA_FOLGA = 16;
+const PUDIM_CASA_ROTA_ISENCAO = 24;
+const PUDIM_CASA_ROTA_MAX = 120;
+
 GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 	const cmpPlayerManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_PlayerManager);
 	const playerEnt = cmpPlayerManager.GetPlayerByID(player);
@@ -3168,6 +3222,57 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 		if (targetIdent && targetFound && targetIdent.HasClass("House")) {
 			anyBuilderInTransit = true;
 			break;
+		}
+	}
+
+	// ── Rotas de coleta: por onde os trabalhadores andam carregados ──────────────────
+	//
+	// Relato de 25/08: "as casas nunca devem ficar entre os coletores e o dropsite, senão
+	// atrapalha e reduz a velocidade das coletas". É literalmente verdade no motor: a casa
+	// vira obstáculo de pathfinding e cada viagem passa a contorná-la. O custo não é único,
+	// é por carga, para sempre, e some da vista porque nada no jogo o reporta.
+	//
+	// Uma rota é o segmento reto entre o recurso que alguém está colhendo e o dropsite mais
+	// próximo que aceita aquele recurso — o caminho que o motor vai querer usar.
+	const rotasColeta = [];
+	{
+		const dropsitesRota = [];
+		for (const ent of allEnts) {
+			const cmpDs = Engine.QueryInterface(ent, IID_ResourceDropsite);
+			if (!cmpDs) continue;
+			if (Engine.QueryInterface(ent, IID_Foundation)) continue;
+			const p = Engine.QueryInterface(ent, IID_Position);
+			if (!p || !p.IsInWorld()) continue;
+			dropsitesRota.push({ pos: p.GetPosition2D(), tipos: cmpDs.GetTypes() });
+		}
+
+		const vistos = {};
+		for (const ent of allEnts) {
+			const cmpAI = Engine.QueryInterface(ent, IID_UnitAI);
+			if (!cmpAI || !cmpAI.orderQueue || !cmpAI.orderQueue.length) continue;
+			const ord = cmpAI.orderQueue[0];
+			if (ord.type !== "Gather") continue;
+			const alvo = ord.data && ord.data.target;
+			if (!alvo || vistos[alvo]) continue;
+			const rs = Engine.QueryInterface(alvo, IID_ResourceSupply);
+			if (!rs) continue;
+			const pr = Engine.QueryInterface(alvo, IID_Position);
+			if (!pr || !pr.IsInWorld()) continue;
+			vistos[alvo] = true;
+			const rpos = pr.GetPosition2D();
+			const generico = rs.GetType().generic;
+
+			let melhor = null, melhorD = Infinity;
+			for (const ds of dropsitesRota) {
+				if (ds.tipos.indexOf(generico) === -1) continue;
+				const dx = ds.pos.x - rpos.x, dz = ds.pos.y - rpos.y;
+				const d = dx*dx + dz*dz;
+				if (d < melhorD) { melhorD = d; melhor = ds; }
+			}
+			// Rota longa demais não entra: ela ainda vai ganhar um dropsite próprio, e
+			// proteger um corredor de 150m tomaria metade da base.
+			if (melhor && melhorD <= PUDIM_CASA_ROTA_MAX * PUDIM_CASA_ROTA_MAX)
+				rotasColeta.push({ ax: rpos.x, az: rpos.y, bx: melhor.pos.x, bz: melhor.pos.y });
 		}
 	}
 
@@ -3431,11 +3536,43 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 		}
 	}
 
+	// Duas listas em vez de uma: o candidato que NÃO fica em cima de uma rota de coleta
+	// entra em `candidates`, e o que fica vai para `bloqueados`. No fim os bloqueados são
+	// anexados no fim da lista, então eles só são usados se nenhum lugar limpo couber.
+	//
+	// Isso importa: casa é população, e recusar a casa por completo trava o crescimento —
+	// um problema pior que a rota atrapalhada. A regra é uma PREFERÊNCIA forte, não um veto.
 	let candidates = [];
+	const bloqueados = [];
+
+	// Distância de um ponto ao segmento AB. É a conta que decide se a casa fica "no caminho".
+	const distRota = (px, pz, r) => {
+		const vx = r.bx - r.ax, vz = r.bz - r.az;
+		const len2 = vx*vx + vz*vz;
+		let t = len2 > 0 ? ((px - r.ax) * vx + (pz - r.az) * vz) / len2 : 0;
+		if (t < 0) t = 0; else if (t > 1) t = 1;
+		const qx = r.ax + t * vx, qz = r.az + t * vz;
+		return Math.sqrt((px - qx) * (px - qx) + (pz - qz) * (pz - qz));
+	};
+
+	const naRota = (cx, cz) => {
+		for (const r of rotasColeta) {
+			// O trecho colado no dropsite é exceção: TODAS as rotas convergem ali, e ele
+			// costuma ficar junto ao CC, que é justamente onde o vilarejo cresce. Vetar
+			// aquele nó deixaria a base sem lugar nenhum para casa.
+			const ddx = cx - r.bx, ddz = cz - r.bz;
+			if (ddx*ddx + ddz*ddz <= PUDIM_CASA_ROTA_ISENCAO * PUDIM_CASA_ROTA_ISENCAO)
+				continue;
+			if (distRota(cx, cz, r) < PUDIM_CASA_ROTA_FOLGA) return true;
+		}
+		return false;
+	};
+
 	const pushCandidate = (cx, cz) => {
 		if (cmpTerritoryManager && cmpTerritoryManager.GetOwner(cx, cz) !== player) return;
 		if (cx < 10 || cz < 10 || cx > mapSize - 10 || cz > mapSize - 10) return;
-		candidates.push({ x: cx, z: cz });
+		if (naRota(cx, cz)) bloqueados.push({ x: cx, z: cz });
+		else candidates.push({ x: cx, z: cz });
 	};
 
 	// ENCOSTAR NUMA CASA EXISTENTE vem primeiro; a posição do construtor é o fallback.
@@ -3486,11 +3623,17 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 		}
 	}
 
+	// Os que ficariam em cima de uma rota vão para o fim: só entram se nada limpo couber.
+	const limpos = candidates.length;
+	for (const b of bloqueados) candidates.push(b);
+
 	return {
 		"builderId": builderIds[0],
 		"builderIds": builderIds,
 		"template": houseTemplate,
 		"candidatePositions": candidates,
+		"rotasEvitadas": rotasColeta.length,
+		"candidatosLimpos": limpos,
 		"stuckGhosts": stuckGhosts,
 		"workersToRedirect": [],
 		"productionBuildingCount": productionBuildingCount,

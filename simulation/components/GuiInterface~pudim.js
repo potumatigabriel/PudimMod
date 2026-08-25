@@ -1493,7 +1493,12 @@ GuiInterface.prototype.pudim_GetAutoRetreatData = function(player, data)
 
 	const fallbackCC = ccPositions.length > 0 ? ccPositions[0] : null;
 
+	// Ordem manual do jogador manda tambem aqui: unidade que ele acabou de comandar
+	// nao e arrastada para o templo no meio da travessia.
+	const arOrdered = new Set(((data && data.playerOrdered) || []).map(Number));
+
 	for (const ent of myUnits) {
+		if (arOrdered.has(ent)) continue;
 		const id = Engine.QueryInterface(ent, IID_Identity);
 		if (!id) continue;
 		if (!id.HasClass("CitizenSoldier") && !id.HasClass("FastMoving")) continue;
@@ -3622,8 +3627,16 @@ GuiInterface.prototype.pudim_GetScoutStatus = function(player, data) {
 const PUDIM_KITE_FOLGA_TIRO = 3;
 /** Margem sobre o alcance de um atirador inimigo. */
 const PUDIM_KITE_MARGEM_RANGED = 3;
-/** Segundos de aproximacao de um corpo a corpo que o gatilho antecipa. */
-const PUDIM_KITE_SEG_APROXIMACAO = 2;
+/**
+ * Segundos de aproximacao de um corpo a corpo que o gatilho antecipa.
+ *
+ * Era 2. Para cavalaria (velocidade ~16) isso punha o gatilho em 36m, e um
+ * dardeiro de alcance 30 recuava de um inimigo que ainda estava mais longe do
+ * que ele proprio consegue acertar — puro desperdicio de dano. 1s mantem a
+ * antecipacao onde ela serve (o corpo a corpo ainda nao encostou) sem disparar
+ * de longe demais.
+ */
+const PUDIM_KITE_SEG_APROXIMACAO = 1;
 
 GuiInterface.prototype.pudim_GetAutoKiteData = function(player, data)
 {
@@ -3672,7 +3685,12 @@ GuiInterface.prototype.pudim_GetAutoKiteData = function(player, data)
 	}
 	if (ameacas.length === 0) return result;
 
+	// Unidade com ordem manual sua nao e tocada por nenhum sistema de combate. A
+	// protecao ja existia no auto-trabalho e faltava exatamente aqui.
+	const kiteOrdered = new Set(((data && data.playerOrdered) || []).map(Number));
+
 	for (const ent of cmpRangeManager.GetEntitiesByPlayer(player)) {
+		if (kiteOrdered.has(ent)) continue; // ordem sua manda
 		if (kiting[ent]) continue; // recuou ha pouco — deixar chegar e atirar
 		const cmpId = Engine.QueryInterface(ent, IID_Identity);
 		if (!cmpId || !cmpId.HasClass("Ranged")) continue;
@@ -3693,7 +3711,17 @@ GuiInterface.prototype.pudim_GetAutoKiteData = function(player, data)
 		// resolve — ou seja, aquelas cujo gatilho cabe dentro do nosso alcance util.
 		let pior = null, piorFolga = -Infinity, piorDist = 0;
 		for (const a of ameacas) {
-			if (destinoDist <= a.gatilho) continue; // recuar nao tira a gente do perigo
+			// Vale recuar quando o ponto de parada fica fora do ALCANCE DA ARMA dele —
+			// nao fora do gatilho. Comparar com o gatilho era o erro: ele inclui o
+			// deslocamento do inimigo, entao contra cavalaria (gatilho 36) um dardeiro
+			// (destino 27) era classificado como "nao adianta recuar" e parava de recuar
+			// POR COMPLETO. Cavalaria e justamente a maior ameaca a unidade de alcance.
+			//
+			// A logica correta e a do kite: nao se escapa da perseguicao, se obriga o
+			// perseguidor a refazer a distancia enquanto apanha. Contra quem ATIRA a
+			// conta continua valendo de verdade — dai fundeiro e arqueiro seguem sendo
+			// pulados por um dardeiro, porque ali recuar nao tira ninguem do alcance.
+			if (destinoDist <= a.alcance + PUDIM_KITE_MARGEM_RANGED) continue;
 			const dx = pos.x - a.x, dz = pos.y - a.z;
 			const d2 = dx * dx + dz * dz;
 			if (d2 >= a.gatilho * a.gatilho) continue; // ainda longe o bastante
@@ -3836,8 +3864,12 @@ GuiInterface.prototype.pudim_GetFocusFireCorrections = function(player, data)
 	const myUnits = cmpRangeManager.GetEntitiesByPlayer(player);
 
 	// Coletar meus soldados em combate (order type "Attack" com target vivo), com posição
+	// Ordem manual do jogador manda: nao reatribuir alvo de quem ele acabou de comandar.
+	const ffOrdered = new Set(((data && data.playerOrdered) || []).map(Number));
+
 	const attackingSoldiers = [];
 	for (const ent of myUnits) {
+		if (ffOrdered.has(ent)) continue;
 		const id = Engine.QueryInterface(ent, IID_Identity);
 		if (!id || (!id.HasClass("CitizenSoldier") && !id.HasClass("FastMoving"))) continue;
 		const cmpUnitAI = Engine.QueryInterface(ent, IID_UnitAI);

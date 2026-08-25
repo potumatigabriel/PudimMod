@@ -2418,7 +2418,12 @@ function pudim_ProcessAdvancedAI()
 	// 1. Foco de Fogo Inteligente
 	if (pudim_CombatAssistOn("focus")) {
 		try {
-			const focusData = Engine.GuiInterfaceCall("pudim_GetFocusFireCorrections", { "fixed": g_PudimFocusFixed });
+			// playerOrdered vai junto: sem ele o foco de fogo passava por cima de ordem
+			// manual. Foi o relato de 24/08 — cavalaria atravessando o mapa para um ataque
+			// furtivo parava sozinha para atacar quem estava no caminho, porque o comando
+			// sai com queued:false e cancela a caminhada.
+			const focusData = Engine.GuiInterfaceCall("pudim_GetFocusFireCorrections",
+				{ "fixed": g_PudimFocusFixed, "playerOrdered": pudim_GetPlayerOrderedIds() });
 			if (focusData && focusData.length > 0)
 			{
 				for (const group of focusData)
@@ -2699,7 +2704,8 @@ function pudim_ProcessAdvancedAI()
 	// 5. Retirada Estratégica
 	if (pudim_CombatAssistOn("retreat")) {
 		try {
-			const retreatData = Engine.GuiInterfaceCall("pudim_GetAutoRetreatData", { "retreating": g_PudimRetreating });
+			const retreatData = Engine.GuiInterfaceCall("pudim_GetAutoRetreatData",
+				{ "retreating": g_PudimRetreating, "playerOrdered": pudim_GetPlayerOrderedIds() });
 			// Desmarcar unidades curadas (HP >= 50%)
 			if (retreatData && retreatData.recovered) {
 				for (const uid of retreatData.recovered) delete g_PudimRetreating[uid];
@@ -3488,7 +3494,8 @@ function pudim_ProcessAutoKite()
 	let kiteData;
 	try
 	{
-		kiteData = Engine.GuiInterfaceCall("pudim_GetAutoKiteData", { "kiting": g_PudimKiting });
+		kiteData = Engine.GuiInterfaceCall("pudim_GetAutoKiteData",
+			{ "kiting": g_PudimKiting, "playerOrdered": pudim_GetPlayerOrderedIds() });
 	}
 	catch (e) { return; }
 

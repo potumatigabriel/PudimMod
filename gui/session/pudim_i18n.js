@@ -61,6 +61,49 @@ function pudim_Lang()
  * botões; as demais são rótulos.
  */
 const PUDIM_STRINGS = {
+	"cap.combatHeader":  ["Combat Estimator", "Estimador de Combate"],
+	"cap.combatRefresh": ["Refresh Estimate", "Atualizar Estimativa"],
+	"cap.autoWorkHeader":["Auto-Work", "Auto-Trabalho"],
+	"cap.autoWorkDesc":  ["Sends idle citizens to gather resources.",
+	                      "Envia cidadãos ociosos para coletar recursos."],
+	"cap.autoWorkOn":    ["( ON ) Auto-Work", "( LIGADO ) Auto-Trabalho"],
+	"cap.autoWorkEnable":["Enable Auto-Work", "Ativar Auto-Trabalho"],
+	"cap.autoWorkDisable":["Disable Auto-Work", "Desativar Auto-Trabalho"],
+	"cap.statusOff":     ["Status: Off", "Status: Desativado"],
+	// Os pesos são deliberadamente não persistentes. Sem esta nota o jogador procura onde
+	// salvá-los e não acha — foi o que motivou remover os sliders mortos das opções.
+	"cap.priorityHeader":["-- Gathering Priorities (reset every match) --",
+	                      "-- Prioridades de Coleta (recomeçam a cada partida) --"],
+	"cap.food":          ["Food", "Comida"],
+	"cap.wood":          ["Wood", "Madeira"],
+	"cap.stone":         ["Stone", "Pedra"],
+	"cap.metal":         ["Metal", "Metal"],
+	"cap.sendIdle":      ["Send Idle Now", "Enviar Ociosos Agora"],
+	"cap.repeatHeader":  ["Repeat Building", "Repetir Construção"],
+	"cap.repeatDesc":    ["On finishing, places the next foundation alongside.",
+	                      "Ao terminar, coloca a próxima fundação adjacente."],
+	"cap.repeatNone":    ["No builder repeating", "Nenhum construtor em repeat"],
+	"cap.repeatCount":   ["Builders repeating: ", "Construtores em repeat: "],
+	"cap.repeatStop":    ["Stop All Repeats", "Parar Todos os Repeats"],
+	"cap.serieHeader":   ["Build in Sequence", "Construção em Série"],
+	"cap.serieBuild":    ["Build", "Construir"],
+	"cap.serieStop":     ["STOP — remaining:", "PARAR — faltam"],
+	"cap.barracks":      ["Barracks", "Quartel"],
+	"cap.stable":        ["Stable", "Estábulo"],
+	"cap.backToWork":    ["Back to Work", "Voltar ao Trabalho"],
+	"cap.situation":     ["Situation", "Situação"],
+	"cap.calm":          ["Calm", "Calma"],
+	"cap.defending":     ["Defending", "Defendendo"],
+	"cap.enemyScout":    ["Enemy scout spotted", "Batedor inimigo à vista"],
+	"cap.panic":         ["PANIC!", "PÂNICO!"],
+	"cap.returning":     ["Returning to work...", "Retornando ao trabalho..."],
+	"cap.autoHouseOff":  ["(OFF) Auto-Houses", "(OFF) Auto-Casas"],
+	"cap.autoHouseOn":   ["(ON) Auto-Houses (short by ", "(ON) Auto-Casas (Faltando "],
+	"cap.counselorHeader":["Strategic Advisor", "Conselheiro Estratégico"],
+	"cap.counselorTip":  ["Tip: Reading the map...", "Dica: Analisando o mapa..."],
+	"cap.counselorCam":  ["Show Location on Map", "Ver Local no Mapa"],
+	"cap.optionsHint":   ["Switches and explanations: Menu > Options > PudimMod",
+	                      "Interruptores e explicações: Menu > Opções > PudimMod"],
 	// Cabeçalho do painel
 	"tip.compact":       ["Collapse the panel to show only the combat estimator, or expand it back.",
 	                      "Encolhe o painel para mostrar só o estimador de combate, ou expande de volta."],
@@ -203,7 +246,53 @@ function pudim_RefreshTooltipsIfNeeded()
 {
 	if (g_PudimTooltipsSettled) return;
 	pudim_ApplyTooltips();
+	pudim_ApplyCaptions();
 	if (g_PudimLang) g_PudimTooltipsSettled = true; // decidido: não precisa mais reaplicar
+}
+
+// ─── Rótulos do painel ────────────────────────────────────────────────────────
+//
+// Pedido de 25/08: "se o jogo instalado estiver em outra lingua que n seja pt ou pt-br, tem
+// que ficar em ingles os botões e as explicações".
+//
+// Os TOOLTIPS já eram bilíngues desde agosto; os RÓTULOS não. Eles nascem do XML, onde o
+// texto é fixo, então o painel saía em português em qualquer idioma — e com pedaços em
+// inglês por acidente ("Smart Dropsites", "Auto-Retreat"), que era o pior dos dois mundos.
+//
+// Mesma tabela, mesma função, mesmo par [en, pt] dos tooltips. O que muda é só o atributo
+// escrito: caption em vez de tooltip.
+const PUDIM_CAPTION_MAP = {
+	"pudim_combatFlash":        "cap.combatHeader",
+	"pudim_combatRefreshBtn":   "cap.combatRefresh",
+	"pudim_autoWorkHeader":     "cap.autoWorkHeader",
+	"pudim_autoWorkDesc":       "cap.autoWorkDesc",
+	"pudim_priorityHeaderLabel":"cap.priorityHeader",
+	"pudim_foodLabel":          "cap.food",
+	"pudim_woodLabel":          "cap.wood",
+	"pudim_stoneLabel":         "cap.stone",
+	"pudim_metalLabel":         "cap.metal",
+	"pudim_sendIdleNowBtn":     "cap.sendIdle",
+	"pudim_repeatHeader":       "cap.repeatHeader",
+	"pudim_repeatDesc":         "cap.repeatDesc",
+	"pudim_stopAllRepeatBtn":   "cap.repeatStop",
+	"pudim_quartelHeader":      "cap.serieHeader",
+	"pudim_backToWorkBtn2":     "cap.backToWork",
+	"pudim_optionsHint":        "cap.optionsHint",
+	"pudim_counselorHeader":    "cap.counselorHeader",
+	"pudim_counselorCameraBtn": "cap.counselorCam"
+};
+
+function pudim_ApplyCaptions()
+{
+	for (const objName in PUDIM_CAPTION_MAP)
+	{
+		const obj = Engine.TryGetGUIObjectByName(objName);
+		if (!obj) continue;
+		try { obj.caption = pudim_T(PUDIM_CAPTION_MAP[objName]); } catch(e) {}
+	}
+	// Os dropdowns e o botão da série têm texto montado em tempo real (o número escolhido
+	// entra no meio da frase), então quem os escreve é o próprio painel.
+	try { if (typeof pudim_QuartelAtualizarLabel === "function") pudim_QuartelAtualizarLabel(); } catch(e) {}
 }
 
 function pudim_ApplyTooltips()

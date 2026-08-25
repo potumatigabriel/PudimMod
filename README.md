@@ -556,6 +556,12 @@ Tudo abaixo saiu de uma partida só, com o jogo aberto e os relatos chegando na 
 
 **Interface**
 
+- **O mod fala a língua do jogo.** Antes ele era escrito em português e ficava assim em
+  qualquer idioma — com pedaços em inglês por acidente ("Smart Dropsites", "Auto-Retreat"),
+  que é o pior dos dois mundos. Agora os rótulos, os tooltips e as explicações das opções saem
+  em português quando o 0 A.D. está em português, e em inglês em qualquer outro caso. O
+  dicionário `gui/session/pudim_i18n.js` já existia e já cobria os tooltips desde agosto; o que
+  faltava era ligar os rótulos nele, porque eles nascem do XML, onde o texto é fixo.
 - **Os interruptores foram para Menu → Opções → PudimMod**, cada um com explicação do que faz e
   por quê — e tudo em português, que era metade do problema: "Smart Dropsites", "Auto-Retreat" e
   "Smart Focus Fire" apareciam em inglês num jogo em pt-BR. O painel ficou com o que é decisão

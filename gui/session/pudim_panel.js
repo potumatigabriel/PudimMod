@@ -440,6 +440,7 @@ function pudim_Init()
 	// Tooltips de todos os botões, no idioma detectado (pudim_i18n.js). Sobrepõe os
 	// tooltips fixos do XML, que estavam só em português e faltavam na maioria dos botões.
 	try { pudim_ApplyTooltips(); } catch(e) {}
+	try { pudim_ApplyCaptions(); } catch(e) {}
 
 	const awL = Engine.TryGetGUIObjectByName("pudim_autoWorkLabel");
 	if (awL) {
@@ -3739,7 +3740,11 @@ function pudim_ProcessHeroAura()
 // E por que a exceção dele é certa: perto do teto de população o gargalo deixa de ser
 // recurso e passa a ser quantos lugares treinam ao mesmo tempo. Aí paralelo ganha.
 const PUDIM_QUARTEL_TIPOS = ["quartel", "estabulo"];
-const PUDIM_QUARTEL_NOMES = { quartel: "Quartel", estabulo: "Estábulo" };
+// Os nomes saem do dicionário, não de literais: o dropdown e o botão têm de falar a
+// mesma língua do resto do painel.
+function pudim_QuartelNome(tipo) {
+	return pudim_T(tipo === "estabulo" ? "cap.stable" : "cap.barracks");
+}
 const PUDIM_QUARTEL_INTERVALO = 2500;   // entre tentativas; obra é lenta, não precisa correr
 const PUDIM_QUARTEL_MAX_PARALELO = 3;   // teto do regime paralelo, para não virar spam
 
@@ -3802,7 +3807,7 @@ function pudim_QuartelToggle()
 		g_PudimQuartelBase = null;
 		g_PudimQuartelUltima = 0;
 		pudim_Log("INFO", "QUARTEL", "série iniciada: " + g_PudimQuartelAlvo + " " +
-			PUDIM_QUARTEL_NOMES[g_PudimQuartelTipo]);
+			pudim_QuartelNome(g_PudimQuartelTipo));
 	}
 	pudim_QuartelAtualizarLabel();
 }
@@ -3826,17 +3831,17 @@ function pudim_QuartelAtualizarLabel()
 {
 	const lbl = Engine.GetGUIObjectByName("pudim_quartelBtnLabel");
 	if (!lbl) return;
-	const nome = PUDIM_QUARTEL_NOMES[g_PudimQuartelTipo];
+	const nome = pudim_QuartelNome(g_PudimQuartelTipo);
 	lbl.caption = g_PudimQuartelAtivo
-		? "PARAR — faltam " + g_PudimQuartelAlvo + " " + nome
-		: "Construir " + g_PudimQuartelAlvo + " " + nome;
+		? pudim_T("cap.serieStop") + " " + g_PudimQuartelAlvo + " " + nome
+		: pudim_T("cap.serieBuild") + " " + g_PudimQuartelAlvo + " " + nome;
 }
 
 function pudim_QuartelInit()
 {
 	const tipo = Engine.GetGUIObjectByName("pudim_quartelTipo");
 	if (tipo) {
-		tipo.list = PUDIM_QUARTEL_TIPOS.map(t => PUDIM_QUARTEL_NOMES[t]);
+		tipo.list = PUDIM_QUARTEL_TIPOS.map(t => pudim_QuartelNome(t));
 		tipo.list_data = PUDIM_QUARTEL_TIPOS.slice();
 		tipo.selected = 0;
 	}
@@ -3869,7 +3874,7 @@ function pudim_ProcessQuartel()
 
 	if (!d.template) {
 		pudim_Log("WARN", "QUARTEL", "esta civilização não constrói " +
-			PUDIM_QUARTEL_NOMES[g_PudimQuartelTipo] + " — série cancelada");
+			pudim_QuartelNome(g_PudimQuartelTipo) + " — série cancelada");
 		g_PudimQuartelAtivo = false;
 		pudim_QuartelAtualizarLabel();
 		return;
@@ -3883,7 +3888,7 @@ function pudim_ProcessQuartel()
 	const faltam = g_PudimQuartelAlvo - feitos;
 	if (faltam <= 0) {
 		pudim_Log("SUCCESS", "QUARTEL", g_PudimQuartelAlvo + " " +
-			PUDIM_QUARTEL_NOMES[g_PudimQuartelTipo] + " prontos — equipe volta ao trabalho");
+			pudim_QuartelNome(g_PudimQuartelTipo) + " prontos — equipe volta ao trabalho");
 		g_PudimQuartelAtivo = false;
 		pudim_QuartelLiberarEquipe();
 		pudim_QuartelAtualizarLabel();
@@ -3950,7 +3955,7 @@ function pudim_ProcessQuartel()
 		pudim_ProtectBuilder(id, agora + 60000);
 
 	g_PudimQuartelUltima = agora;
-	pudim_Log("SUCCESS", "QUARTEL", PUDIM_QUARTEL_NOMES[g_PudimQuartelTipo] + " em (" +
+	pudim_Log("SUCCESS", "QUARTEL", pudim_QuartelNome(g_PudimQuartelTipo) + " em (" +
 		escolhida.x.toFixed(0) + "," + escolhida.z.toFixed(0) + ") com " +
 		d.builderIds.length + " trabalhador(es) — faltam " + faltam +
 		(paralelo ? " [paralelo: pop " + d._dbg.pop + " e recurso sobrando]" : " [em série]"));

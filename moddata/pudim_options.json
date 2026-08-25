@@ -4,83 +4,109 @@
 		"options": [
 			{
 				"type": "boolean",
+				"config": "pudim.advanced.combat",
 				"label": "[color=\"255 200 120\"]Ajudas de Combate:[/color] chave-mestra",
 				"tooltip": "Desligando aqui, NENHUMA ajuda de combate age: nem foco de fogo, nem recuo automático, nem manter distância, nem pânico, nem guarnição. Os interruptores individuais continuam existindo, mas este tem precedência sobre todos. Serve para jogar as batalhas 100% no controle manual sem precisar desligar um por um.",
-				"config": "pudim.advanced.combat"
+				"label_en": "[color=\"255 200 120\"]Combat Assists:[/color] master switch",
+				"tooltip_en": "Turn this off and NO combat assist acts: no focus fire, no auto-retreat, no kiting, no panic, no garrisoning. The individual switches still exist, but this one overrides them all. It is here so you can fight a battle entirely by hand without switching off six things one at a time."
 			},
 			{
 				"type": "boolean",
+				"config": "pudim.advanced.retreat",
 				"label": "[color=\"255 200 120\"]Combate:[/color] Recuo Automático (vida abaixo de 20%)",
 				"tooltip": "Unidade que cai abaixo de 20% da vida sai da linha de frente sozinha e vai até um curandeiro ou templo. Vale a pena porque unidade ferida que volta curada custa zero, enquanto substituí-la custa recursos e tempo de treino. Desligue se preferir decidir você mesmo quando cada unidade recua.",
-				"config": "pudim.advanced.retreat"
+				"label_en": "[color=\"255 200 120\"]Combat:[/color] Auto-Retreat (below 20% health)",
+				"tooltip_en": "A unit that drops below 20% health leaves the front line on its own and walks to a healer or temple. It pays off because a wounded unit that comes back healed costs nothing, while replacing it costs resources and training time. Turn it off if you would rather decide yourself when each unit pulls back."
 			},
 			{
 				"type": "boolean",
+				"config": "pudim.advanced.focus",
 				"label": "[color=\"255 200 120\"]Combate:[/color] Foco de Fogo",
 				"tooltip": "Faz seus soldados concentrarem no MESMO alvo em vez de cada um escolher um inimigo diferente. Matar um inimigo por vez reduz o dano que você recebe a cada segundo, porque inimigo morto para de atirar — dez unidades feridas fazem o mesmo estrago que dez inteiras. Unidade que recebeu ordem sua não é tocada.",
-				"config": "pudim.advanced.focus"
+				"label_en": "[color=\"255 200 120\"]Combat:[/color] Focus Fire",
+				"tooltip_en": "Makes your soldiers concentrate on the SAME target instead of each picking a different enemy. Killing one enemy at a time cuts the damage you take per second, because a dead enemy stops shooting — ten wounded units hit just as hard as ten healthy ones. A unit you gave an order to is never touched."
 			},
 			{
 				"type": "boolean",
+				"config": "pudim.advanced.garrison",
 				"label": "[color=\"255 200 120\"]Combate:[/color] Guarnição Defensiva",
 				"tooltip": "Durante um ataque, os trabalhadores se abrigam nos prédios próximos e voltam ao trabalho quando acalma. A casa vem antes do centro cívico: são muitas, espalhadas, e deixam o centro livre para a guarnição militar que o faz atirar. Se todos os abrigos estiverem lotados, eles correm — para o lado oposto ao atacante, longe o bastante para sair do alcance real da arma dele.",
-				"config": "pudim.advanced.garrison"
+				"label_en": "[color=\"255 200 120\"]Combat:[/color] Defensive Garrison",
+				"tooltip_en": "During an attack, workers shelter in nearby buildings and return to work once it calms down. Houses come before the civic centre: there are many of them, spread out, and they leave the centre free for the military garrison that makes it shoot. If every shelter is full, they run — away from the attacker, far enough to leave the actual range of his weapon."
 			},
 			{
 				"type": "boolean",
+				"config": "pudim.advanced.panic",
 				"label": "[color=\"255 200 120\"]Combate:[/color] Sistema de Pânico",
 				"tooltip": "Num ataque sério, tudo para e os trabalhadores são protegidos. Só dispara com HOSTILIDADE REAL, não com proximidade: um inimigo só conta se estiver atacando algo seu ou de um aliado, ou se estiver dentro do seu território — tropa passando de largo não dispara nada. Se o seu centro cívico caiu, ou se um abrigo está cercado, o mod nunca desguarnece sozinho; isso continua sendo decisão sua.",
-				"config": "pudim.advanced.panic"
+				"label_en": "[color=\"255 200 120\"]Combat:[/color] Panic System",
+				"tooltip_en": "In a serious attack everything stops and the workers are protected. It only fires on REAL HOSTILITY, not on proximity: an enemy counts only if it is attacking something of yours or an ally's, or if it stands inside your territory — troops marching past trigger nothing. If your civic centre has fallen, or a shelter is surrounded, the mod never ungarrisons on its own; that stays your call."
 			},
 			{
 				"type": "boolean",
+				"config": "pudim.advanced.countertrain",
 				"label": "[color=\"255 200 120\"]Combate:[/color] Treinar o Contra do Inimigo",
 				"tooltip": "Treina unidades que fazem frente ao que o inimigo REALMENTE tem em campo, e não ao que ele poderia ter. Se ele está de cavalaria, sai lanceiro; se está de infantaria pesada, sai unidade à distância.",
-				"config": "pudim.advanced.countertrain"
+				"label_en": "[color=\"255 200 120\"]Combat:[/color] Counter-Train",
+				"tooltip_en": "Trains units that answer what the enemy ACTUALLY has on the field, not what he might have. If he is on cavalry, you get spearmen; if he is on heavy infantry, you get ranged units."
 			},
 			{
 				"type": "boolean",
+				"config": "pudim.advanced.dropsites",
 				"label": "[color=\"120 220 255\"]Economia:[/color] Armazéns e Celeiros Automáticos",
 				"tooltip": "Ergue armazém perto da floresta e celeiro perto das frutas quando os coletores estão andando demais para entregar. O limiar não é um número fixo: sai da capacidade de carga, da taxa de coleta e da velocidade da própria unidade, então melhoria de coleta ou de velocidade desloca o limiar sozinha. Construir custa 100 de madeira e não move ninguém, então dispara cedo; TIRAR um coletor do lugar é bem mais caro e exige folga bem maior.",
-				"config": "pudim.advanced.dropsites"
+				"label_en": "[color=\"120 220 255\"]Economy:[/color] Automatic Storehouses and Farmsteads",
+				"tooltip_en": "Puts up a storehouse near the forest and a farmstead near the berries when gatherers are walking too far to deliver. The threshold is not a fixed number: it comes from the unit's own carry capacity, gather rate and walk speed, so a gathering or speed upgrade moves the threshold by itself. Building costs 100 wood and moves nobody, so it fires early; MOVING a gatherer is far more expensive and needs a much wider margin."
 			},
 			{
 				"type": "boolean",
+				"config": "pudim.advanced.barter",
 				"label": "[color=\"120 220 255\"]Economia:[/color] Mercado Inteligente",
-				"tooltip": "Vende no mercado o recurso que está sobrando para comprar o que está faltando, respeitando a taxa de câmbio do momento.",
-				"config": "pudim.advanced.barter"
+				"tooltip": "Vende no mercado o recurso que está sobrando para comprar o que está faltando, respeitando a taxa de câmbio do momento e sem despejar tudo de uma vez.",
+				"label_en": "[color=\"120 220 255\"]Economy:[/color] Smart Market",
+				"tooltip_en": "Sells the resource you have to spare to buy the one you are short of, at the current exchange rate and without dumping everything at once."
 			},
 			{
 				"type": "boolean",
+				"config": "pudim.advanced.autoqueue",
 				"label": "[color=\"120 220 255\"]Economia:[/color] Auto-Fila de Treino",
 				"tooltip": "Mantém os edifícios de produção treinando sem você precisar reenfileirar. Duas garantias: o TIPO de unidade que você pôs na fila nunca é trocado (5 guerreiros nunca voltam como 2 aldeões), e se você desligar a fila num edifício, o mod não religa. Como o motor também desliga a fila sozinho quando falta recurso, o mod espera 10 segundos antes de religar — e se você desligar duas vezes em 30 segundos, ele entende que é decisão sua e não mexe mais.",
-				"config": "pudim.advanced.autoqueue"
+				"label_en": "[color=\"120 220 255\"]Economy:[/color] Auto Training Queue",
+				"tooltip_en": "Keeps production buildings training without you having to re-queue. Two guarantees: the unit TYPE you queued is never swapped (5 warriors never come back as 2 women), and if you switch the queue off on a building, the mod does not switch it back on. Since the engine also turns the queue off by itself when resources run short, the mod waits 10 seconds before re-enabling — and if you switch it off twice within 30 seconds, it takes that as your decision and leaves it alone."
 			},
 			{
 				"type": "boolean",
+				"config": "pudim.autowork.enabled",
 				"label": "[color=\"120 220 255\"]Economia:[/color] Auto-Trabalho ativo ao iniciar a partida",
 				"tooltip": "Começa a partida já enviando cidadão ocioso para coletar. Se desligar, o Auto-Trabalho continua existindo no painel; ele só não vem ligado sozinho.",
-				"config": "pudim.autowork.enabled"
+				"label_en": "[color=\"120 220 255\"]Economy:[/color] Auto-Work on at match start",
+				"tooltip_en": "Starts the match already sending idle citizens to gather. If you turn this off, Auto-Work still exists in the panel; it just does not come on by itself."
 			},
 			{
 				"type": "boolean",
+				"config": "pudim.debug.show",
 				"label": "[color=\"200 200 200\"]Diagnóstico:[/color] Mensagens de Debug",
 				"tooltip": "Escreve no log da partida o que o mod está decidindo e por quê: distâncias medidas, limiares calculados, motivo de cada recusa. Não muda nada no jogo — serve para entender uma decisão estranha e para relatar problema. O log fica no botão \"Log\" do painel.",
-				"config": "pudim.debug.show"
+				"label_en": "[color=\"200 200 200\"]Diagnostics:[/color] Debug Messages",
+				"tooltip_en": "Writes to the match log what the mod is deciding and why: distances measured, thresholds computed, the reason for each refusal. It changes nothing in the game — it is there to explain a strange decision and to report a problem. The log is behind the \"Log\" button in the panel."
 			},
 			{
 				"type": "slider",
+				"config": "pudim.autowork.interval",
 				"label": "[color=\"120 220 255\"]Auto-Trabalho:[/color] Intervalo de Verificação (s)",
 				"tooltip": "De quanto em quanto tempo o mod procura trabalhador ocioso. Mais baixo reage mais rápido; mais alto dá mais tempo para você mesmo dar as ordens antes de o mod agir.",
-				"config": "pudim.autowork.interval",
+				"label_en": "[color=\"120 220 255\"]Auto-Work:[/color] Check Interval (s)",
+				"tooltip_en": "How often the mod looks for idle workers. Lower reacts faster; higher gives you more time to give the orders yourself before the mod steps in.",
 				"min": 1,
 				"max": 15
 			},
 			{
 				"type": "slider",
+				"config": "pudim.combat.interval",
 				"label": "[color=\"255 200 120\"]Combate:[/color] Intervalo do Estimador (s)",
 				"tooltip": "De quanto em quanto tempo a estimativa de combate do painel é recalculada. Só afeta o número que você lê; não muda decisão nenhuma do mod.",
-				"config": "pudim.combat.interval",
+				"label_en": "[color=\"255 200 120\"]Combat:[/color] Estimator Interval (s)",
+				"tooltip_en": "How often the panel's combat estimate is recomputed. It only affects the number you read; it changes none of the mod's decisions.",
 				"min": 1,
 				"max": 10
 			}

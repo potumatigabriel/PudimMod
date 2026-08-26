@@ -2383,6 +2383,7 @@ function pudim_ProcessAutoQueue()
 					template = atrasada.tpl;
 					g_PudimAutoQueueTemplates[b.ent] = template;
 				}
+				pudim_ProporcaoDiag(b, atrasada);
 			}
 
 			if (!template) {
@@ -4756,6 +4757,46 @@ function pudim_ProporcaoTrocaria(permitidos, semeado, naFila)
 var g_PudimUnitTodas = [];
 
 /** Há alguma proporção configurada? Com tudo zerado, este sistema inteiro fica fora. */
+/**
+ * Por que a proporcao escolheu o que escolheu.
+ *
+ * "so ta fazendo escaramurcador, nenhum espadachin", com peso 1 nos dois e o espadachim em
+ * zero. Pela conta, a falta do espadachim so cresce e ele teria de sair na frente — entao
+ * ou ele nao esta chegando ate a conta, ou esta e alguma premissa minha esta errada.
+ *
+ * Ja gastei tres hipoteses nisto por inspecao (lista filtrada por requisito, sufixo de
+ * patente diferente entre as duas fontes, memoria de escolha do jogador travada) e nenhuma
+ * se sustentou ao ler o codigo. O que decidiu todos os casos anteriores foi medir, entao e
+ * o que vai decidir este: uma linha por edificio dizendo QUEM concorreu, com peso, quantos
+ * existem, quantos estao na fila e a falta de cada um.
+ *
+ * Se o espadachim aparecer com falta alta e mesmo assim nao for escolhido, o erro esta na
+ * escolha. Se nao aparecer na lista, esta em quem monta a lista — e o campo `treina` diz
+ * qual das duas, porque mostra se o edificio declara saber treina-lo.
+ */
+var g_PudimPropDiagUltimo = {};
+function pudim_ProporcaoDiag(b, escolhida)
+{
+	if (!g_PudimShowDebug || !pudim_ProporcaoAtiva()) return;
+	const agora = Date.now();
+	if (agora - (g_PudimPropDiagUltimo[b.ent] || 0) < 20000) return;
+	g_PudimPropDiagUltimo[b.ent] = agora;
+
+	const permitidos = b.trainerEntities || [];
+	const partes = [];
+	for (const u of (g_PudimUnitTodas || [])) {
+		const peso = g_PudimUnitPesos[u.tpl] || 0;
+		if (!peso) continue;
+		partes.push(u.tpl.split("/").pop() +
+			" p" + peso + " tem" + u.existentes + " fila" + u.emFila +
+			(permitidos.indexOf(u.tpl) >= 0 ? " treina=sim" : " treina=NAO"));
+	}
+	pudim_Log("DEBUG", "PROP", "edifício " + b.ent + " escolheu " +
+		(escolhida ? escolhida.tpl.split("/").pop() : "NADA") +
+		" | pesados: " + (partes.join(" ; ") || "nenhum") +
+		" | treinaveis do edifício: " + permitidos.length);
+}
+
 function pudim_ProporcaoAtiva()
 {
 	for (const tpl in g_PudimUnitPesos)

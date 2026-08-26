@@ -180,6 +180,24 @@ check("e a mensagem de indisponível não fala em fase",
 	panel.indexOf("só existe na fase 1") < 0);
 
 // ── Integração ─────────────────────────────────────────────────────────────────────────
+// E TEM DE APARECER NO DROPDOWN. "o construção em serie n aparece a palisadas": eu a pus
+// em PUDIM_QUARTEL_TIPOS no painel e nunca na disponibilidade da simulação. Como a lista é
+// filtrada por `disponiveis`, ela era removida em toda partida — o tipo existia, o processo
+// existia, e não havia como escolher.
+//
+// Ela não entra em PUDIM_SERIE de propósito: não é "mais um edifício", não tem obra única
+// para contar em prontos/emObra, e o painel a desvia para pudim_PalicadaToggle antes da
+// espiral de lá. O marcador é o mesmo que pudim_GetPalicadaData já usa e que está
+// comprovado em jogo.
+check("a simulação declara a paliçada como disponível",
+	/if \(base === "wallset_palisade" && result\.disponiveis\.indexOf\("palicada"\) === -1\)/.test(sim) &&
+	/result\.disponiveis\.push\("palicada"\);/.test(sim));
+check("e o marcador é o mesmo que a espiral já usa",
+	(sim.match(/"wallset_palisade"/g) || []).length >= 2);
+check("está escrito por que ela fica fora de PUDIM_SERIE",
+	/não é "mais um edifício"|nao e "mais um edificio"/.test(sim) ||
+	/NAO ENTRA EM PUDIM_SERIE|FORA DE PUDIM_SERIE/.test(sim));
+
 check("a paliçada é um tipo da série",
 	/const PUDIM_QUARTEL_TIPOS = \[[^\]]*"palicada"\]/.test(panel));
 check("mas tem processo próprio — não é 'mais um edifício'",

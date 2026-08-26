@@ -128,6 +128,32 @@ check("o mod inteiro usa a mesma fonte",
 const EQUIPE = +/const PUDIM_QUARTEL_EQUIPE = (\d+);/.exec(sim)[1];
 check("são 5 trabalhadores por obra, como pedido", EQUIPE === 5, EQUIPE);
 
+// ── O quartel nao pode roubar o terreno das fazendas ──────────────────────────────────
+//
+// "os quarteis estão fazendo muito proximo ao centro civico, esse local é para as fazendas".
+//
+// A disputa era desigual, e por isso o quartel ganhava sempre: a fazenda gera candidatos de
+// r=6 a r=90 em volta do centro/celeiro e PREFERE os mais perto; o quartel gerava de r=30 a
+// r=110 e levava o PRIMEIRO que passasse na validação. Começando em 30, ele chegava antes no
+// melhor terreno de fazenda em toda partida.
+const CINTURAO = +/const PUDIM_CINTURAO_FAZENDA = (\d+);/.exec(sim)[1];
+const QMIN = /const PUDIM_QUARTEL_RAIO_MIN = ([^;]+);/.exec(sim)[1].trim();
+const QMAX = +/const PUDIM_QUARTEL_RAIO_MAX = (\d+);/.exec(sim)[1];
+const FMAX = +/const PUDIM_FAZENDA_ANEL_MAX = (\d+);/.exec(sim)[1];
+
+check("o cinturão das fazendas é declarado, não implícito", CINTURAO > 0, CINTURAO);
+check("e o quartel começa nele — os dois números ficam amarrados, não copiados",
+	QMIN === "PUDIM_CINTURAO_FAZENDA", QMIN);
+check("o cinturão cobre a faixa que as fazendas de fato usam",
+	CINTURAO >= FMAX * 0.6, CINTURAO + " de " + FMAX);
+check("e ainda sobra anel de verdade para os quartéis",
+	QMAX - CINTURAO >= 50, QMAX - CINTURAO);
+
+// O anel da fazenda passou a sair de constantes: com 6 e 90 escritos no laço, mexer no
+// alcance dela sem mexer no cinturão traria o problema de volta sem ninguém notar.
+check("o anel das fazendas vem das constantes, não de números soltos no laço",
+	/for \(let r = PUDIM_FAZENDA_ANEL_MIN; r <= PUDIM_FAZENDA_ANEL_MAX; r \+= PUDIM_FAZENDA_ANEL_PASSO\)/.test(sim));
+
 // ── A equipe ATRAVESSA a série, não é recrutada de novo a cada obra ────────────────────
 //
 // "mandei fazer 6 quarteis, no primeiro mandou 5 trabalhadores, no segundo só mandou 1".

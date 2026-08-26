@@ -3019,7 +3019,7 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	outerSeeds: for (let si = 0; si < seedPoints.length; si++) {
 		const seed = seedPoints[si];
 		let nSeed = 0;
-		for (let r = 6; r <= 90; r += 6) {
+		for (let r = PUDIM_FAZENDA_ANEL_MIN; r <= PUDIM_FAZENDA_ANEL_MAX; r += PUDIM_FAZENDA_ANEL_PASSO) {
 			const dirs = Math.max(8, Math.round(2 * Math.PI * r / 12));
 			for (let i = 0; i < dirs; i++) {
 				const angle = (i / dirs) * 2 * Math.PI;
@@ -3300,8 +3300,23 @@ const PUDIM_ORDENS_COLETA = { "Gather": 1, "GatherNearPosition": 1, "ReturnResou
 
 const PUDIM_QUARTEL_EQUIPE = 5;      // trabalhadores por obra, o tamanho que ele pediu
 const PUDIM_QUARTEL_POP_PARALELO = 180;
-const PUDIM_QUARTEL_RAIO_MIN = 30;   // não colar no centro cívico
-const PUDIM_QUARTEL_RAIO_MAX = 110;
+// O CINTURAO PERTO DO CENTRO CIVICO E DAS FAZENDAS.
+//
+// "os quarteis estão fazendo muito proximo ao centro civico, esse local é para as fazendas".
+//
+// As duas colocacoes disputavam a mesma faixa e a disputa era desigual: a fazenda gera
+// candidatos de r=6 a r=90 em volta do centro/celeiro e prefere os mais PERTO; o quartel
+// gerava de r=30 a r=110 e levava o PRIMEIRO que passasse na validacao. Comecando em 30, o
+// quartel sempre ganhava o melhor terreno de fazenda antes de ela chegar la.
+//
+// Agora o quartel so comeca depois do cinturao. Os dois numeros ficam lado a lado porque um
+// depende do outro: mexer no alcance da fazenda sem mexer aqui traz o problema de volta.
+const PUDIM_FAZENDA_ANEL_MIN = 6;
+const PUDIM_FAZENDA_ANEL_MAX = 90;
+const PUDIM_FAZENDA_ANEL_PASSO = 6;
+const PUDIM_CINTURAO_FAZENDA = 60;   // reservado para fazenda; nenhuma serie constroi aqui
+const PUDIM_QUARTEL_RAIO_MIN = PUDIM_CINTURAO_FAZENDA;
+const PUDIM_QUARTEL_RAIO_MAX = 130;
 const PUDIM_QUARTEL_PASSO = 12;
 
 /**
@@ -3417,6 +3432,21 @@ GuiInterface.prototype.pudim_GetBarracksBuildData = function(player, data)
 				for (const t2 in PUDIM_SERIE)
 					if (PUDIM_SERIE[t2].tpl === base && result.disponiveis.indexOf(t2) === -1)
 						result.disponiveis.push(t2);
+
+				// A PALICADA ENTRA AQUI, FORA DE PUDIM_SERIE, E DE PROPOSITO.
+				//
+				// "o construção em serie n aparece a palisadas": eu a coloquei em
+				// PUDIM_QUARTEL_TIPOS no painel e nunca em PUDIM_SERIE aqui. Como o dropdown
+				// e filtrado por `disponiveis`, e `disponiveis` so recebe o que casa com
+				// PUDIM_SERIE, ela era removida da lista em toda partida.
+				//
+				// Nao entra em PUDIM_SERIE porque nao e "mais um edificio": nao tem obra
+				// unica para contar em prontos/emObra, e o painel a desvia para
+				// pudim_PalicadaToggle antes de chegar na espiral daqui. O que ela precisa e
+				// so de aparecer na lista — e o marcador e o mesmo que pudim_GetPalicadaData
+				// ja usa e que esta comprovado em jogo.
+				if (base === "wallset_palisade" && result.disponiveis.indexOf("palicada") === -1)
+					result.disponiveis.push("palicada");
 			}
 		}
 
@@ -3631,11 +3661,24 @@ GuiInterface.prototype.pudim_GetTrainableUnits = function(player, data)
 
 	// Quantas de cada tipo já estão em campo. É a metade da conta que falta para saber quem
 	// está atrás da proporção.
+	// O NOME DO TEMPLATE VEM DO TemplateManager, NAO DO Identity.
+	//
+	// Aqui estava "if (!cmpId || !cmpId.GetTemplateName) continue;" — e Identity NAO tem
+	// GetTemplateName. A guarda era verdadeira para TODA entidade, o continue pulava todas,
+	// e `existentes` ficava em zero para sempre.
+	//
+	// O estrago nao aparecia como erro, e sim como escolha errada: com todas as contagens em
+	// zero a falta empatava entre todas as unidades, e no empate vence a primeira da lista,
+	// que e ordenada por nome. "so ta fazendo escaramurcador, nenhum espadachin" era
+	// infantry_javelineer_b vindo antes de infantry_swordsman_b em ordem alfabetica, partida
+	// after partida.
+	//
+	// Terceira vez que invento uma API neste arquivo (ProductionQueue.GetEntitiesList,
+	// RangeManager.GetMapSize, e agora esta) e a terceira vez que a chamada CERTA ja estava
+	// escrita no proprio mod — GetCurrentTemplateName aparece nas linhas 875 e 4779.
 	for (const ent of allEnts) {
-		const cmpId = Engine.QueryInterface(ent, IID_Identity);
-		if (!cmpId || !cmpId.GetTemplateName) continue;
 		let nome = "";
-		try { nome = cmpId.GetTemplateName(); } catch (e) { continue; }
+		try { nome = cmpTemplateManager.GetCurrentTemplateName(ent); } catch (e) { continue; }
 		if (!nome) continue;
 		// A unidade em campo pode ter promovido de posto (ranks a/b/e no fim do nome),
 		// então o template dela não bate com o treinável. Compara pela raiz.

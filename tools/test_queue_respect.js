@@ -51,7 +51,7 @@ check("o tamanho do jogador tem precedencia sobre o padrao do mod",
 // Sem esta guarda, configurar proporcao de unidades reabriria o bug dos 5 guerreiros que
 // voltavam como 2 aldeoes — dessa vez no TAMANHO em vez do tipo.
 check("e o lote proporcional nao atropela o tamanho que o jogador pos",
-	/if \(!g_PudimPlayerQueueCount\[b\.ent\] && pudim_ProporcaoAtiva\(\)\)/.test(PANEL));
+	/if \(tplLote && !g_PudimPlayerQueueCount\[b\.ent\] && pudim_ProporcaoAtiva\(\)\)/.test(PANEL));
 check("nem o tipo: a proporcao so escolhe quando ele nunca escolheu ali",
 	PANEL.indexOf("const atrasada = pudim_UnidadeMaisAtrasada(") >
 	PANEL.indexOf("let template = g_PudimPlayerQueueTpl[b.ent] || null;"));

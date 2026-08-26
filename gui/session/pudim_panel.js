@@ -2018,6 +2018,12 @@ function pudim_Tick(dt)
 function pudim_ComputeAffordableCount(template, desiredCount, res)
 {
 	if (desiredCount <= 0) return 0;
+	// SEM TEMPLATE, NAO PERGUNTA. GetTemplateData desce ate o motor
+	// (GuiInterface.js:647), e la a conversao de argumento falha com "v.isString() ||
+	// v.isNumber() || v.isBoolean() (got type undefined)". O try/catch daqui NAO evita
+	// isso: o motor registra o erro antes de a excecao chegar ao JS, entao a tela do
+	// jogador enche de rastro vermelho a cada tique mesmo com a excecao tratada.
+	if (!template) return desiredCount;
 	let tData = null;
 	try { tData = GetTemplateData(template); } catch(e) {}
 	if (!tData || !tData.cost) return desiredCount;
@@ -2204,10 +2210,13 @@ function pudim_ProcessAutoQueue()
 			// regra já custou caro quando 5 guerreiros voltavam como 2 aldeões.
 			let desiredCount = g_PudimPlayerQueueCount[b.ent] ||
 			                   g_PudimAutoQueueDesiredCount[b.ent] || defaultCount;
-			if (!g_PudimPlayerQueueCount[b.ent] && pudim_ProporcaoAtiva())
-				desiredCount = pudim_LoteIdeal(
-					g_PudimPlayerQueueTpl[b.ent] || g_PudimAutoQueueTemplates[b.ent],
-					res, buildings);
+			// So dimensiona quando ja se sabe O QUE aquele edificio vai treinar. Com a
+			// proporcao ligada este trecho passa a rodar para TODO edificio de producao —
+			// e a lista inclui casa, armazem e celeiro, que tem IID_ProductionQueue por
+			// causa de tecnologia e nunca terao template. Era dali que saia o undefined.
+			const tplLote = g_PudimPlayerQueueTpl[b.ent] || g_PudimAutoQueueTemplates[b.ent];
+			if (tplLote && !g_PudimPlayerQueueCount[b.ent] && pudim_ProporcaoAtiva())
+				desiredCount = pudim_LoteIdeal(tplLote, res, buildings);
 
 			// ── PROPORCAO COM A FILA CHEIA ──────────────────────────────────────────
 			//
@@ -4797,6 +4806,7 @@ const PUDIM_LOTE_TETO_CONTA = 500;
 function pudim_LoteDiag(template, res, buildings)
 {
 	try {
+		if (!template) return "lote=1 sem-template";
 		const paga = pudim_ComputeAffordableCount(template, PUDIM_LOTE_TETO_CONTA, res || {});
 		return "lote=" + pudim_LoteIdeal(template, res, buildings) +
 			" paga=" + paga + " treinam=" + pudim_QuantosTreinam(template, buildings) +
@@ -4839,6 +4849,7 @@ function pudim_QuantosTreinam(template, buildings)
  */
 function pudim_LoteIdeal(template, res, buildings)
 {
+	if (!template) return 1;
 	const paga = pudim_ComputeAffordableCount(template, PUDIM_LOTE_TETO_CONTA, res || {});
 	const porEdificio = Math.floor(paga / pudim_QuantosTreinam(template, buildings));
 	return Math.max(1, Math.min(PUDIM_LOTE_MAX, porEdificio));

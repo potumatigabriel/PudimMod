@@ -296,7 +296,7 @@ check("há uma chave para 'a proporção está ativa'",
 check("com tudo zerado ela é falsa",
 	/for \(const tpl in g_PudimUnitPesos\)[\s\S]{0,40}?if \(g_PudimUnitPesos\[tpl\] > 0\) return true;/.test(panel));
 check("o lote só entra com a proporção ativa",
-	/if \(!g_PudimPlayerQueueCount\[b\.ent\] && pudim_ProporcaoAtiva\(\)\)/.test(panel));
+	/if \(tplLote && !g_PudimPlayerQueueCount\[b\.ent\] && pudim_ProporcaoAtiva\(\)\)/.test(panel));
 check("e o que o jogador enfileirou naquele edifício continua vindo antes",
 	/g_PudimPlayerQueueCount\[b\.ent\] \|\|/.test(panel));
 check("os pesos começam todos em zero",

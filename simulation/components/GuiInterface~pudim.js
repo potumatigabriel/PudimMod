@@ -3381,6 +3381,13 @@ GuiInterface.prototype.pudim_GetBarracksBuildData = function(player, data)
 	// sobra custa menos que tirar de onde falta.
 	const contagem = {};
 	const candidatosPorRecurso = {};
+
+	// A equipe que ja estava na serie. Vem do painel (g_PudimQuartelEquipe) porque quem
+	// guarda o estado da serie e ele — a simulacao e consultada, nao lembra de nada.
+	const jaNaEquipe = {};
+	for (const id of ((data && data.equipeAtual) || [])) jaNaEquipe[id] = 1;
+	const equipeAnterior = [];
+
 	for (const ent of allEnts) {
 		if (ordenados[ent]) continue;
 		const cmpBuilder = Engine.QueryInterface(ent, IID_Builder);
@@ -3415,7 +3422,24 @@ GuiInterface.prototype.pudim_GetBarracksBuildData = function(player, data)
 
 		const cmpAI = Engine.QueryInterface(ent, IID_UnitAI);
 		const ord = cmpAI && cmpAI.orderQueue && cmpAI.orderQueue.length ? cmpAI.orderQueue[0] : null;
-		// Já construindo alguma coisa: não é candidato — tirá-lo da obra é o desperdício
+
+		// A EQUIPE ATRAVESSA A SÉRIE.
+		//
+		// "vai pegar 5 trabalhadores/guerreiros do recurso mais abundante, e fazer as
+		// construções sequencialmente, não simultaneamente, e ao finalizar, eles voltam a
+		// trabalhar" — é UMA equipe para a série inteira, não uma por obra.
+		//
+		// Relato de 25/08: "mandei fazer 6 quarteis, no primeiro mandou 5 trabalhadores, no
+		// segundo só mandou 1". A causa é a linha logo abaixo: quem está em "Repair" era
+		// descartado do recrutamento, e depois da primeira obra os cinco estavam justamente
+		// nela. O mod excluía a própria equipe e saía catando gente nova — e como o resto já
+		// estava alocado, achou um. A cada obra a série ficava mais fraca.
+		//
+		// Quem já é da equipe entra primeiro e sem passar pelo filtro de ordem: ele está
+		// construindo O NOSSO prédio, e o que se quer é exatamente que continue.
+		if (jaNaEquipe[ent]) { equipeAnterior.push(ent); continue; }
+
+		// Já construindo OUTRA coisa: não é candidato — tirá-lo da obra é o desperdício
 		// que se quer evitar, e é a mesma regra do pool de fazendas.
 		if (ord && ord.type === "Repair") continue;
 
@@ -3451,8 +3475,12 @@ GuiInterface.prototype.pudim_GetBarracksBuildData = function(player, data)
 	});
 	result._dbg.pool = ordemRecursos.map(r => r + ":" + contagem[r]).join(",");
 
-	const equipe = [];
+	// A equipe que já vinha vem na frente; o pool só COMPLETA o que faltar (alguém morreu,
+	// ou o jogador deu ordem a um deles).
+	const equipe = equipeAnterior.slice(0, PUDIM_QUARTEL_EQUIPE);
+	result._dbg.herdados = equipe.length;
 	for (const rec of ordemRecursos) {
+		if (equipe.length >= PUDIM_QUARTEL_EQUIPE) break;
 		const lista = candidatosPorRecurso[rec];
 		// Mais perto do centro cívico primeiro: a obra nasce perto dele, então é quem
 		// chega antes e volta antes para o recurso.

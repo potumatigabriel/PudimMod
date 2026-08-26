@@ -4292,7 +4292,8 @@ function pudim_ProcessQuartel()
 	let d;
 	try {
 		d = Engine.GuiInterfaceCall("pudim_GetBarracksBuildData",
-			{ "tipo": g_PudimQuartelTipo, "playerOrdered": pudim_GetPlayerOrderedIds() });
+			{ "tipo": g_PudimQuartelTipo, "playerOrdered": pudim_GetPlayerOrderedIds(),
+			  "equipeAtual": g_PudimQuartelEquipe });
 	} catch (e) { return; }
 	if (!d) return;
 
@@ -4411,7 +4412,8 @@ function pudim_ProcessQuartel()
 	g_PudimQuartelUltima = agora;
 	pudim_Log("SUCCESS", "QUARTEL", pudim_QuartelNome(g_PudimQuartelTipo) + " em (" +
 		escolhida.x.toFixed(0) + "," + escolhida.z.toFixed(0) + ") com " +
-		d.builderIds.length + " trabalhador(es) — faltam " + faltam +
+		d.builderIds.length + " trabalhador(es) (" +
+		((d._dbg && d._dbg.herdados) || 0) + " da equipe anterior) — faltam " + faltam +
 		(paralelo ? " [paralelo: pop " + d._dbg.pop + " e recurso sobrando]" : " [em série]"));
 }
 

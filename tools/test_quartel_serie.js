@@ -127,6 +127,39 @@ check("o mod inteiro usa a mesma fonte",
 // ── A equipe ───────────────────────────────────────────────────────────────────────────
 const EQUIPE = +/const PUDIM_QUARTEL_EQUIPE = (\d+);/.exec(sim)[1];
 check("são 5 trabalhadores por obra, como pedido", EQUIPE === 5, EQUIPE);
+
+// ── A equipe ATRAVESSA a série, não é recrutada de novo a cada obra ────────────────────
+//
+// "mandei fazer 6 quarteis, no primeiro mandou 5 trabalhadores, no segundo só mandou 1".
+//
+// A causa era uma linha só, e ela parecia certa: quem estava em "Repair" era descartado do
+// recrutamento — tirar alguém de uma obra para outra é o desperdício que o mod inteiro
+// evita. Só que depois da primeira obra os cinco estavam justamente nela. O mod excluía a
+// PRÓPRIA equipe e saía catando gente nova; como o resto já estava alocado, achou um. A
+// cada obra da série ela ficava mais fraca.
+//
+// O pedido era uma equipe só: "pegue 5 trabalhadores... e faça as construções
+// sequencialmente, não simultaneamente, e ao finalizar, eles voltam a trabalhar".
+check("quem já é da equipe entra ANTES do filtro de quem está construindo",
+	sim.indexOf("if (jaNaEquipe[ent]) { equipeAnterior.push(ent); continue; }") <
+	sim.indexOf('if (ord && ord.type === "Repair") continue;'));
+check("a equipe vem do painel — a simulação é consultada, não guarda estado",
+	/for \(const id of \(\(data && data\.equipeAtual\) \|\| \[\]\)\) jaNaEquipe\[id\] = 1;/.test(sim) &&
+	/"equipeAtual": g_PudimQuartelEquipe/.test(panel));
+check("a equipe herdada vem na frente e o pool só completa o que faltar",
+	/const equipe = equipeAnterior\.slice\(0, PUDIM_QUARTEL_EQUIPE\);/.test(sim) &&
+	/if \(equipe\.length >= PUDIM_QUARTEL_EQUIPE\) break;\s+const lista = candidatosPorRecurso\[rec\];/.test(sim));
+
+// A regra que nunca cede: ordem do jogador vem antes de tudo, inclusive de "é da equipe".
+// Se ele mandar um dos cinco fazer outra coisa, ele sai da equipe e o pool repõe.
+check("mas ordem do jogador continua ganhando até da equipe herdada",
+	sim.indexOf("if (ordenados[ent]) continue;") <
+	sim.indexOf("if (jaNaEquipe[ent]) { equipeAnterior.push(ent); continue; }"));
+
+// Morreu na obra: some de allEnts, não é herdado, e o pool completa sozinho. Sem código
+// especial — é o que cai fora naturalmente de perguntar quem existe agora.
+check("e o log diz quantos vieram da equipe anterior, para dar para conferir",
+	/da equipe anterior\) — faltam/.test(panel));
 check("tirados do recurso mais abundante",
 	/return contagem\[b\] - contagem\[a\];/.test(sim));
 check("com ocioso na frente — custa coleta nenhuma",

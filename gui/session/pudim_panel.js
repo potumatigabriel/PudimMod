@@ -2665,6 +2665,7 @@ function pudim_ProcessFarms()
 			const d = farmData._dbg || {};
 			pudim_Log("DEBUG", "FARM", "fc=" + (d.fc||0) + " nfc=" + (d.nfc||0) +
 				" ncap=" + (d.ncap||0) + " tg=" + (d.tg||0) + " oci0=" + (d.oci0||0) +
+				" sold=" + (d.sold||0) +
 				" esc=" + ["food","wood","stone","metal"]
 					.filter(r => d["esc_" + r] !== undefined)
 					.map(r => r[0] + (d["esc_" + r])).join("/") +

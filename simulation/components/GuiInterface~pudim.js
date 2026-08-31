@@ -2458,7 +2458,29 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	// Capacidade real de um campo, conferida em
 	// simulation/templates/template_structure_resource_field.xml: <MaxGatherers>5</MaxGatherers>
 	const PUDIM_FIELD_CAPACITY = 5;
-	if (farmCount >= PUDIM_MAX_FARMS || ccPositions.length === 0) { result._dbg.reason = "limit"; return result; }
+	// O TETO DE CAMPOS PARA A CONSTRUCAO, NAO A FUNCAO INTEIRA.
+	//
+	// "no final ficou extremamente desbalanceado os recursos". No log de 31/08 a linha
+	// `fc=9 tg=0 esc= cfm=0 reason=limit action=none` se repete de 319s a 1292s — DEZESSEIS
+	// MINUTOS. Tudo zerado porque o `return` daqui saia antes de a funcao calcular qualquer
+	// coisa.
+	//
+	// So que esta funcao faz TRES coisas, e o teto de campos so diz respeito a uma:
+	//
+	//   build  — erguer um campo novo   <- e so isto que o teto limita
+	//   assist — mandar construtor para uma fundacao de campo ja aberta
+	//   assign — mover trabalhador para vaga em campo existente
+	//
+	// Com 9 campos e 31 coletores, sobravam 14 vagas que `assign` teria preenchido. E era
+	// aqui que a escassez (esc=) devia atuar — por isso ela nunca apareceu no log depois de
+	// 319s, e a correcao do commit anterior parecia nao ter feito efeito.
+	//
+	// O teto de 9 e decisao do jogador (19/08) e continua valendo como esta: 15 campos
+	// deixaram 7904 de comida parada no banco. O que muda e o alcance do freio.
+	const podeErguerCampo = farmCount < PUDIM_MAX_FARMS;
+	// Sem centro civico nao ha de onde medir distancia nem onde ancorar campo: ai sim a
+	// funcao inteira nao tem o que fazer.
+	if (ccPositions.length === 0) { result._dbg.reason = "sem_cc"; return result; }
 
 	const resCounts = cmpPlayer.GetResourceCounts();
 	// 100 de madeira e o custo de um campo, conferido em
@@ -2468,7 +2490,8 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	// Quantos campos o estoque paga AGORA. Vai para o painel, que corta a lista por ele —
 	// "so nao fazer se nao tiver madeira disponivel, mas assim que tiver faz".
 	result.camposPagaveis = Math.floor(resCounts.wood / PUDIM_CUSTO_CAMPO);
-	if (!hasWoodForFarm) { result._dbg.reason = "nowood"; return result; }
+	// Mesma correcao: sem madeira nao da para ERGUER campo, mas mover trabalhador para vaga
+	// em campo que ja existe nao custa madeira nenhuma.
 
 	// Freio por ESTOQUE: a proporção de coleta distribui por peso, não por necessidade, e
 	// por isso pedia campo novo mesmo com o celeiro transbordando. Comida se gasta em
@@ -2859,6 +2882,34 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	result._dbg.ocio = poolFazenda.length;
 	for (const w of woodWorkerPool) poolFazenda.push(w);
 
+	// ── ALDEAO NA FAZENDA; EXERCITO SO EM ULTIMO CASO ─────────────────────────────────
+	//
+	// "sempre na fazenda a preferencia é por aldeões/plebeus... só colocar exercito em
+	// ultimo caso".
+	//
+	// A ordem do pool decide quem vai (farFoodWorkers = poolFazenda.slice(0, effDeficit)),
+	// e ela so distinguia ocioso de coletor. Um cidadao-soldado colhendo entrava na frente
+	// de um plebeu ocioso — e soldado na fazenda e soldado fora da linha de frente.
+	//
+	// A preferencia por cidadao DOMINA: "ultimo caso" quer dizer depois de todos os
+	// aldeoes, nao "depois dos aldeoes ociosos". Ocioso-antes-de-coletor continua valendo,
+	// mas como criterio de desempate dentro de cada grupo.
+	//
+	// A classe e a mesma que o resto do mod ja usa para separar os dois (ver o isSoldier de
+	// pudim_GetPanicData): CitizenSoldier, ou FastMoving para a cavalaria.
+	const ehSoldado = function(ent) {
+		const cid = Engine.QueryInterface(ent, IID_Identity);
+		return !!cid && (cid.HasClass("CitizenSoldier") || cid.HasClass("FastMoving"));
+	};
+	const ordemOriginal = {};
+	poolFazenda.forEach(function(e, i) { ordemOriginal[e] = i; });
+	poolFazenda.sort(function(a, b) {
+		const sa = ehSoldado(a) ? 1 : 0, sb = ehSoldado(b) ? 1 : 0;
+		if (sa !== sb) return sa - sb;              // aldeao antes de soldado
+		return ordemOriginal[a] - ordemOriginal[b]; // e dentro do grupo, ocioso antes de coletor
+	});
+	result._dbg.sold = poolFazenda.filter(ehSoldado).length;
+
 	if (effDeficit <= 0 || poolFazenda.length === 0) {
 		result._dbg.reason = poolFazenda.length === 0 ? "nowood2"
 			: (deficit > 0 ? "aguarda_nascimento" : "nodeficit");
@@ -2974,6 +3025,13 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 		result.assistTarget = fieldFoundations[0];
 		result.workersToRedirect = farFoodWorkers;
 		result._dbg.reason = "fundacao_aberta:" + fieldFoundations.length + " vagas:" + vagasEmObra;
+		return result;
+	}
+
+	// Chegou ate aqui querendo erguer um campo. Os dois freios que antes derrubavam a funcao
+	// inteira agem so neste ponto — depois de `assign` e `assist` ja terem tido a vez deles.
+	if (!podeErguerCampo || !hasWoodForFarm) {
+		result._dbg.reason = !podeErguerCampo ? "limit" : "nowood";
 		return result;
 	}
 

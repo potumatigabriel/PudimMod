@@ -4424,8 +4424,11 @@ function pudim_ProcessQuartel()
 		pudim_ProtectBuilder(id, agora + 60000);
 
 	g_PudimQuartelUltima = agora;
+	const distCC = (d._dbg && d._dbg.ccx !== undefined)
+		? Math.round(Math.sqrt(Math.pow(escolhida.x - d._dbg.ccx, 2) +
+		                       Math.pow(escolhida.z - d._dbg.ccz, 2))) : -1;
 	pudim_Log("SUCCESS", "QUARTEL", pudim_QuartelNome(g_PudimQuartelTipo) + " em (" +
-		escolhida.x.toFixed(0) + "," + escolhida.z.toFixed(0) + ") com " +
+		escolhida.x.toFixed(0) + "," + escolhida.z.toFixed(0) + ") a " + distCC + "m do CC com " +
 		d.builderIds.length + " trabalhador(es) (" +
 		((d._dbg && d._dbg.herdados) || 0) + " da equipe anterior) — faltam " + faltam +
 		(paralelo ? " [paralelo: pop " + d._dbg.pop + " e recurso sobrando]" : " [em série]"));

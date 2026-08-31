@@ -149,6 +149,46 @@ check("o cinturão cobre a faixa que as fazendas de fato usam",
 check("e ainda sobra anel de verdade para os quartéis",
 	QMAX - CINTURAO >= 50, QMAX - CINTURAO);
 
+// ── A distância perseguida é ALVO, não piso ───────────────────────────────────────────
+//
+// "o quartel ainda faz perto do centro civico, fazer um pouco mais longe, talvez dobrar a
+// distancia atual". Subir o piso resolvia a queixa e criava outra: quando o raio mínimo não
+// cabe no território, TODA candidata é recusada e a série para com cands=0 — foi exatamente
+// assim no bug do GetMapSize. Território pequeno, ou base espremida na borda do mapa, é caso
+// normal e não pode travar nada.
+//
+// Por isso 120 é para onde a lista é ORDENADA, não onde ela começa: a geração continua
+// saindo do cinturão, e se não houver nada a 120 ele constrói na melhor que existir.
+const IDEAL = +/const PUDIM_QUARTEL_RAIO_IDEAL = (\d+);/.exec(sim)[1];
+check("o alvo é o dobro do cinturão, como pedido", IDEAL === CINTURAO * 2,
+	IDEAL + " vs " + (CINTURAO * 2));
+check("e cabe dentro do alcance gerado", IDEAL > CINTURAO && IDEAL < QMAX,
+	CINTURAO + " < " + IDEAL + " < " + QMAX);
+check("a geração continua saindo do cinturão — o alvo não vira piso",
+	/for \(let r = PUDIM_QUARTEL_RAIO_MIN; r <= PUDIM_QUARTEL_RAIO_MAX/.test(sim));
+check("o que muda é a ORDEM: mais perto do alvo vem primeiro",
+	/Math\.abs\(ra - PUDIM_QUARTEL_RAIO_IDEAL\) - Math\.abs\(rb - PUDIM_QUARTEL_RAIO_IDEAL\)/.test(sim));
+check("e isso não vale para a torre, que tem o anel dela",
+	/if \(!spec\.anel\) \{/.test(sim) && /if \(spec\.anel\) \{/.test(sim));
+
+// A ordenação, espelhada: com candidatas espalhadas, a escolhida tem de ser a mais próxima
+// do alvo — e, faltando o alvo, a melhor que existir, nunca "nenhuma".
+function escolher(raios, ideal) {
+	return raios.slice().sort((a, b) => Math.abs(a - ideal) - Math.abs(b - ideal))[0];
+}
+check("com todo o anel disponível, escolhe o alvo",
+	escolher([60, 72, 96, 120, 144, 180], IDEAL) === IDEAL);
+check("com o território curto, escolhe o mais longe que existe — não desiste",
+	escolher([60, 72, 84], IDEAL) === 84, escolher([60, 72, 84], IDEAL));
+check("e nunca volta a colar no cinturão quando há opção melhor",
+	escolher([60, 110], IDEAL) === 110);
+
+// O número no log: julgar "está perto demais?" por captura de tela já me fez errar duas
+// vezes nesta mesma queixa.
+check("o log diz a que distância do centro cívico a obra saiu",
+	/\) a " \+ distCC \+ "m do CC com "/.test(panel) &&
+	/result\._dbg\.ccx = Math\.round\(ccX\);/.test(sim));
+
 // O anel da fazenda passou a sair de constantes: com 6 e 90 escritos no laço, mexer no
 // alcance dela sem mexer no cinturão traria o problema de volta sem ninguém notar.
 check("o anel das fazendas vem das constantes, não de números soltos no laço",

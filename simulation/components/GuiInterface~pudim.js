@@ -3372,7 +3372,21 @@ const PUDIM_FAZENDA_ANEL_MAX = 90;
 const PUDIM_FAZENDA_ANEL_PASSO = 6;
 const PUDIM_CINTURAO_FAZENDA = 60;   // reservado para fazenda; nenhuma serie constroi aqui
 const PUDIM_QUARTEL_RAIO_MIN = PUDIM_CINTURAO_FAZENDA;
-const PUDIM_QUARTEL_RAIO_MAX = 130;
+const PUDIM_QUARTEL_RAIO_MAX = 200;
+// A DISTANCIA QUE O QUARTEL PERSEGUE — alvo, nao piso.
+//
+// "o quartel ainda faz perto do centro civico, fazer um pouco mais longe, talvez dobrar a
+// distancia atual": 60 -> 120.
+//
+// Mas dobrar como PISO seria repetir um erro que ja custou uma partida. Quando o raio
+// minimo nao cabia no territorio, TODA posicao candidata era recusada e a serie parava com
+// "cands=0" — foi assim no bug do GetMapSize. Territorio pequeno, ou base espremida contra
+// a borda do mapa, e caso normal e nao pode travar a serie.
+//
+// Entao 120 e para onde as candidatas sao ORDENADAS, e nao onde a lista comeca: a geracao
+// continua saindo do cinturao das fazendas, e a ordenacao poe as de ~120 na frente. Se nao
+// houver nada la, ele constroi na melhor que existir em vez de nao construir.
+const PUDIM_QUARTEL_RAIO_IDEAL = 120;
 const PUDIM_QUARTEL_PASSO = 12;
 
 /**
@@ -3612,6 +3626,17 @@ GuiInterface.prototype.pudim_GetBarracksBuildData = function(player, data)
 	// TORRE EM ANEL: reordena os candidatos para que cada torre nova va para o setor MENOS
 	// coberto pelas que ja existem. Sem isso a espiral entrega as primeiras posicoes todas
 	// juntas, e um anel de 6 torres sairia como um arco de 6 num lado so.
+	// Fora do anel de torres, a ordem passa a ser "o mais perto de PUDIM_QUARTEL_RAIO_IDEAL".
+	// A espiral entregava as candidatas do raio menor primeiro e a primeira valida vencia,
+	// entao o quartel colava no cinturao das fazendas por construcao — era o que o jogador
+	// estava vendo mesmo depois de o piso subir para 60.
+	if (!spec.anel) {
+		candidatos.sort(function(a, b) {
+			const ra = Math.sqrt((a.x-ccX)*(a.x-ccX) + (a.z-ccZ)*(a.z-ccZ));
+			const rb = Math.sqrt((b.x-ccX)*(b.x-ccX) + (b.z-ccZ)*(b.z-ccZ));
+			return Math.abs(ra - PUDIM_QUARTEL_RAIO_IDEAL) - Math.abs(rb - PUDIM_QUARTEL_RAIO_IDEAL);
+		});
+	}
 	if (spec.anel) {
 		const jaTem = [];
 		for (const ent of allEnts) {
@@ -3646,6 +3671,10 @@ GuiInterface.prototype.pudim_GetBarracksBuildData = function(player, data)
 	result.candidatePositions = candidatos;
 	result._dbg.reason = "ok";
 	result._dbg.cands = candidatos.length;
+	// O centro, para o painel poder dizer a que distancia a obra saiu. Julgar "esta perto
+	// demais?" por captura de tela ja me fez errar; com o numero no log da para conferir.
+	result._dbg.ccx = Math.round(ccX);
+	result._dbg.ccz = Math.round(ccZ);
 	return result;
 };
 

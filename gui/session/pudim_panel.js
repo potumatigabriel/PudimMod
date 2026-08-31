@@ -3799,11 +3799,42 @@ function pudim_ProcessPanic()
 		const soldierSheltersFallback = panicData.shelters.filter(s =>
 			s.type === "cc" || s.type === "tower" || s.type === "fortress");
 
-		const pickWorkerShelter = () =>
-			safeHouses.find(s => s.freeSlots > 0) ||
-			safeCCs.find(s => s.freeSlots > 0) ||
-			anyHouses.find(s => s.freeSlots > 0) ||
-			anyCCs.find(s => s.freeSlots > 0) ||
+		// ── O ABRIGO E O MAIS PERTO DE QUEM ESTA FUGINDO ──────────────────────────────
+		//
+		// "os coletores de madeira viram um perigo, ao inves de irem para casas proximas,
+		// andaram pra longe... o trabalhador, sempre tem que procurar uma casa mais proxima
+		// que não esteja cheia da posicao dele".
+		//
+		// A versao anterior era `safeHouses.find(s => s.freeSlots > 0)` — sem argumento
+		// nenhum. `.find` devolve o PRIMEIRO da lista, na ordem em que a simulacao empilhou
+		// as entidades, entao todo mundo em panico ia para a mesma casa ate ela encher,
+		// estivesse a dez metros ou do outro lado da base. Um lenhador na mata ganhava a
+		// casa que por acaso vinha primeiro.
+		//
+		// A simulacao ja mandava x/z de cada trabalhador para isto — o comentario dela diz
+		// "sem ela o painel nao tem como escolher o abrigo MAIS PERTO". O painel e que nunca
+		// usou.
+		//
+		// As faixas de prioridade continuam: abrigo seguro (sem inimigo a 80m) antes de
+		// inseguro, casa antes de CC. Dentro da faixa, o mais perto. Trocar a ordem das
+		// faixas por distancia pura mandaria gente para uma casa colada no inimigo so por
+		// ser dois metros mais perto.
+		const maisPerto = (lista, x, z) => {
+			let melhor = null, melhorD = Infinity;
+			for (const s of lista) {
+				if (s.freeSlots <= 0) continue;
+				if (x === null || x === undefined || s.x === undefined) return s;
+				const dx = s.x - x, dz = s.z - z;
+				const d = dx * dx + dz * dz;
+				if (d < melhorD) { melhorD = d; melhor = s; }
+			}
+			return melhor;
+		};
+		const pickWorkerShelter = (x, z) =>
+			maisPerto(safeHouses, x, z) ||
+			maisPerto(safeCCs, x, z) ||
+			maisPerto(anyHouses, x, z) ||
+			maisPerto(anyCCs, x, z) ||
 			null;
 
 		// Guarnecer trabalhadores em risco
@@ -3820,7 +3851,7 @@ function pudim_ProcessPanic()
 			if (!g_PudimPanicPreTask[worker.id] && worker.currentOrder)
 				g_PudimPanicPreTask[worker.id] = worker.currentOrder;
 
-			const shelter = pickWorkerShelter();
+			const shelter = pickWorkerShelter(worker.x, worker.z);
 			if (shelter) {
 				Engine.PostNetworkCommand({
 					"type": "garrison",
@@ -3845,15 +3876,16 @@ function pudim_ProcessPanic()
 		}
 
 		// Guarnecer soldados em torres/fortalezas/CC seguros
-		const pickSoldierShelter = () =>
-			soldierShelters.find(s => s.freeSlots > 0) ||
-			soldierSheltersFallback.find(s => s.freeSlots > 0) ||
+		// Mesma regra para o soldado: a torre mais perto, nao a primeira da lista.
+		const pickSoldierShelter = (x, z) =>
+			maisPerto(soldierShelters, x, z) ||
+			maisPerto(soldierSheltersFallback, x, z) ||
 			null;
 
 		for (const soldier of panicData.atRiskSoldiers) {
 			if (g_PudimPanicGarrisoned[soldier.id]) continue;
 
-			const shelter = pickSoldierShelter();
+			const shelter = pickSoldierShelter(soldier.x, soldier.z);
 			if (!shelter) continue;
 
 			Engine.PostNetworkCommand({

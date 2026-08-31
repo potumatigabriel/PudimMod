@@ -1961,7 +1961,12 @@ GuiInterface.prototype.pudim_GetPanicData = function(player, data)
 			                            x: wp2 ? wp2.x : null, z: wp2 ? wp2.y : null,
 			                            fleeX: fuga ? fuga.x : null, fleeZ: fuga ? fuga.z : null });
 		} else if (isSoldier) {
-			result.atRiskSoldiers.push({ id: ent });
+			// Posicao tambem para o soldado, pela mesma razao do trabalhador: a torre MAIS
+			// PERTO. Sem ela o painel mandava todo mundo para a primeira da lista.
+			const spos = Engine.QueryInterface(ent, IID_Position);
+			const sp2 = (spos && spos.IsInWorld()) ? spos.GetPosition2D() : null;
+			result.atRiskSoldiers.push({ id: ent,
+			                             x: sp2 ? sp2.x : null, z: sp2 ? sp2.y : null });
 		}
 	}
 

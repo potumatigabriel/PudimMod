@@ -2601,8 +2601,44 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	// ── Ratio: quantos workers de fazenda são necessários ────────────────────────────────
 	// Fruta cobre até naturalFoodCapacity workers. Fazendas cobrem o excedente.
 	const weights = data && data.weights || {};
-	const foodW = weights.food || 0;
-	const totalW = (weights.food || 0) + (weights.wood || 0) + (weights.stone || 0) + (weights.metal || 0);
+	// ── O QUE ESTA SOBRANDO CEDE VEZ AO QUE ESTA FALTANDO ──────────────────────────────
+	//
+	// "se um recurso está muito abundante, tem que focar no que está pouco". No log de
+	// 31/08 a madeira chegou a 9922 com a comida em 61, e os pesos do painel (comida 4,
+	// madeira 3) seguiam mandando quase metade da gente para a madeira — porque eles sao
+	// fixos e nao enxergam o estoque.
+	//
+	// O fator sai da razao entre o estoque do recurso e a MEDIA dos recursos que o jogador
+	// pesou. Ser relativo a media, em vez de a um numero fixo, e o que faz isso valer aos 5
+	// e aos 40 minutos sem tabela de faixas — e, quando os estoques estao parelhos, todos os
+	// fatores dao 1 e os pesos do jogador valem exatamente como ele os escreveu. A raiz
+	// quadrada suaviza (sem ela, 9922 contra 61 zeraria a madeira), e os limites impedem que
+	// um recurso zerado sequestre a base inteira.
+	const PUDIM_ESCASSEZ_MIN = 0.25;
+	const PUDIM_ESCASSEZ_MAX = 4;
+	const bancoFarm = cmpPlayer.GetResourceCounts ? cmpPlayer.GetResourceCounts() : null;
+	const pesoEf = {};
+	{
+		const rs = ["food", "wood", "stone", "metal"];
+		let soma = 0, n = 0;
+		if (bancoFarm)
+			for (const r of rs)
+				if ((weights[r] || 0) > 0) { soma += (+bancoFarm[r] || 0); n++; }
+		const media = n > 0 ? soma / n : 0;
+		for (const r of rs) {
+			const p = weights[r] || 0;
+			let f = 1;
+			if (p > 0 && media > 0) {
+				f = Math.sqrt(media / Math.max(+bancoFarm[r] || 0, 1));
+				f = Math.max(PUDIM_ESCASSEZ_MIN, Math.min(PUDIM_ESCASSEZ_MAX, f));
+			}
+			pesoEf[r] = p * f;
+			if (p > 0) result._dbg["esc_" + r] = Math.round(f * 100) / 100;
+		}
+	}
+
+	const foodW = pesoEf.food || 0;
+	const totalW = (pesoEf.food || 0) + (pesoEf.wood || 0) + (pesoEf.stone || 0) + (pesoEf.metal || 0);
 	if (totalW <= 0 || foodW <= 0) { result._dbg.reason = "noweights"; return result; }
 
 	// Memória de função vinda do painel (a mesma de pudim_GetIdleWorkersAndBestResource):
@@ -2693,9 +2729,28 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 		if (rts && rts.generic === "wood") soldierWoodCount++;
 	}
 
-	const effectiveTotal = totalGatherers + soldierWoodCount;
+	// ── O OCIOSO CONTA COMO MAO DE OBRA ───────────────────────────────────────────────
+	//
+	// "e por algum motivo, ficaram muitos trabalhadores ociosos" — e a causa estava aqui.
+	//
+	// O ocioso nao tem ordem, entao nao entrava em totalGatherers; e o `Math.min(...,
+	// totalGatherers)` abaixo ainda TRAVAVA a meta de comida no numero de quem ja coletava.
+	// Isso fechava um ciclo que se alimentava sozinho:
+	//
+	//   trabalhador fica ocioso -> tg cai -> a meta de comida cai junto -> o deficit fica
+	//   negativo -> nenhum campo novo -> nenhuma vaga -> ele continua ocioso
+	//
+	// No log de 31/08 isso aparece cru: tg=4 cfm=4 fwt=2 df=-2 ocio=53 vagas=0
+	// reason=nodeficit, com fc=5 parado ha mais de 500 segundos e a comida em 86. Cinquenta
+	// e tres pessoas paradas e o mod concluindo "sem deficit".
+	//
+	// Ocioso e mao de obra disponivel: ele entra no total (a demanda que ele mesmo
+	// representa) e no teto (ele PODE ir para a comida).
+	const ociosos = idleBuilders.length;
+	const effectiveTotal = totalGatherers + soldierWoodCount + ociosos;
 	// Quantos workers de comida o ratio exige no total
-	const desiredFoodWorkers = Math.min(Math.ceil(effectiveTotal * foodW / totalW), totalGatherers);
+	const desiredFoodWorkers = Math.min(Math.ceil(effectiveTotal * foodW / totalW),
+		totalGatherers + ociosos);
 	// Fruta cobre até naturalFoodCapacity workers — fazendas cobrem o excedente.
 	// PUDIM_MAX_FARMS x PUDIM_FIELD_CAPACITY = 45 vagas de fazenda. Sem esse limite o alvo
 	// pedia mais gente do que os campos comportam: o mod tentaria construir para sempre e
@@ -2717,6 +2772,7 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	result._dbg.fwt = farmWorkerTarget;
 	result._dbg.df = deficit;
 	result._dbg.wp = woodWorkerPool.length;
+	result._dbg.oci0 = ociosos;
 
 	// ── Trava: abaixo de pop 100, quem está nascendo cobre o déficit ────────────────────
 	// Tirar um trabalhador da madeira custa a viagem inteira (ida, volta e o tempo parado

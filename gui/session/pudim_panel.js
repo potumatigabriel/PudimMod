@@ -2664,7 +2664,11 @@ function pudim_ProcessFarms()
 			g_PudimFarmDebugLastLog = Date.now();
 			const d = farmData._dbg || {};
 			pudim_Log("DEBUG", "FARM", "fc=" + (d.fc||0) + " nfc=" + (d.nfc||0) +
-				" ncap=" + (d.ncap||0) + " tg=" + (d.tg||0) + " cfm=" + (d.cfm||0) +
+				" ncap=" + (d.ncap||0) + " tg=" + (d.tg||0) + " oci0=" + (d.oci0||0) +
+				" esc=" + ["food","wood","stone","metal"]
+					.filter(r => d["esc_" + r] !== undefined)
+					.map(r => r[0] + (d["esc_" + r])).join("/") +
+				" cfm=" + (d.cfm||0) +
 				" fwt=" + (d.fwt||0) + " df=" + (d.df||0) + " wp=" + (d.wp||0) + " ocio=" + (d.ocio||0) + " vagas=" + (d.vagas||0) + " pag=" + (farmData.camposPagaveis||0) +
 				" fmc=" + (d.fmc||0) + " tffs=" + (d.tffs||0) +
 				// trn = unidades em produção; edf = déficit já descontado delas. Juntos

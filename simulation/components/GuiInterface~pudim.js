@@ -693,6 +693,11 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 		// workers passeando pelo mapa até bagas distantes quando há bagas próximas com capacidade.
 		// Wood/stone/metal: peso 3 para preferir floresta próxima de armazém existente.
 		const densityWeight = type === "food" ? 20 : 40;
+		// Onde a densidade para de contar. Oito vizinhas num raio de 60m ja e uma mata que
+		// sustenta um grupo por bastante tempo; da nona em diante o que decide o rendimento e
+		// a viagem ate o armazem, nao ter mais arvore por perto. O numero existe para separar
+		// MATA de arvore avulsa — nao para ranquear matas entre si.
+		const PUDIM_DENSIDADE_SUFICIENTE = 8;
 		const distToDropsiteWeight = type === "food" ? 2 : 3;
 		// Distância que o trabalhador precisa percorrer ATÉ o recurso. Estava em 0.1, um valor
 		// perto de zero diante de densidade 40: uma única árvore a mais num agrupamento pagava
@@ -751,7 +756,26 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 				if (d < distToDropsite) distToDropsite = d;
 			}
 
-			const score = (density * densityWeight) - distToDropsite * distToDropsiteWeight - distToWorker * distToWorkerWeight;
+			// DENSIDADE SATURA. Passado o ponto em que a mata "da conta", arvore a mais
+			// nao vale nada — e sem saturar ela decidia a escolha inteira.
+			//
+			// Relato de 01/09: "tem arvores mais proximas ao armazem, mas o mod manda pra
+			// essa um pouco mais longe". A causa esta na propria formula: densidade conta
+			// vizinhas num raio de 60m, e DENTRO de uma mata a arvore do interior sempre tem
+			// mais vizinhas que a da borda. Com peso 40, cada arvore a mais compra 13m de
+			// distancia ao armazem (40/3) — dez de diferenca entre borda e miolo compram
+			// 133m. A arvore colada no armazem perdia sempre.
+			//
+			// Ou seja: a densidade nao estava escolhendo entre MATAS, que era o proposito;
+			// estava escolhendo o miolo da mesma mata, contra o transporte.
+			//
+			// Saturando, as duas pontas de qualquer mata de verdade empatam em densidade e a
+			// distancia decide — que e o que manda no rendimento, porque o coletor passa a
+			// vida na viagem de ida e volta. O que a densidade ainda faz, e por isso ela
+			// continua na conta, e descartar a arvore solitaria: essa nao chega ao teto e
+			// perde, como deve, ja que acaba e obriga a remarcar.
+			const densEfetiva = Math.min(density, PUDIM_DENSIDADE_SUFICIENTE);
+			const score = (densEfetiva * densityWeight) - distToDropsite * distToDropsiteWeight - distToWorker * distToWorkerWeight;
 			if (score > maxScore) {
 				maxScore = score;
 				bestRes = res.id;

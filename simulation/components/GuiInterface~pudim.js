@@ -3040,9 +3040,28 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	// natural e a conta de déficit volta a decidir sozinha.
 	// O piso de 5 vagas evita travar a economia para sempre por causa de meia moita: abaixo
 	// disso a fruta restante não sustenta ninguém e a fazenda segue normalmente.
+	// A FRUTA SO SEGURA O CAMPO SE ELA DER CONTA DO DEFICIT.
+	//
+	// O piso era fixo em 5 vagas, sem olhar de quanto era a falta. No log de 01/09, aos
+	// 127s:
+	//
+	//   fwt=14 df=11 esc=f4/w0.72 tffs=9 reason=fruta_na_base:9 action=none
+	//
+	// Escassez de comida no MAXIMO (fator 4, o teto), deficit de 11 trabalhadores — e o mod
+	// nao ergueu campo nenhum porque havia 9 vagas de fruta. Nove nao cobrem onze, e a
+	// diferenca nao e so aritmetica: fruta ACABA, campo fica. Esperar a fruta encher para so
+	// entao comecar a construir e chegar tarde duas vezes.
+	//
+	// A comparacao agora e com o deficit, e ela ja carrega a escassez dentro: fwt sai dos
+	// pesos corrigidos por estoque, entao comida no chao aumenta o deficit e a fruta perde a
+	// vez mais cedo, sozinha.
+	//
+	// O piso de 5 continua, pela razao original: abaixo disso a fruta restante nao sustenta
+	// ninguem e nao vale adiar nada por meia moita.
 	result._dbg.tffs = territoryFruitFreeSlots;
-	if (territoryFruitFreeSlots >= 5) {
-		result._dbg.reason = "fruta_na_base:" + territoryFruitFreeSlots;
+	if (territoryFruitFreeSlots >= 5 && territoryFruitFreeSlots >= effDeficit) {
+		result._dbg.reason = "fruta_na_base:" + territoryFruitFreeSlots +
+			" cobre deficit " + effDeficit;
 		return result;
 	}
 

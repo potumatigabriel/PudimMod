@@ -171,5 +171,41 @@ check("o log mostra os fatores de escassez e os ociosos",
 check("e a simulação os expõe", /result\._dbg\["esc_" \+ r\]/.test(sim) &&
 	/result\._dbg\.oci0 = ociosos;/.test(sim));
 
+// ── A fruta nao pode segurar o campo quando nao da conta ──────────────────────────────
+//
+// Pergunta do jogador em 01/09: "o balanceamento de comida/madeira está correto?". O log
+// respondeu com o momento exato em que nao estava, aos 127s:
+//
+//   fwt=14 df=11 esc=f4/w0.72 tffs=9 reason=fruta_na_base:9 action=none
+//
+// Escassez de comida no TETO (fator 4), deficit de 11 trabalhadores, e zero campos
+// erguidos — porque havia 9 vagas de fruta e o piso era fixo em 5. Nove nao cobrem onze,
+// e fruta acaba enquanto campo fica: esperar ali chega tarde duas vezes.
+console.log("\nfruta so segura o campo se der conta");
+
+const PISO = 5;   // o piso original, que continua valendo por baixo
+function seguraCampo(vagasFruta, deficit) {
+	return vagasFruta >= PISO && vagasFruta >= deficit;
+}
+check("o caso do log: 9 vagas nao seguram um deficit de 11",
+	!seguraCampo(9, 11));
+check("mas 9 vagas seguram um deficit de 4 — fruta e de graca",
+	seguraCampo(9, 4));
+check("e meia moita nunca segura nada, por menor que seja a falta",
+	!seguraCampo(4, 1), "piso de " + PISO);
+check("vagas iguais ao deficit ainda seguram — cobre exatamente",
+	seguraCampo(11, 11));
+// Sem deficit nenhum a fruta segura, e e o que se quer: nao ha o que construir.
+check("sem deficit, a fruta segura e nenhum campo sai", seguraCampo(9, 0));
+
+check("a regra no codigo compara com o deficit, nao so com o piso",
+	/if \(territoryFruitFreeSlots >= 5 && territoryFruitFreeSlots >= effDeficit\)/.test(sim));
+check("e o log diz o deficit que ela alegou cobrir",
+	/" cobre deficit " \+ effDeficit/.test(sim));
+// O piso de 5 sobrevive, e o motivo original dele também: abaixo disso a fruta que resta
+// não sustenta ninguém, e não vale adiar campo por meia moita.
+check("o piso de 5 continua, com o porquê original preservado",
+	/a fruta restante não sustenta ninguém/.test(sim));
+
 console.log(fails === 0 ? "\nTODOS OS TESTES PASSARAM" : "\n" + fails + " TESTE(S) FALHARAM");
 process.exit(fails === 0 ? 0 : 1);

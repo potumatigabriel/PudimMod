@@ -1011,16 +1011,32 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 				continue; // nunca vai para lógica de recurso genérico
 			}
 
-			// Havendo batalha em qualquer lugar do mapa, nenhuma unidade de combate faz
-			// auto-trabalho — atacando ou defendendo, tanto faz. Regra do jogador, 24/08.
+			// O QUE PRENDE O EXERCITO E A BASE SOB ATAQUE, NAO BATALHA EM QUALQUER LUGAR.
 			//
-			// A regra antiga era local: inimigo a 100m. Isso deixava passar todo soldado
-			// longe do contato, e o replay 2026-08-24_0003 mostrou o resultado — no pico da
-			// luta o mod despachava gente para colher enquanto a batalha corria a poucos
-			// metros. Combate e assunto do exercito inteiro, nao so de quem esta encostado.
-			if (batalhaEmCurso && cmpIdentity &&
+			// Regra do jogador, 31/08: "quando estou em batalha, longe da base, os guerreiros
+			// que nascem, tem que ir pro trabalho, agora se minha base estiver sendo atacada,
+			// nao pode ir pro trabalho".
+			//
+			// Isto refina a regra dele de 24/08 ("quando tem luta, as unidades de combate nao
+			// podem ficar em auto servico"), que eu implementei do jeito mais amplo possivel:
+			// `batalhaEmCurso` = QUALQUER unidade nossa com ordem Attack, em qualquer ponto do
+			// mapa. Um soldado atacando uma ovelha parava o exercito inteiro.
+			//
+			// No log de 31/08 o custo aparece: aos 641s, "2 sem alvo [batalha_em_curso]" com a
+			// base calma (nenhum PANIC no periodo) — dois soldados parados porque havia briga
+			// do outro lado do mapa. Recem-nascido no quartel nao tem o que fazer numa batalha
+			// a 300m; ficar parado ao lado do centro civico nao ajuda nela e custa a coleta.
+			//
+			// A distincao agora e por LOCAL, e as duas metades ja existiam nesta funcao:
+			//
+			//   baseUnderAttack   3+ inimigos a 80m de um CC  -> ninguem trabalha
+			//   inimigo a 100m    checado por unidade, abaixo -> quem esta no contato fica
+			//
+			// A segunda e o que preserva a intencao de 24/08: soldado perto da luta continua
+			// na luta. O que muda e o soldado LONGE dela, que volta a poder trabalhar.
+			if (baseUnderAttack && cmpIdentity &&
 			    (cmpIdentity.HasClass("CitizenSoldier") || cmpIdentity.HasClass("FastMoving"))) {
-				result.unplaced.push({ id: ent, kind: "soldado", tried: "batalha_em_curso" });
+				result.unplaced.push({ id: ent, kind: "soldado", tried: "base_sob_ataque" });
 				continue;
 			}
 
@@ -1039,7 +1055,10 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 			// soldado a 100m de inimigo deve ficar em combate mesmo que a base esteja calma,
 			// e é justamente fora do território que ele tem mais chance de topar com um.
 			// Uma consulta por soldado ocioso, com todos os inimigos de uma vez.
-			if (cmpIdentity && cmpIdentity.HasClass("CitizenSoldier") && enemies.length > 0) {
+			// FastMoving entra junto: a cavalaria escapava desta checagem e, sem o freio
+			// global de batalha, sairia para colher com inimigo ao lado.
+			if (cmpIdentity && enemies.length > 0 &&
+			    (cmpIdentity.HasClass("CitizenSoldier") || cmpIdentity.HasClass("FastMoving"))) {
 				const nearRaw = cmpRangeManager.ExecuteQueryAroundPos(
 					{ x: workerPos.x, y: workerPos.y }, 0, 100, enemies, IID_UnitAI, false);
 				// Bicho não é ameaça: mesmo num inimigo de verdade, animais e barcos de pesca
@@ -1612,6 +1631,48 @@ GuiInterface.prototype.pudim_GetAutoRetreatData = function(player, data)
 };
 
 // ─── Pânico ────────────────────────────────────────────────────
+/**
+ * Os ids de todos os guerreiros do jogador, para o botao de selecao do painel.
+ *
+ * Pedido de 31/08: "adicionar um botão no pudim mod, pra selecionar todos os guerreiros
+ * (tudo que não for aldeão e do mercado)".
+ *
+ * O criterio dele traduzido em classes do 0 A.D., conferidas nos templates do jogo:
+ *
+ *   template_unit_infantry   VisibleClasses "Citizen Worker Soldier Infantry"
+ *   template_unit_champion   VisibleClasses "Soldier Champion"
+ *   template_unit_hero       VisibleClasses "Soldier Hero"
+ *   template_unit_siege      VisibleClasses "Siege"        (e Classes "-Organic")
+ *   template_unit_support_female_citizen  Classes "FemaleCitizen", VC "Citizen Worker"
+ *   template_unit_support_trader          VisibleClasses "Trader Bribable"
+ *
+ * Ou seja: `Soldier` e a classe que cidadao-soldado, campeao e heroi tem e que NENHUM
+ * aldeao ou mercador tem — e o cerco entra por `Siege`, que nao herda Soldier. Trader sai
+ * explicitamente porque e o "do mercado" do pedido, ainda que ja nao tenha Soldier: se um
+ * dia uma civilizacao der Soldier a um mercador, a intencao continua registrada aqui.
+ *
+ * So leitura: quem seleciona e o painel, e selecao nao passa pela rede.
+ */
+GuiInterface.prototype.pudim_GetGuerreiros = function(player, data)
+{
+	const result = { "ids": [] };
+	const cmpRangeManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_RangeManager);
+	if (!cmpRangeManager) return result;
+	for (const ent of cmpRangeManager.GetEntitiesByPlayer(player)) {
+		const cmpId = Engine.QueryInterface(ent, IID_Identity);
+		if (!cmpId) continue;
+		if (cmpId.HasClass("Trader")) continue;
+		if (!cmpId.HasClass("Soldier") && !cmpId.HasClass("Siege")) continue;
+		// Fundacao nao e unidade; e torre/fortaleza nao entram porque nao tem Identity de
+		// unidade com Soldier — mas a checagem de Position custa pouco e garante que so vai
+		// coisa viva e no mundo.
+		const p = Engine.QueryInterface(ent, IID_Position);
+		if (!p || !p.IsInWorld()) continue;
+		result.ids.push(ent);
+	}
+	return result;
+};
+
 GuiInterface.prototype.pudim_GetPanicData = function(player, data)
 {
 	const result = {
@@ -6861,6 +6922,7 @@ var pudim_exposedFunctions = {
   	"pudim_GetFocusFireCorrections": 1,
   	"pudim_GetAutoRetreatData": 1,
   	"pudim_GetPanicData": 1,
+  	"pudim_GetGuerreiros": 1,
   	"pudim_GetProductionBuildings": 1,
   	"pudim_GetScoutBorderTarget": 1,
   	"pudim_GetFarmBuildData": 1,

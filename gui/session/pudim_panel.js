@@ -3492,6 +3492,37 @@ function pudim_ExecuteInitialBalance()
  * Retorna trabalhadores do pânico às suas tarefas anteriores (botão manual).
  * Também reseta o estado de pânico completamente.
  */
+/**
+ * Seleciona todos os guerreiros do jogador.
+ *
+ * Pedido de 31/08: "adicionar um botão no pudim mod, pra selecionar todos os guerreiros
+ * (tudo que não for aldeão e do mercado)".
+ *
+ * Quem monta a lista e a simulacao (pudim_GetGuerreiros), porque so ela enxerga as classes
+ * de cada entidade. Quem seleciona e este lado, e selecao NAO passa pela rede: g_Selection
+ * e estado local da interface, entao isto nao afeta quem joga sem o mod. Por isso nao ha
+ * PostNetworkCommand em lugar nenhum daqui.
+ *
+ * A API e a do proprio jogo, conferida em gui/session/selection.js: g_Selection e global
+ * (`var g_Selection = new EntitySelection()`), com reset() e addList(). O motor limita a
+ * selecao a g_MaxSelectionSize sozinho — nao ha o que cortar aqui.
+ */
+function pudim_SelecionarGuerreiros()
+{
+	let d = null;
+	try { d = Engine.GuiInterfaceCall("pudim_GetGuerreiros", {}); } catch (e) { return; }
+	const ids = (d && d.ids) || [];
+	if (!ids.length) {
+		pudim_Log("INFO", "SELECAO", "nenhum guerreiro para selecionar");
+		return;
+	}
+	try {
+		g_Selection.reset();
+		g_Selection.addList(ids);
+	} catch (e) { return; }
+	pudim_Log("INFO", "SELECAO", ids.length + " guerreiro(s) selecionado(s)");
+}
+
 function pudim_ReturnToWork()
 {
 	// Botão do painel = ordem explícita do jogador: sempre obedece, mesmo sem CC ou em cerco.
@@ -4500,7 +4531,8 @@ const PUDIM_ABAIXO_DO_COMBATE = [
 	"pudim_metalVal", "pudim_sendIdleNowBtn", "pudim_repeatHeader", "pudim_repeatDesc",
 	"pudim_repeatStatus", "pudim_stopAllRepeatBtn", "pudim_quartelHeader", "pudim_quartelQtd",
 	"pudim_quartelTipo", "pudim_quartelBtn", "pudim_toggleAutoHouseBtn", "pudim_panicStatus",
-	"pudim_backToWorkBtn2", "pudim_optionsHint", "pudim_unitHeader", "pudim_unitLabel0",
+	"pudim_backToWorkBtn2", "pudim_selectWarriorsBtn",
+	"pudim_optionsHint", "pudim_unitHeader", "pudim_unitLabel0",
 	"pudim_unitMinus0", "pudim_unitPlus0", "pudim_unitVal0", "pudim_unitVazio",
 	"pudim_unitLabel1", "pudim_unitMinus1", "pudim_unitPlus1", "pudim_unitVal1",
 	"pudim_unitLabel2", "pudim_unitMinus2", "pudim_unitPlus2", "pudim_unitVal2",

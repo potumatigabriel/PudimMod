@@ -158,21 +158,53 @@ const destFundeiro = kite(60, FUNDEIRO, 40);
 check("arqueiro fica fora do alcance do fundeiro e dentro do seu",
 	destFundeiro > FUNDEIRO.alcance && destFundeiro < 60, destFundeiro);
 
-console.log("\ncombatente nao trabalha durante batalha");
+console.log("\ncombatente e a batalha: o que prende e a BASE sob ataque");
 
-check("existe a guarda de batalha no auto-trabalho",
-	/if \(batalhaEmCurso && cmpIdentity &&/.test(SIM));
+// Regra do jogador em 24/08: "quando tem luta, as unidades de combate nao podem ficar em
+// auto servico". Eu implementei do jeito mais amplo possivel: `batalhaEmCurso` = QUALQUER
+// unidade nossa com ordem Attack em qualquer ponto do mapa. Um soldado atacando uma ovelha
+// parava o exercito inteiro.
+//
+// Refinamento dele em 31/08: "quando estou em batalha, longe da base, os guerreiros que
+// nascem, tem que ir pro trabalho, agora se minha base estiver sendo atacada, nao pode ir
+// pro trabalho".
+//
+// No log de 31/08 o custo da versao ampla aparece aos 641s: "2 sem alvo
+// [batalha_em_curso]" com a base calma — nenhum PANIC no periodo. Dois soldados parados por
+// causa de briga do outro lado do mapa. Aos 1615s foram 66, mas ali a base ESTAVA sob
+// ameaca (PANIC as 1410s, encerrada as 1642s), entao aqueles a nova regra segura tambem.
+//
+// A distincao virou LOCAL, com as duas metades que ja existiam nesta funcao:
+//   baseUnderAttack  3+ inimigos a 80m de um CC   -> ninguem trabalha
+//   inimigo a 100m   checado por unidade          -> quem esta no contato fica
+check("o que prende o exercito e a base sob ataque",
+	/if \(baseUnderAttack && cmpIdentity &&/.test(SIM));
+check("e nao mais batalha em qualquer lugar do mapa",
+	!/if \(batalhaEmCurso && cmpIdentity/.test(SIM));
 check("cobre CitizenSoldier E cavalaria",
 	/cmpIdentity\.HasClass\("CitizenSoldier"\) \|\| cmpIdentity\.HasClass\("FastMoving"\)/.test(SIM));
-check("batalha e detectada por ordem de Attack de qualquer unidade nossa",
-	/if \(ob && ob\.type === "Attack"\) \{ batalhaEmCurso = true; break; \}/.test(SIM));
 check("o motivo entra no diagnostico de nao-alocados",
-	/tried: "batalha_em_curso"/.test(SIM));
-check("e o estado vai para o log de balanceamento",
+	/tried: "base_sob_ataque"/.test(SIM));
+
+// A intencao de 24/08 sobrevive na checagem por unidade: soldado perto da luta fica na
+// luta. O que mudou foi o soldado LONGE dela.
+check("quem esta a 100m de inimigo continua fora do trabalho",
+	/tried: "inimigo_a_100m"/.test(SIM));
+check("e a cavalaria entrou nessa checagem — antes escapava dela",
+	/enemies\.length > 0 &&[\s\S]{0,120}?HasClass\("FastMoving"\)/.test(SIM));
+check("a guarda da base vem ANTES da regra local dos 100m",
+	SIM.indexOf('tried: "base_sob_ataque"') < SIM.indexOf('tried: "inimigo_a_100m"'));
+
+// baseUnderAttack e invasao de verdade, nao um batedor passando: o raio ja foi 200m e
+// causava bloqueio permanente em partidas 1v3.
+check("base sob ataque exige 3+ inimigos a 80m de um centro civico",
+	/0, 80, enemies, IID_UnitAI, false\)/.test(SIM) &&
+	/if \(enemyNearCC >= 3\) \{ baseUnderAttack = true; break outer; \}/.test(SIM));
+
+// batalhaEmCurso continua sendo calculado: serve ao diagnostico, so nao decide mais sozinho.
+check("batalha em curso continua no log de balanceamento",
 	/_bal\.batalha = batalhaEmCurso;/.test(SIM));
-check("a guarda vem ANTES da regra local dos 100m",
-	SIM.indexOf('tried: "batalha_em_curso"') < SIM.indexOf('tried: "inimigo_a_100m"'));
-check("a deteccao roda uma vez, fora do laco de trabalhadores",
+check("e a deteccao dela roda uma vez, fora do laco de trabalhadores",
 	SIM.indexOf("let batalhaEmCurso = false;") < SIM.indexOf("const idleWorkersList = [];"));
 
 console.log("\nordem manual do jogador manda em combate");

@@ -98,6 +98,7 @@ const PUDIM_STRINGS = {
 	"cap.forge":         ["Forge", "Forja"],
 	"cap.tower":         ["Tower", "Torre"],
 	"cap.palisade":      ["Palisade", "Paliçada"],
+	"cap.selWarriors": ["Select Warriors", "Selecionar Guerreiros"],
 	"cap.laps":          ["lap(s)", "volta(s)"],
 	"cap.backToWork":    ["Back to Work", "Voltar ao Trabalho"],
 	"cap.situation":     ["Situation", "Situação"],
@@ -282,6 +283,7 @@ const PUDIM_CAPTION_MAP = {
 	// (pudim_combatHeaderLabel) — escrever caption no botao desenha um SEGUNDO texto por cima
 	// do primeiro, que foi o "Estimador de Estimador de Combate" que apareceu na tela.
 	// Quem escreve esse rotulo e pudim_AplicarCombatBox, que precisa por a seta junto.
+	"pudim_selectWarriorsBtn":  "cap.selWarriors",
 	"pudim_combatRefreshBtn":   "cap.combatRefresh",
 	"pudim_autoWorkHeader":     "cap.autoWorkHeader",
 	"pudim_autoWorkDesc":       "cap.autoWorkDesc",

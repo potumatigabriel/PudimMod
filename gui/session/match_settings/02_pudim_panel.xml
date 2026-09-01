@@ -64,7 +64,8 @@
   <object name="pudim_stopAllRepeatBtn" type="button" size="8 568 100%-8 592" style="StoneButton"><action on="Press">pudim_StopAllRepeat();</action><translatableAttribute id="caption">Parar Todos os Repeats</translatableAttribute></object>
 
   <object name="pudim_panicStatus" type="text" size="8 720 100%-8 738" font="sans-13" text_align="center" textcolor="200 200 180 255" ghost="true"><translatableAttribute id="caption">Situacao: Calma</translatableAttribute></object>
-  <object name="pudim_backToWorkBtn2" type="button" size="8 742 100%-8 766" style="StoneButton"><action on="Press">pudim_ReturnToWork();</action><translatableAttribute id="caption">Voltar ao Trabalho</translatableAttribute></object>
+  <object name="pudim_backToWorkBtn2" type="button" size="8 742 49% 766" style="StoneButton"><action on="Press">pudim_ReturnToWork();</action><translatableAttribute id="caption">Voltar ao Trabalho</translatableAttribute></object>
+  <object name="pudim_selectWarriorsBtn" type="button" size="51% 742 100%-8 766" style="StoneButton"><action on="Press">pudim_SelecionarGuerreiros();</action><translatableAttribute id="caption">Selecionar Guerreiros</translatableAttribute></object>
   <object name="pudim_toggleAutoHouseBtn" type="button" size="8 692 100%-8 716" style="StoneButton"><action on="Press">pudim_ToggleAutoHouse();</action><object name="pudim_toggleAutoHouseLabel" type="text" size="0 0 100% 100%" font="sans-bold-13" text_align="center" text_valign="center" textcolor="255 255 255 255" ghost="true"><translatableAttribute id="caption">(ON) Auto-Casas (Faltando 3)</translatableAttribute></object></object>
 
   <!-- Os interruptores de liga/desliga sairam daqui para Menu > Opcoes > PudimMod, onde cada

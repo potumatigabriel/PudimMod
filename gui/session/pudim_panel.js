@@ -4066,6 +4066,36 @@ var g_PudimQuartelEquipe = [];      // quem foi recrutado, para devolver ao trab
 // primeira obra deixava de ser contada. Resultado: pedir 3 construía 4, sempre que se
 // começava do zero. Um sentinela que não colide com um valor legítimo resolve.
 var g_PudimQuartelBase = null;
+// ── A ORDEM VIROU FUNDACAO? ───────────────────────────────────────────────────────────
+//
+// "mandei fazer torres e nada aconteceu". O log de 01/09 mostra a ordem sendo emitida 28
+// vezes, de 3 em 3 segundos, sempre na MESMA coordenada (717,154), com "faltam 10" parado:
+//
+//   607s Torre em (717,154) ... faltam 10 [paralelo: pop 199 e recurso sobrando]
+//   610s Torre em (717,154) ... faltam 10 [paralelo: pop 199 e recurso sobrando]
+//   ... 26 vezes mais
+//
+// Duas coisas se somaram. A primeira: o painel registrava SUCCESS ao EMITIR o comando, nao
+// ao ver a fundacao aparecer — entao o log dizia "sucesso" 28 vezes para 28 fracassos.
+//
+// A segunda: nada fazia o mod desconfiar. O motor recusa o `construct` por motivos que o
+// SetBuildingPlacementPreview do lado GUI nao testa (limite de construcao do template, por
+// exemplo), e a recusa e silenciosa. Como o ponto escolhido e deterministico, o ciclo
+// seguinte reescolhia exatamente o mesmo.
+//
+// No regime sequencial isso nao aparecia porque o freio "obra em andamento" segurava tudo
+// no primeiro fracasso. As torres entraram no regime PARALELO (pop 199), onde o teto e 3
+// obras — e com emObra travado em 0 o freio nunca agia.
+//
+// Agora o mod compara o progresso (prontos + emObra) com o da ultima emissao. Igual
+// significa que a ordem anterior nao virou nada: o ponto vai para a lista de adiados e a
+// proxima tentativa sai em outro lugar. Depois de PUDIM_QUARTEL_FALHAS_MAX seguidas sem
+// nenhum progresso, a serie para e diz — melhor parar avisando do que gastar comando a cada
+// 3 segundos para sempre.
+var g_PudimQuartelUltimoPonto = null;
+var g_PudimQuartelProgresso = -1;
+var g_PudimQuartelFalhas = 0;
+const PUDIM_QUARTEL_FALHAS_MAX = 5;
 var g_PudimQuartelLogAt = 0;
 
 /** Chamado pelo dropdown de tipo. */
@@ -4108,6 +4138,9 @@ function pudim_QuartelToggle()
 		g_PudimQuartelAtivo = true;
 		g_PudimQuartelBase = null;
 		g_PudimQuartelUltima = 0;
+		g_PudimQuartelUltimoPonto = null;
+		g_PudimQuartelProgresso = -1;
+		g_PudimQuartelFalhas = 0;
 		pudim_Log("INFO", "QUARTEL", "série iniciada: " + g_PudimQuartelAlvo + " " +
 			pudim_QuartelNome(g_PudimQuartelTipo));
 	}
@@ -4444,6 +4477,33 @@ function pudim_ProcessQuartel()
 	// O teste é contra null, não contra 0 — ver a declaração de g_PudimQuartelBase.
 	if (g_PudimQuartelBase === null) g_PudimQuartelBase = d.prontos;
 
+	// A ordem anterior virou fundacao? (ver a declaracao de g_PudimQuartelUltimoPonto)
+	const progressoAgora = d.prontos + d.emObra;
+	if (g_PudimQuartelUltimoPonto !== null) {
+		if (progressoAgora === g_PudimQuartelProgresso) {
+			g_PudimDecayedSpots.push({ x: g_PudimQuartelUltimoPonto.x,
+			                           z: g_PudimQuartelUltimoPonto.z,
+			                           until: Date.now() + 90000 });
+			g_PudimQuartelFalhas++;
+			pudim_Log("WARN", "QUARTEL", "ordem em (" +
+				g_PudimQuartelUltimoPonto.x.toFixed(0) + "," +
+				g_PudimQuartelUltimoPonto.z.toFixed(0) + ") nao virou fundacao — " +
+				"ponto adiado (" + g_PudimQuartelFalhas + " de " + PUDIM_QUARTEL_FALHAS_MAX + ")");
+			if (g_PudimQuartelFalhas >= PUDIM_QUARTEL_FALHAS_MAX) {
+				pudim_Log("ERROR", "QUARTEL", pudim_QuartelNome(g_PudimQuartelTipo) +
+					": " + PUDIM_QUARTEL_FALHAS_MAX + " ordens seguidas sem fundacao — " +
+					"o motor esta recusando (limite do edificio? terreno?). Serie cancelada.");
+				g_PudimQuartelAtivo = false;
+				pudim_QuartelLiberarEquipe();
+				pudim_QuartelAtualizarLabel();
+				return;
+			}
+		} else {
+			g_PudimQuartelFalhas = 0;
+		}
+		g_PudimQuartelUltimoPonto = null;
+	}
+
 	const feitos = Math.max(0, d.prontos - g_PudimQuartelBase);
 	const faltam = g_PudimQuartelAlvo - feitos;
 	if (faltam <= 0) {
@@ -4512,6 +4572,9 @@ function pudim_ProcessQuartel()
 		"queued": false
 	});
 	pudim_MarkModBuilt(escolhida.x, escolhida.z);
+	// Guardado para o ciclo seguinte conferir se isto virou fundacao de verdade.
+	g_PudimQuartelUltimoPonto = { x: escolhida.x, z: escolhida.z };
+	g_PudimQuartelProgresso = d.prontos + d.emObra;
 	// Protege a equipe enquanto ela constrói, senão o despacho a puxa de volta para o
 	// recurso no tique seguinte e a obra fica sem ninguém.
 	g_PudimQuartelEquipe = d.builderIds.slice();
@@ -4522,7 +4585,7 @@ function pudim_ProcessQuartel()
 	const distCC = (d._dbg && d._dbg.ccx !== undefined)
 		? Math.round(Math.sqrt(Math.pow(escolhida.x - d._dbg.ccx, 2) +
 		                       Math.pow(escolhida.z - d._dbg.ccz, 2))) : -1;
-	pudim_Log("SUCCESS", "QUARTEL", pudim_QuartelNome(g_PudimQuartelTipo) + " em (" +
+	pudim_Log("INFO", "QUARTEL", pudim_QuartelNome(g_PudimQuartelTipo) + " ordenado em (" +
 		escolhida.x.toFixed(0) + "," + escolhida.z.toFixed(0) + ") a " + distCC + "m do CC com " +
 		d.builderIds.length + " trabalhador(es) (" +
 		((d._dbg && d._dbg.herdados) || 0) + " da equipe anterior) — faltam " + faltam +

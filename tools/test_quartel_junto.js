@@ -170,5 +170,76 @@ check("a paliçada aparece em voltas, a série em quantidade",
 	/" x" \+ g_PudimQuartelAlvo/.test(panel) &&
 	/g_PudimPalicadaVoltas \+ " " \+ pudim_T\("cap\.laps"\)/.test(panel));
 
+// -- A ordem tem de virar fundacao ---------------------------------------------------
+//
+// "mandei fazer torres e nada aconteceu". O log de 01/09 mostra a ordem emitida 28 vezes,
+// de 3 em 3 segundos, sempre na MESMA coordenada (717,154), com "faltam 10" parado:
+//
+//   607s Torre em (717,154) ... faltam 10 [paralelo: pop 199 e recurso sobrando]
+//   610s Torre em (717,154) ... faltam 10 [paralelo: pop 199 e recurso sobrando]
+//   ... 26 vezes mais
+//
+// Duas coisas somadas. O painel registrava SUCCESS ao EMITIR o comando, nao ao ver a
+// fundacao aparecer — 28 "sucessos" para 28 fracassos. E nada fazia o mod desconfiar: o
+// motor recusa o construct por motivos que o preview do lado GUI nao testa, em silencio, e
+// como o ponto escolhido e deterministico o ciclo seguinte reescolhia o mesmo.
+//
+// No regime SEQUENCIAL isso nunca apareceu porque o freio "obra em andamento" segurava tudo
+// no primeiro fracasso. As torres cairam no regime PARALELO (pop 199), onde o teto e 3 — e
+// com emObra travado em zero o freio nunca agia. Por isso o teste cobre os dois regimes.
+console.log("\na ordem tem de virar fundacao");
+
+const MAXF = +/const PUDIM_QUARTEL_FALHAS_MAX = (\d+);/.exec(panel)[1];
+check("ha um teto de falhas seguidas", MAXF >= 3 && MAXF <= 10, MAXF);
+
+// Espelha o ciclo: emite, e no proximo confere se prontos+emObra mudou.
+function ciclo(progressos) {
+	let ultimo = null, prog = -1, falhas = 0, adiados = 0, parou = false;
+	for (const p of progressos) {
+		if (ultimo !== null) {
+			if (p === prog) { adiados++; if (++falhas >= MAXF) { parou = true; break; } }
+			else falhas = 0;
+			ultimo = null;
+		}
+		ultimo = { x: 0, z: 0 }; prog = p;
+	}
+	return { adiados: adiados, parou: parou, falhas: falhas };
+}
+
+// O caso real: progresso nunca muda.
+const travado = ciclo(new Array(28).fill(0));
+check("com o motor recusando sempre, a serie para em vez de repetir 28 vezes",
+	travado.parou, "adiou " + travado.adiados + " ponto(s)");
+check("e cada tentativa adia o ponto, entao a proxima sai em outro lugar",
+	travado.adiados >= 1);
+
+// O caso saudavel: cada ordem vira fundacao, nada e adiado.
+const bom = ciclo([0, 1, 2, 3, 4, 5]);
+check("com a obra saindo, nada e adiado e a serie segue",
+	!bom.parou && bom.adiados === 0);
+
+// Falha isolada nao pode cancelar: terreno ocupado por uma unidade que ja saiu, por exemplo.
+const intermitente = ciclo([0, 0, 1, 1, 2, 3, 3, 4]);
+check("falha isolada nao cancela — o contador zera quando ha progresso",
+	!intermitente.parou, "falhas seguidas ao fim: " + intermitente.falhas);
+
+// No codigo.
+check("o progresso comparado e prontos + emObra",
+	/const progressoAgora = d\.prontos \+ d\.emObra;/.test(panel));
+check("o ponto que falhou entra na lista de adiados",
+	/g_PudimDecayedSpots\.push\(\{ x: g_PudimQuartelUltimoPonto\.x,/.test(panel));
+check("e a lista de adiados e consultada ao escolher",
+	/if \(pudim_IsCancelledSpot\(pos\.x, pos\.z\)\) continue;/.test(panel));
+check("o estado zera ao iniciar uma serie nova",
+	/g_PudimQuartelUltimoPonto = null;\s+g_PudimQuartelProgresso = -1;\s+g_PudimQuartelFalhas = 0;/.test(panel));
+check("a serie cancelada devolve a equipe ao trabalho",
+	/ordens seguidas sem fundacao[\s\S]{0,220}?pudim_QuartelLiberarEquipe\(\);/.test(panel));
+
+// O log mentia: SUCCESS para uma ordem que so tinha sido emitida.
+check("o log nao chama de SUCCESS uma ordem apenas emitida",
+	/pudim_Log\("INFO", "QUARTEL", pudim_QuartelNome\(g_PudimQuartelTipo\) \+ " ordenado em \("/.test(panel));
+check("e o SUCCESS ficou reservado para a serie concluida",
+	/pudim_Log\("SUCCESS", "QUARTEL", g_PudimQuartelAlvo \+ " "/.test(panel));
+
 console.log(fails === 0 ? "\nTODOS OS TESTES PASSARAM" : "\n" + fails + " TESTE(S) FALHARAM");
 process.exit(fails === 0 ? 0 : 1);

@@ -4134,6 +4134,12 @@ function pudim_QuartelAtualizarLabel()
 	const lbl = Engine.GetGUIObjectByName("pudim_quartelBtnLabel");
 	if (!lbl) return;
 	const nome = pudim_QuartelNome(g_PudimQuartelTipo);
+	// Com as DUAS correndo, o rotulo diz as duas — senao a que nao esta no dropdown some da
+	// tela e parece que o mod nao aceita simultaneas.
+	if (g_PudimQuartelAtivo && g_PudimPalicadaAtiva) {
+		lbl.caption = pudim_T("cap.serieStop") + " " + pudim_SerieStatusTexto();
+		return;
+	}
 	if (g_PudimQuartelTipo === "palicada") {
 		const dd = Engine.TryGetGUIObjectByName("pudim_quartelQtd");
 		const voltas = g_PudimPalicadaAtiva ? g_PudimPalicadaVoltas : ((dd ? dd.selected : 0) + 1);
@@ -4144,6 +4150,31 @@ function pudim_QuartelAtualizarLabel()
 	lbl.caption = g_PudimQuartelAtivo
 		? pudim_T("cap.serieStop") + " " + g_PudimQuartelAlvo + " " + nome
 		: pudim_T("cap.serieBuild") + " " + g_PudimQuartelAlvo + " " + nome;
+}
+
+/**
+ * O que esta em andamento nas duas series, junto.
+ *
+ * Pergunta do jogador em 01/09: "da pra fazer varias coisas simultaneas? por exemplo
+ * palicadas e quarteis?".
+ *
+ * Da, e ja dava: g_PudimQuartelAtivo e g_PudimPalicadaAtiva sao estados independentes, os
+ * dois processos rodam no mesmo tique, e o toggle de um nao encosta no outro. Cada um tem
+ * equipe propria (5 construtores a serie, 3 a palicada).
+ *
+ * O que faltava era a TELA dizer isso. O rotulo do botao so falava da serie selecionada no
+ * dropdown, entao a outra corria invisivel — e quem nao sabe do detalhe conclui que o mod so
+ * faz uma coisa por vez, que foi exatamente a duvida dele.
+ */
+function pudim_SerieStatusTexto()
+{
+	const partes = [];
+	if (g_PudimQuartelAtivo)
+		partes.push(pudim_QuartelNome(g_PudimQuartelTipo === "palicada" ? "quartel" : g_PudimQuartelTipo) +
+			" x" + g_PudimQuartelAlvo);
+	if (g_PudimPalicadaAtiva)
+		partes.push(pudim_QuartelNome("palicada") + ": " + g_PudimPalicadaVoltas + " " + pudim_T("cap.laps"));
+	return partes.join("  +  ");
 }
 
 /** Tipos que dao para construir AGORA. A lista cresce sozinha durante a partida. */

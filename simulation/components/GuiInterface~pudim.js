@@ -3798,10 +3798,55 @@ GuiInterface.prototype.pudim_GetBarracksBuildData = function(player, data)
 	// entao o quartel colava no cinturao das fazendas por construcao — era o que o jogador
 	// estava vendo mesmo depois de o piso subir para 60.
 	if (!spec.anel) {
+		// PERTO DOS QUE JA EXISTEM. "coloquei pra fazer quarteis... fez um em cada canto...
+		// eles poderiam ficar mais proximos".
+		//
+		// A ordenacao anterior olhava SO o raio: |r - RAIO_IDEAL|. Com isso todos os
+		// candidatos na distancia ideal ficavam equivalentes, e o angulo entrava na ordem em
+		// que o gerador tinha empilhado. Cada obra da serie escolhia sozinha, sem saber onde
+		// as anteriores foram parar — e onde havia arvore ou pedra ela pulava para um angulo
+		// completamente diferente. Espalhava por construcao, nao por acidente.
+		//
+		// Agora o criterio principal e a distancia ao MESMO tipo ja de pe. Serve ao pedido e
+		// ao jogo: quarteis juntos compartilham a mesma defesa, o mesmo ponto de encontro e a
+		// mesma viagem de reforco.
+		//
+		// O raio ideal continua decidindo quando nao ha nenhum ainda — a primeira obra da
+		// serie nao tem em que se ancorar, e o cinturao das fazendas ja limita o intervalo
+		// (ver PUDIM_CINTURAO_FAZENDA). E ele segue como desempate, para que entre dois
+		// pontos igualmente perto do vizinho venca o que fica melhor posicionado.
+		const mesmosDePe = [];
+		for (const ent of allEnts) {
+			const cid = Engine.QueryInterface(ent, IID_Identity);
+			if (!cid || !cid.HasClass(classe)) continue;
+			const pp = Engine.QueryInterface(ent, IID_Position);
+			if (!pp || !pp.IsInWorld()) continue;
+			const q = pp.GetPosition2D();
+			mesmosDePe.push({ x: q.x, z: q.y });
+		}
+		result._dbg.mesmos = mesmosDePe.length;
+
+		const distAoVizinho = function(c) {
+			let melhor = Infinity;
+			for (const m of mesmosDePe) {
+				const dx = c.x - m.x, dz = c.z - m.z;
+				const d = dx*dx + dz*dz;
+				if (d < melhor) melhor = d;
+			}
+			return melhor;
+		};
+		const desvioDoRaio = function(c) {
+			const r = Math.sqrt((c.x-ccX)*(c.x-ccX) + (c.z-ccZ)*(c.z-ccZ));
+			return Math.abs(r - PUDIM_QUARTEL_RAIO_IDEAL);
+		};
 		candidatos.sort(function(a, b) {
-			const ra = Math.sqrt((a.x-ccX)*(a.x-ccX) + (a.z-ccZ)*(a.z-ccZ));
-			const rb = Math.sqrt((b.x-ccX)*(b.x-ccX) + (b.z-ccZ)*(b.z-ccZ));
-			return Math.abs(ra - PUDIM_QUARTEL_RAIO_IDEAL) - Math.abs(rb - PUDIM_QUARTEL_RAIO_IDEAL);
+			if (mesmosDePe.length) {
+				const da = distAoVizinho(a), db = distAoVizinho(b);
+				// 15m de tolerancia (225 = 15^2) antes de o raio desempatar: sem ela, um
+				// metro de diferenca ja mandaria, e o segundo criterio nunca valeria nada.
+				if (Math.abs(da - db) > 225) return da - db;
+			}
+			return desvioDoRaio(a) - desvioDoRaio(b);
 		});
 	}
 	if (spec.anel) {

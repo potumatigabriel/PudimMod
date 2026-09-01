@@ -166,8 +166,14 @@ check("e cabe dentro do alcance gerado", IDEAL > CINTURAO && IDEAL < QMAX,
 	CINTURAO + " < " + IDEAL + " < " + QMAX);
 check("a geração continua saindo do cinturão — o alvo não vira piso",
 	/for \(let r = PUDIM_QUARTEL_RAIO_MIN; r <= PUDIM_QUARTEL_RAIO_MAX/.test(sim));
+// O alvo de raio continua ordenando, mas desde 01/09 ele é o SEGUNDO critério: o primeiro é
+// ficar perto de um do mesmo tipo já de pé ("fez um em cada canto... poderiam ficar mais
+// proximos"). Quando não há nenhum — a primeira obra da série — é ele que decide sozinho,
+// que é o caso espelhado logo abaixo. Ver tools/test_quartel_junto.js.
 check("o que muda é a ORDEM: mais perto do alvo vem primeiro",
-	/Math\.abs\(ra - PUDIM_QUARTEL_RAIO_IDEAL\) - Math\.abs\(rb - PUDIM_QUARTEL_RAIO_IDEAL\)/.test(sim));
+	/const desvioDoRaio = function\(c\)/.test(sim) &&
+	/Math\.abs\(r - PUDIM_QUARTEL_RAIO_IDEAL\)/.test(sim) &&
+	/return desvioDoRaio\(a\) - desvioDoRaio\(b\);/.test(sim));
 check("e isso não vale para a torre, que tem o anel dela",
 	/if \(!spec\.anel\) \{/.test(sim) && /if \(spec\.anel\) \{/.test(sim));
 

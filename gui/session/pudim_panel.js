@@ -4205,6 +4205,8 @@ function pudim_QuartelToggle()
 		st.ultimoPonto = null;
 		st.progresso = -1;
 		st.falhas = 0;
+		st.faltam = undefined;
+		st.feitos = 0;
 		const outras = pudim_SeriesAtivas().filter(t => t !== tipo).map(pudim_QuartelNome);
 		pudim_Log("INFO", "QUARTEL", "série iniciada: " + st.alvo + " " +
 			pudim_QuartelNome(tipo) +
@@ -4231,15 +4233,13 @@ function pudim_QuartelLiberarEquipe(tipo)
 
 function pudim_QuartelAtualizarLabel()
 {
+	try { pudim_SerieDesenharLista(); } catch (e) {}
 	const lbl = Engine.GetGUIObjectByName("pudim_quartelBtnLabel");
 	if (!lbl) return;
 	const nome = pudim_QuartelNome(g_PudimQuartelTipo);
-	// Com as DUAS correndo, o rotulo diz as duas — senao a que nao esta no dropdown some da
-	// tela e parece que o mod nao aceita simultaneas.
-	if (pudim_SeriesAtivas().length + (g_PudimPalicadaAtiva ? 1 : 0) > 1) {
-		lbl.caption = pudim_T("cap.serieStop") + " " + pudim_SerieStatusTexto();
-		return;
-	}
+	// O botao fala SO do tipo que esta no dropdown. Quem mostra o conjunto e a lista de
+	// vagas logo abaixo (pudim_SerieDesenharLista) — antes isto era um rotulo unico que
+	// crescia ate quebrar em duas linhas com tres series ativas.
 	if (g_PudimQuartelTipo === "palicada") {
 		const dd = Engine.TryGetGUIObjectByName("pudim_quartelQtd");
 		const voltas = g_PudimPalicadaAtiva ? g_PudimPalicadaVoltas : ((dd ? dd.selected : 0) + 1);
@@ -4271,7 +4271,7 @@ function pudim_SerieStatusTexto()
 {
 	const partes = [];
 	for (const t of pudim_SeriesAtivas())
-		partes.push(pudim_QuartelNome(t) + " x" + pudim_SerieEstado(t).alvo);
+		partes.push(pudim_QuartelNome(t) + " x" + pudim_SerieFaltam(t));
 	if (g_PudimPalicadaAtiva)
 		partes.push(pudim_QuartelNome("palicada") + ": " + g_PudimPalicadaVoltas + " " + pudim_T("cap.laps"));
 	return partes.join("  +  ");
@@ -4514,9 +4514,73 @@ function pudim_SerieEstado(tipo)
 {
 	if (!g_PudimSeries[tipo])
 		g_PudimSeries[tipo] = { ativo: false, alvo: 1, base: null, ultima: 0, logAt: 0,
-		                        equipe: [], ultimoPonto: null, progresso: -1, falhas: 0 };
+		                        equipe: [], ultimoPonto: null, progresso: -1, falhas: 0,
+		                        faltam: undefined, feitos: 0 };
 	return g_PudimSeries[tipo];
 }
+
+/**
+ * Quantos ainda faltam nesta serie.
+ *
+ * st.faltam so existe depois do primeiro ciclo de pudim_ProcessSerie (e ele que conta os
+ * prontos). Antes disso, o alvo cheio e a resposta certa: nada foi construido ainda.
+ */
+function pudim_SerieFaltam(tipo)
+{
+	const st = pudim_SerieEstado(tipo);
+	return st.faltam === undefined ? st.alvo : Math.max(0, st.faltam);
+}
+
+/**
+ * A lista do que esta sendo construido, uma linha por serie, cada uma com o seu X.
+ *
+ * Pedido de 02/09: "poderia ficar uma lista de coisas sendo construidas, com um botao X pra
+ * parar, de forma individual".
+ *
+ * Antes tudo cabia num rotulo so — "PARAR — faltam Quartel x10 + Estabulo x3 + Casa x5" —
+ * que nao escala e nao deixa cancelar UMA. Sao seis vagas porque sao seis tipos
+ * (PUDIM_QUARTEL_TIPOS), entao a lista nunca transborda.
+ *
+ * A ordem e a de PUDIM_QUARTEL_TIPOS, fixa: lista que reordena sozinha faz o jogador clicar
+ * no X de uma e acertar outra. Foi o mesmo cuidado da lista de unidades.
+ */
+const PUDIM_SERIE_VAGAS = 6;
+
+function pudim_SerieDesenharLista()
+{
+	const ativas = pudim_SeriesAtivas();
+	if (g_PudimPalicadaAtiva) ativas.push("palicada");
+	for (let i = 0; i < PUDIM_SERIE_VAGAS; i++) {
+		const rot = Engine.TryGetGUIObjectByName("pudim_serieRot" + i);
+		const bx = Engine.TryGetGUIObjectByName("pudim_serieX" + i);
+		const t = ativas[i];
+		if (rot) {
+			rot.hidden = !t;
+			if (t) rot.caption = pudim_QuartelNome(t) + " " +
+				(t === "palicada" ? g_PudimPalicadaVoltas + "v" : pudim_SerieFaltam(t));
+		}
+		if (bx) bx.hidden = !t;
+	}
+	g_PudimSerieLista = ativas;
+}
+
+/**
+ * O X de uma vaga. Cancela SO aquela serie — e a segunda metade do pedido de 01/09
+ * ("ter a opcao de cancelar uma das ordens").
+ */
+function pudim_SerieCancelar(vaga)
+{
+	const tipo = (g_PudimSerieLista || [])[vaga];
+	if (!tipo) return;
+	if (tipo === "palicada") { pudim_PalicadaToggle(); return; }
+	const st = pudim_SerieEstado(tipo);
+	if (!st.ativo) return;
+	st.ativo = false;
+	pudim_QuartelLiberarEquipe(tipo);
+	pudim_Log("INFO", "QUARTEL", pudim_QuartelNome(tipo) + ": série cancelada pelo jogador (X da lista)");
+	pudim_QuartelAtualizarLabel();
+}
+var g_PudimSerieLista = [];
 
 /** As series em andamento agora, na ordem fixa de PUDIM_QUARTEL_TIPOS. */
 function pudim_SeriesAtivas()
@@ -4538,6 +4602,11 @@ function pudim_ProcessQuartel()
 
 	for (const tipo of pudim_SeriesAtivas())
 		pudim_ProcessSerie(tipo, pudim_SerieEstado(tipo));
+
+	// A lista precisa acompanhar o `faltam`, que muda a cada ciclo — desenhar so no clique
+	// deixaria o numero congelado no valor inicial, que foi exatamente a queixa
+	// ("ja foram construidos 5 quarteis, mas n diminuiu ai conforme constroi").
+	try { pudim_SerieDesenharLista(); } catch (e) {}
 }
 
 function pudim_ProcessSerie(tipo, st)
@@ -4616,8 +4685,16 @@ function pudim_ProcessSerie(tipo, st)
 		st.ultimoPonto = null;
 	}
 
+	// QUANTOS FALTAM FICA NO ESTADO, NAO SO NESTA VARIAVEL.
+	//
+	// "ja foram construidos 5 quarteis e 2 estabulos, mas n diminuiu ai conforme constroi":
+	// o rotulo mostrava st.alvo, que e o TOTAL PEDIDO e nunca muda. O numero que interessa
+	// — quantos ainda faltam — era calculado aqui, usado, e jogado fora a cada ciclo, entao
+	// a tela nao tinha como saber dele.
 	const feitos = Math.max(0, d.prontos - st.base);
 	const faltam = st.alvo - feitos;
+	st.faltam = faltam;
+	st.feitos = feitos;
 	if (faltam <= 0) {
 		pudim_Log("SUCCESS", "QUARTEL", st.alvo + " " +
 			pudim_QuartelNome(tipo) + " prontos — equipe volta ao trabalho");
@@ -4737,6 +4814,9 @@ const PUDIM_ABAIXO_DO_COMBATE = [
 	"pudim_metalVal", "pudim_sendIdleNowBtn", "pudim_repeatHeader", "pudim_repeatDesc",
 	"pudim_repeatStatus", "pudim_stopAllRepeatBtn", "pudim_quartelHeader", "pudim_quartelQtd",
 	"pudim_quartelTipo", "pudim_quartelBtn", "pudim_toggleAutoHouseBtn", "pudim_panicStatus",
+	"pudim_serieRot0", "pudim_serieX0", "pudim_serieRot1", "pudim_serieX1",
+	"pudim_serieRot2", "pudim_serieX2", "pudim_serieRot3", "pudim_serieX3",
+	"pudim_serieRot4", "pudim_serieX4", "pudim_serieRot5", "pudim_serieX5",
 	"pudim_backToWorkBtn2", "pudim_selectWarriorsBtn",
 	"pudim_optionsHint", "pudim_unitHeader", "pudim_unitLabel0",
 	"pudim_unitMinus0", "pudim_unitPlus0", "pudim_unitVal0", "pudim_unitVazio",
@@ -4830,7 +4910,9 @@ function pudim_AplicarCombatBox()
 //
 // Peso zero significa "não treine isto", igual em coleta. Todos começam em zero: o mod não
 // deve escolher exército pelo jogador — ele mantém a proporção QUE O JOGADOR pediu.
-const PUDIM_UNIT_LINHAS = 7;
+// 5 vagas: as duas ultimas pagaram as fileiras da lista de series (02/09). A ordenacao
+// poe os tipos COM PESO na frente, entao o que o jogador configurou nunca some.
+const PUDIM_UNIT_LINHAS = 5;
 var g_PudimUnitPesos = {};      // tpl -> peso 0..10, escolha do jogador
 var g_PudimUnitLista = [];      // o que a simulação devolveu na última leitura
 var g_PudimUnitAccum = 0;

@@ -31,6 +31,10 @@ const base = path.join(__dirname, "..");
 const sim = fs.readFileSync(
 	path.join(base, "simulation", "components", "GuiInterface~pudim.js"), "utf8");
 const panel = fs.readFileSync(path.join(base, "gui", "session", "pudim_panel.js"), "utf8");
+const xml = fs.readFileSync(
+	path.join(base, "gui", "session", "match_settings", "02_pudim_panel.xml"), "utf8");
+const PUDIM_QUARTEL_TIPOS_N =
+	(/const PUDIM_QUARTEL_TIPOS = \[([^\]]*)\]/.exec(panel)[1].match(/"/g) || []).length / 2;
 
 let fails = 0;
 function check(name, cond, extra) {
@@ -165,127 +169,47 @@ const EQ_PALI = +/const PUDIM_PALICADA_EQUIPE = (\d+);/.exec(sim)[1];
 check("cada série tem equipe própria", EQ_SERIE === 5 && EQ_PALI === 3,
 	EQ_SERIE + " e " + EQ_PALI);
 
-// O que faltava: a tela.
-check("o rótulo mostra TODAS quando mais de uma corre",
-	/if \(pudim_SeriesAtivas\(\)\.length \+ \(g_PudimPalicadaAtiva \? 1 : 0\) > 1\) \{/.test(panel) &&
-	/pudim_SerieStatusTexto\(\)/.test(panel));
-check("e o texto junta as duas com um separador visível",
-	/partes\.join\("  \+  "\)/.test(panel));
-check("a paliçada aparece em voltas, a série em quantidade",
-	/" x" \+ pudim_SerieEstado\(t\)\.alvo/.test(panel) &&
-	/g_PudimPalicadaVoltas \+ " " \+ pudim_T\("cap\.laps"\)/.test(panel));
+// O que faltava: a tela. Em 02/09 isto virou uma LISTA, com um X por serie —
+// "poderia ficar uma lista de coisas sendo construidas, com um botao X pra parar, de forma
+// individual". O rotulo unico nao escalava: com tres series ativas ele quebrava em duas
+// linhas ("PARAR — faltam Quartel x10 + Estabulo x3 + Casa x5") e nao deixava cancelar uma.
+check("ha uma vaga de lista por tipo possivel",
+	/const PUDIM_SERIE_VAGAS = 6;/.test(panel) &&
+	PUDIM_QUARTEL_TIPOS_N === 6, "tipos=" + PUDIM_QUARTEL_TIPOS_N);
+check("cada vaga tem rotulo e X proprios no XML",
+	[0,1,2,3,4,5].every(i =>
+		xml.indexOf('name="pudim_serieRot' + i + '"') > 0 &&
+		xml.indexOf('name="pudim_serieX' + i + '"') > 0));
+check("o X de cada vaga chama o cancelamento com o indice dela",
+	[0,1,2,3,4,5].every(i => xml.indexOf("pudim_SerieCancelar(" + i + ");") > 0));
+check("as vagas nascem escondidas — a lista e dinamica",
+	(xml.match(/name="pudim_serie(Rot|X)\d"[^>]*hidden="true"/g) || []).length === 12);
 
-// -- A ordem tem de virar fundacao ---------------------------------------------------
-//
-// "mandei fazer torres e nada aconteceu". O log de 01/09 mostra a ordem emitida 28 vezes,
-// de 3 em 3 segundos, sempre na MESMA coordenada (717,154), com "faltam 10" parado:
-//
-//   607s Torre em (717,154) ... faltam 10 [paralelo: pop 199 e recurso sobrando]
-//   610s Torre em (717,154) ... faltam 10 [paralelo: pop 199 e recurso sobrando]
-//   ... 26 vezes mais
-//
-// Duas coisas somadas. O painel registrava SUCCESS ao EMITIR o comando, nao ao ver a
-// fundacao aparecer — 28 "sucessos" para 28 fracassos. E nada fazia o mod desconfiar: o
-// motor recusa o construct por motivos que o preview do lado GUI nao testa, em silencio, e
-// como o ponto escolhido e deterministico o ciclo seguinte reescolhia o mesmo.
-//
-// No regime SEQUENCIAL isso nunca apareceu porque o freio "obra em andamento" segurava tudo
-// no primeiro fracasso. As torres cairam no regime PARALELO (pop 199), onde o teto e 3 — e
-// com emObra travado em zero o freio nunca agia. Por isso o teste cobre os dois regimes.
-console.log("\na ordem tem de virar fundacao");
-
-const MAXF = +/const PUDIM_QUARTEL_FALHAS_MAX = (\d+);/.exec(panel)[1];
-check("ha um teto de falhas seguidas", MAXF >= 3 && MAXF <= 10, MAXF);
-
-// Espelha o ciclo: emite, e no proximo confere se prontos+emObra mudou.
-function ciclo(progressos) {
-	let ultimo = null, prog = -1, falhas = 0, adiados = 0, parou = false;
-	for (const p of progressos) {
-		if (ultimo !== null) {
-			if (p === prog) { adiados++; if (++falhas >= MAXF) { parou = true; break; } }
-			else falhas = 0;
-			ultimo = null;
-		}
-		ultimo = { x: 0, z: 0 }; prog = p;
-	}
-	return { adiados: adiados, parou: parou, falhas: falhas };
-}
-
-// O caso real: progresso nunca muda.
-const travado = ciclo(new Array(28).fill(0));
-check("com o motor recusando sempre, a serie para em vez de repetir 28 vezes",
-	travado.parou, "adiou " + travado.adiados + " ponto(s)");
-check("e cada tentativa adia o ponto, entao a proxima sai em outro lugar",
-	travado.adiados >= 1);
-
-// O caso saudavel: cada ordem vira fundacao, nada e adiado.
-const bom = ciclo([0, 1, 2, 3, 4, 5]);
-check("com a obra saindo, nada e adiado e a serie segue",
-	!bom.parou && bom.adiados === 0);
-
-// Falha isolada nao pode cancelar: terreno ocupado por uma unidade que ja saiu, por exemplo.
-const intermitente = ciclo([0, 0, 1, 1, 2, 3, 3, 4]);
-check("falha isolada nao cancela — o contador zera quando ha progresso",
-	!intermitente.parou, "falhas seguidas ao fim: " + intermitente.falhas);
-
-// No codigo.
-check("o progresso comparado e prontos + emObra",
-	/const progressoAgora = d\.prontos \+ d\.emObra;/.test(panel));
-check("o ponto que falhou entra na lista de adiados",
-	/g_PudimDecayedSpots\.push\(\{ x: st\.ultimoPonto\.x,/.test(panel));
-check("e a lista de adiados e consultada ao escolher",
-	/if \(pudim_IsCancelledSpot\(pos\.x, pos\.z\)\) continue;/.test(panel));
-check("o estado zera ao iniciar uma serie nova",
-	/st\.ultimoPonto = null;\s+st\.progresso = -1;\s+st\.falhas = 0;/.test(panel));
-check("a serie cancelada devolve a equipe ao trabalho",
-	/ordens seguidas sem fundacao[\s\S]{0,220}?pudim_QuartelLiberarEquipe\(tipo\);/.test(panel));
-
-// O log mentia: SUCCESS para uma ordem que so tinha sido emitida.
-check("o log nao chama de SUCCESS uma ordem apenas emitida",
-	/pudim_Log\("INFO", "QUARTEL", pudim_QuartelNome\(tipo\) \+ " ordenado em \("/.test(panel));
-check("e o SUCCESS ficou reservado para a serie concluida",
-	/pudim_Log\("SUCCESS", "QUARTEL", st\.alvo \+ " "/.test(panel));
-
-// -- Cada tipo tem a sua serie --------------------------------------------------------
-//
-// "mandei fazer 4 quarteis, e no meio da construcao do primeiro, mandei fazer 4 estabulos,
-// so terminou o que tinha comecado e n fez os quarteis... tem que fazer em paralelo, e ter
-// a opcao de cancelar uma das ordens".
-//
-// A causa era estrutural: OITO variaveis escalares para UMA serie. Trocar o tipo no
-// dropdown e apertar reescrevia o mesmo estado — a serie de quarteis nao era cancelada, era
-// SOBRESCRITA. O que ja estava em obra terminava porque o motor nao sabe do mod; o resto
-// deixava de existir sem uma linha de log.
-console.log("\ncada tipo tem a sua serie");
-
-check("o estado e por tipo, criado sob demanda",
-	/g_PudimSeries\[tipo\] = \{ ativo: false, alvo: 1, base: null/.test(panel));
-check("o laco processa TODAS as series ativas no mesmo tique",
-	/for \(const tipo of pudim_SeriesAtivas\(\)\)\s+pudim_ProcessSerie\(tipo, pudim_SerieEstado\(tipo\)\);/.test(panel));
-check("e a serie recebe o tipo e o estado dela, sem ler global nenhuma",
-	/function pudim_ProcessSerie\(tipo, st\)/.test(panel));
-check("a palicada fica fora do laco — ela tem processo proprio",
-	/filter\(t => t !== "palicada" && pudim_SerieEstado\(t\)\.ativo\)/.test(panel));
-
-// A segunda metade do pedido: cancelar uma sem derrubar a outra.
-const corpoT = (function() {
-	return corpoToggle;   // ja extraido acima
+// Cancelar uma nao pode encostar nas outras: e a metade do pedido que faltava.
+const corpoCanc = (function() {
+	const i = panel.indexOf("function pudim_SerieCancelar(vaga)");
+	return panel.slice(i, panel.indexOf("\n}\n", i));
 })();
-check("o botao age so no tipo do dropdown",
-	/const tipo = g_PudimQuartelTipo;\s+const st = pudim_SerieEstado\(tipo\);/.test(corpoT));
-check("cancelar mexe so no estado daquele tipo",
-	/st\.ativo = false;/.test(corpoT) && corpoT.indexOf("g_PudimSeries = {}") < 0);
-check("e devolve so a equipe daquele tipo",
-	/pudim_QuartelLiberarEquipe\(tipo\);/.test(corpoT));
-check("cada tipo tem equipe propria",
-	/function pudim_QuartelLiberarEquipe\(tipo\)/.test(panel) &&
-	/const st = pudim_SerieEstado\(tipo\);\s+for \(const id of st\.equipe\)/.test(panel));
-check("o log diz com quais outras a nova serie vai correr em paralelo",
-	/em paralelo com/.test(panel));
-// Estado por tipo so serve se o TIPO chegar na consulta da simulacao — senao as duas series
-// pediriam dados do mesmo edificio.
-check("a consulta a simulacao leva o tipo da serie, nao o do dropdown",
-	/"tipo": tipo, "playerOrdered"/.test(panel));
+check("o X cancela SO a serie daquela vaga",
+	/const tipo = \(g_PudimSerieLista \|\| \[\]\)\[vaga\];/.test(corpoCanc) &&
+	/pudim_QuartelLiberarEquipe\(tipo\);/.test(corpoCanc));
+check("e a palicada, que tem processo proprio, e desviada",
+	/if \(tipo === "palicada"\) \{ pudim_PalicadaToggle\(\); return; \}/.test(corpoCanc));
+check("vaga vazia nao faz nada", /if \(!tipo\) return;/.test(corpoCanc));
+
+// A ordem da lista tem de ser fixa, senao o jogador clica no X de uma e acerta outra.
+check("a ordem da lista e a de PUDIM_QUARTEL_TIPOS, fixa",
+	/lista que reordena sozinha faz o jogador clicar/.test(panel));
+
+// O NUMERO da lista: "ja foram construidos 5 quarteis, mas n diminuiu ai conforme constroi".
+check("a lista mostra quantos FALTAM, nao o total pedido",
+	/pudim_QuartelNome\(t\) \+ " " \+\s+\(t === "palicada" \? g_PudimPalicadaVoltas \+ "v" : pudim_SerieFaltam\(t\)\)/.test(panel));
+check("e faltam vive no estado, nao so numa variavel local",
+	/st\.faltam = faltam;/.test(panel) && /function pudim_SerieFaltam\(tipo\)/.test(panel));
+check("antes do primeiro ciclo, faltam e o alvo cheio",
+	/return st\.faltam === undefined \? st\.alvo : Math\.max\(0, st\.faltam\);/.test(panel));
+check("a lista e redesenhada a cada ciclo, senao o numero congela",
+	/pudim_ProcessSerie\(tipo, pudim_SerieEstado\(tipo\)\);[\s\S]{0,400}?pudim_SerieDesenharLista\(\)/.test(panel));
 
 console.log(fails === 0 ? "\nTODOS OS TESTES PASSARAM" : "\n" + fails + " TESTE(S) FALHARAM");
 process.exit(fails === 0 ? 0 : 1);

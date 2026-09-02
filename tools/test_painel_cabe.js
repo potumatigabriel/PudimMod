@@ -138,8 +138,13 @@ check("o atualizador de rótulos usa TryGet, então não quebra sem os botões",
 check("Auto-Casas continua no painel — é decisão da partida, não configuração",
 	xml.indexOf('name="pudim_toggleAutoHouseBtn"') > 0 &&
 	/Sem persistência: toda partida recomeça no padrão 5/.test(panel));
-check("e o painel diz onde os interruptores foram parar",
-	xml.indexOf('name="pudim_optionsHint"') > 0);
+// A dica "Menu > Opcoes > PudimMod" saiu em 02/09. Ela era texto fixo, ja lido, e os 28px
+// dela pagaram as duas fileiras da lista de series ("uma lista de coisas sendo construidas,
+// com um botao X pra parar"). Espaco no painel e o recurso escasso desde que ele passou a
+// nao caber na tela do jogador — ver o cabecalho deste arquivo.
+check("a dica das opções cedeu lugar à lista de séries",
+	xml.indexOf('name="pudim_optionsHint"') < 0 &&
+	xml.indexOf('name="pudim_serieX0"') > 0);
 
 // ── As opções: pt-BR e explicação de verdade ───────────────────────────────────────────
 console.log("\nas opcoes, em pt-BR e explicadas");

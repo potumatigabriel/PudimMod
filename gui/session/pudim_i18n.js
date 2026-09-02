@@ -298,7 +298,6 @@ const PUDIM_CAPTION_MAP = {
 	"pudim_stopAllRepeatBtn":   "cap.repeatStop",
 	"pudim_quartelHeader":      "cap.serieHeader",
 	"pudim_backToWorkBtn2":     "cap.backToWork",
-	"pudim_optionsHint":        "cap.optionsHint",
 	"pudim_unitHeader":         "cap.unitHeader",
 	"pudim_unitVazio":          "cap.unitVazio"
 };

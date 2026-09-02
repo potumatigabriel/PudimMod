@@ -1990,10 +1990,17 @@ function pudim_Tick(dt)
 		pudim_ProcessHeroAura();
 	}
 
-	// Lista de unidades treinaveis: a cada 4s. Ela muda quando um edificio de producao sobe
-	// ou quando a fase avanca, e nenhum dos dois e frequente o bastante para justificar mais.
+	// Lista de unidades treinaveis: a cada 1,5s.
+	//
+	// O intervalo era 4s, justificado assim: "ela muda quando um edificio de producao sobe
+	// ou quando a fase avanca, e nenhum dos dois e frequente". O raciocinio olhava so para a
+	// COMPOSICAO da lista — e essa parte estava certa. O que ele ignorava e que a mesma
+	// leitura traz `existentes` e `emFila`, e ESSES mudam a toda hora: cada unidade que
+	// nasce e, principalmente, cada uma que MORRE em batalha altera a proporcao real.
+	// Decidir o que treinar com contagem de 4s atras significa, no meio de uma briga,
+	// insistir em reforcar o tipo que acabou de ser dizimado ja estar coberto.
 	g_PudimUnitAccum += dt;
-	if (g_PudimUnitAccum >= 4000)
+	if (g_PudimUnitAccum >= 1500)
 	{
 		g_PudimUnitAccum = 0;
 		try { pudim_AtualizarUnidades(); } catch(e) {}

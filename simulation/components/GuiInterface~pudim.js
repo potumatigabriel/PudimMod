@@ -4209,6 +4209,18 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 
 	let civ = "gaul";
 	let ccPosList = [];
+	// Medidos em 1625 casas de 30 replays (mediana 15,4m entre vizinhas, moda 14-16m): e a
+	// distancia em que duas casas ficam encostadas. Tudo abaixo depende dela.
+	const PUDIM_CASA_ADJACENTE = 16;
+	// "Colada" e um pouco alem da adjacencia medida: duas casas a 16m estao encostadas, e a
+	// margem de 3m evita que um metro de diferenca decida se conta como vizinha ou nao.
+	const PUDIM_CASA_VIZINHA_RAIO = PUDIM_CASA_ADJACENTE + 3;
+	const PUDIM_CASA_MAX_VIZINHAS = 2;    // 2 ainda e fila; 3 ja e bolsao fechado
+	const PUDIM_CASA_ANEL_RAIO = 20;
+	// 6, nao 8: com 8 a corda entre irmas do anel da 15,3m — exatamente casas encostadas, e
+	// o anel se fecha sozinho. Com 6 a corda vai a 20m e sobra passagem.
+	const PUDIM_CASA_ANEL_DIRECOES = 6;
+
 	let housePosList = [];
 	let isBuildingHouseActive = false;
 	let houseFoundationCount = 0; // fundações ativas — cap em 2 para evitar burst
@@ -4577,9 +4589,43 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 		return false;
 	};
 
+	// ── NAO FECHAR O CERCO EM VOLTA DE NINGUEM ────────────────────────────────────────
+	//
+	// "fez casas muito proximas e aldeoes ficaram presos".
+	//
+	// A distancia entre casas nao era o problema, e vale registrar porque a suspeita obvia
+	// estava errada: medi 1625 casas em 30 replays e a mediana entre vizinhas e 15,4m, com
+	// uma moda forte em 14-16m. O mod usa 20 — mais FOLGADO que a pratica humana.
+	//
+	// O problema e a TOPOLOGIA. O gerador propunha 8 direcoes a raio 20 em volta de cada
+	// casa, e a corda entre dois candidatos vizinhos do anel e
+	//
+	//   2 * 20 * sen(pi/8) = 15,3m
+	//
+	// que e exatamente a distancia de duas casas encostadas. Ou seja: o anel de 8 fecha
+	// sozinho, e quem estiver dentro nao sai mais. Humanos encostam casas tanto quanto,
+	// mas em FILA — e fila tem duas pontas abertas.
+	//
+	// Duas travas, porque uma so nao basta:
+	//
+	//   PUDIM_CASA_ANEL_DIRECOES  6 em vez de 8: a corda sobe para 20m e sobra ~4,6m de
+	//                             passagem entre irmas do mesmo anel
+	//   PUDIM_CASA_MAX_VIZINHAS   uma casa nova nao pode ter mais que 2 vizinhas coladas.
+	//                             Com 2 ela continua uma fila; com 3 ou mais ela esta
+	//                             tapando o ultimo lado de um bolsao, que e o momento em
+	//                             que alguem fica preso.
+	const casaPerto = (cx, cz) => {
+		let n = 0;
+		for (const h of housePosList) {
+			const dx = h.x - cx, dz = h.y - cz;
+			if (dx*dx + dz*dz < PUDIM_CASA_VIZINHA_RAIO * PUDIM_CASA_VIZINHA_RAIO) n++;
+		}
+		return n;
+	};
 	const pushCandidate = (cx, cz) => {
 		if (cmpTerritoryManager && cmpTerritoryManager.GetOwner(cx, cz) !== player) return;
 		if (cx < 10 || cz < 10 || cx > mapSize - 10 || cz > mapSize - 10) return;
+		if (casaPerto(cx, cz) > PUDIM_CASA_MAX_VIZINHAS) return;
 		if (naRota(cx, cz)) bloqueados.push({ x: cx, z: cz });
 		else candidates.push({ x: cx, z: cz });
 	};
@@ -4605,11 +4651,11 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 		const hdx = house.x - builderCentroid.x, hdz = house.y - builderCentroid.z;
 		if (hdx*hdx + hdz*hdz > 100*100) break; // lista ordenada: daqui pra frente só piora
 		// Offset 20 units para evitar sobreposição (casa gaul ~20 world units de footprint)
-		for (let i = 0; i < 8; i++) {
-			const angle = i * Math.PI / 4;
+		for (let i = 0; i < PUDIM_CASA_ANEL_DIRECOES; i++) {
+			const angle = (i * 2 * Math.PI) / PUDIM_CASA_ANEL_DIRECOES;
 			pushCandidate(
-				house.x + Math.cos(angle) * 20,
-				house.y + Math.sin(angle) * 20
+				house.x + Math.cos(angle) * PUDIM_CASA_ANEL_RAIO,
+				house.y + Math.sin(angle) * PUDIM_CASA_ANEL_RAIO
 			);
 		}
 	}

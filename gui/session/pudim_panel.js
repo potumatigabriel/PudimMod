@@ -3788,9 +3788,17 @@ function pudim_ProcessPanic()
 		// 1 batedor manteve "defendendo" por 2min, guarneceu dezenas de trabalhadores e
 		// paralisou a economia.
 		if (canDefend && panicData.enemyCount <= 2) {
-			// Pânico anterior ainda ativo? Ameaça trivial não renova o timer, então o mesmo
-			// timeout de 10s do fluxo normal libera as unidades aqui também.
-			if (g_PudimPanicMode && (now - g_PudimPanicLastThreat > 10000 && g_PudimCalmStreak >= PUDIM_CALM_CYCLES_TO_RELEASE)) {
+			// Pânico anterior ainda ativo? Ameaça trivial não renova o timer, então o
+			// timeout de 10s libera as unidades aqui.
+			//
+			// NÃO exigir g_PudimCalmStreak aqui. Ele só cresce quando underAttack e falso, e
+			// um inimigo rondando mantem underAttack VERDADEIRO — o streak era zerado a cada
+			// ciclo e nunca alcancava o limite, deixando a soltura inatingivel. Em jogo isso
+			// virou "PANICO! 1 inimigos" com ZERO coletores por minutos: um unico batedor
+			// paralisava a economia inteira, que e o oposto do que este ramo existe para
+			// fazer. A ameaca aqui ja foi classificada como trivial (<=2 inimigos e com
+			// defesa suficiente), entao o timer de 10s sozinho e critério de sobra.
+			if (g_PudimPanicMode && now - g_PudimPanicLastThreat > 10000) {
 				if (statusEl) statusEl.caption = "Retornando ao trabalho...";
 				pudim_ReturnPanicUnitsToWork();
 			} else if (statusEl && !g_PudimPanicMode) {

@@ -3343,6 +3343,7 @@ function pudim_SetCaption(name, text)
 
 /** Flag para o balanceamento inicial */
 var g_PudimInitialBalanceDone = false;
+var g_PudimBalanceUltimaLinha = "";   // ver pudim_ExecuteInitialBalance: log so quando muda
 var g_PudimInitialFemaleDispatched = false;
 var g_PudimInitialSoldierDispatched = false;
 var g_PudimInitialCavalryDispatched = false;
@@ -3375,7 +3376,21 @@ function pudim_ExecuteInitialBalance()
 		return false;
 	}
 
-	pudim_Log("DEBUG", "BALANCE", "fc=" + data.femaleCitizens.length + " sol=" + data.soldiers.length + " cav=" + (data.cavalry||0) + " berry=" + (data.berryBush||0) + " tree=" + (data.tree||0) + " chicken=" + (data.chicken||0));
+	// SO QUANDO MUDA. Esta linha rodava a cada tique do balanceamento inicial: no log da
+	// partida nomad de 01/09 foram 386 entradas IDENTICAS ("fc=0 sol=0 cav=0...") em 7,7
+	// segundos, e elas ocuparam o log inteiro — as 389 entradas da sessao eram 387 destas
+	// mais duas. O diagnostico de qualquer outra coisa ficou impossivel.
+	//
+	// Log que se repete identico nao informa nada na segunda vez, e a partir da centesima
+	// atrapalha ativamente. Guardar a ultima e so registrar mudanca mantem o sinal (a
+	// transicao de fc=0 para fc=4 e o que importa) e devolve o log ao resto do mod.
+	const balAssinatura = "fc=" + data.femaleCitizens.length + " sol=" + data.soldiers.length +
+		" cav=" + (data.cavalry||0) + " berry=" + (data.berryBush||0) +
+		" tree=" + (data.tree||0) + " chicken=" + (data.chicken||0);
+	if (balAssinatura !== g_PudimBalanceUltimaLinha) {
+		g_PudimBalanceUltimaLinha = balAssinatura;
+		pudim_Log("DEBUG", "BALANCE", balAssinatura);
+	}
 
 	// Se não encontrou nenhuma unidade inicial do jogador no mapa, retornar false para tentar novamente
 	if (data.femaleCitizens.length === 0 && data.soldiers.length === 0 && !data.cavalry)
@@ -4769,6 +4784,7 @@ const PUDIM_UNIT_LINHAS = 7;
 var g_PudimUnitPesos = {};      // tpl -> peso 0..10, escolha do jogador
 var g_PudimUnitLista = [];      // o que a simulação devolveu na última leitura
 var g_PudimUnitAccum = 0;
+var g_PudimUnitVazioLogAt = 0;  // ver o diagnostico de lista vazia em pudim_AtualizarUnidades
 
 function pudim_UnitWeightDelta(linha, delta)
 {
@@ -4833,6 +4849,31 @@ function pudim_AtualizarUnidades()
 	lista = lista.filter(u => disponivel(u.tpl));
 	if (g_PudimShowDebug && antes !== lista.length)
 		pudim_Log("DEBUG", "UNIDADES", (antes - lista.length) + " tipo(s) fora por requisito");
+
+	// LISTA VAZIA COM EDIFICIO DE PE E UM DEFEITO, NAO UM ESTADO.
+	//
+	// Relato de 01/09, partida nomad: "falando que nao tem nada pra treinar", com o centro
+	// civico erguido e treinando na tela. Com o log de entao nao dava para saber se a
+	// simulacao nao achou edificio nenhum ou se o filtro de requisito comeu tudo — as duas
+	// causas produzem exatamente a mesma tela.
+	//
+	// Esta linha separa as duas. `edificios` e quantos edificios com IID_Trainer a simulacao
+	// encontrou; `antes` e quantos tipos vieram dali; `depois` e o que sobrou do filtro:
+	//
+	//   edificios=0            -> a simulacao nao ve o edificio (nomad? fundacao? ownership?)
+	//   edificios>0 antes=0    -> o edificio existe mas Trainer.GetEntitiesList veio vazia
+	//   antes>0 depois=0       -> AreRequirementsMet recusou tudo
+	//
+	// Throttle de 20s: o caso interessante e persistente, e repetir a cada 4s so repetiria o
+	// erro que acabei de corrigir no log do balanceamento inicial.
+	if (!lista.length) {
+		const agoraU = Date.now();
+		if (agoraU - g_PudimUnitVazioLogAt > 20000) {
+			g_PudimUnitVazioLogAt = agoraU;
+			pudim_Log("WARN", "UNIDADES", "nada para treinar: edificios=" +
+				((d._dbg && d._dbg.edificios) || 0) + " antes=" + antes + " depois=0");
+		}
+	}
 
 	// NOME TRADUZIDO, E SEM AMBIGUIDADE. Ver o comentário abaixo.
 	const nomes = {};

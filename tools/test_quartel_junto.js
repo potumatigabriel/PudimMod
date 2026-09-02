@@ -143,8 +143,13 @@ console.log("\npalicada e quartel ao mesmo tempo");
 
 check("os dois processos rodam no mesmo tique",
 	/pudim_ProcessQuartel\(\);\s*\n\s*try \{ pudim_ProcessPalicada\(\);/.test(panel));
+// Desde 01/09 cada TIPO tem o seu estado (g_PudimSeries), nao so palicada-vs-serie: mandar
+// estabulos no meio dos quarteis apagava a serie de quarteis, porque as oito variaveis do
+// estado eram escalares e o dropdown as reescrevia.
 check("e os estados são independentes",
-	/var g_PudimQuartelAtivo/.test(panel) && /var g_PudimPalicadaAtiva/.test(panel));
+	/var g_PudimSeries = \{\};/.test(panel) &&
+	/function pudim_SerieEstado\(tipo\)/.test(panel) &&
+	/var g_PudimPalicadaAtiva/.test(panel));
 
 // O toggle de um não pode desligar o outro — é isso que permite as duas juntas.
 const corpoToggle = (function() {
@@ -161,13 +166,13 @@ check("cada série tem equipe própria", EQ_SERIE === 5 && EQ_PALI === 3,
 	EQ_SERIE + " e " + EQ_PALI);
 
 // O que faltava: a tela.
-check("o rótulo mostra as DUAS quando as duas correm",
-	/if \(g_PudimQuartelAtivo && g_PudimPalicadaAtiva\) \{/.test(panel) &&
+check("o rótulo mostra TODAS quando mais de uma corre",
+	/if \(pudim_SeriesAtivas\(\)\.length \+ \(g_PudimPalicadaAtiva \? 1 : 0\) > 1\) \{/.test(panel) &&
 	/pudim_SerieStatusTexto\(\)/.test(panel));
 check("e o texto junta as duas com um separador visível",
 	/partes\.join\("  \+  "\)/.test(panel));
 check("a paliçada aparece em voltas, a série em quantidade",
-	/" x" \+ g_PudimQuartelAlvo/.test(panel) &&
+	/" x" \+ pudim_SerieEstado\(t\)\.alvo/.test(panel) &&
 	/g_PudimPalicadaVoltas \+ " " \+ pudim_T\("cap\.laps"\)/.test(panel));
 
 // -- A ordem tem de virar fundacao ---------------------------------------------------
@@ -227,19 +232,60 @@ check("falha isolada nao cancela — o contador zera quando ha progresso",
 check("o progresso comparado e prontos + emObra",
 	/const progressoAgora = d\.prontos \+ d\.emObra;/.test(panel));
 check("o ponto que falhou entra na lista de adiados",
-	/g_PudimDecayedSpots\.push\(\{ x: g_PudimQuartelUltimoPonto\.x,/.test(panel));
+	/g_PudimDecayedSpots\.push\(\{ x: st\.ultimoPonto\.x,/.test(panel));
 check("e a lista de adiados e consultada ao escolher",
 	/if \(pudim_IsCancelledSpot\(pos\.x, pos\.z\)\) continue;/.test(panel));
 check("o estado zera ao iniciar uma serie nova",
-	/g_PudimQuartelUltimoPonto = null;\s+g_PudimQuartelProgresso = -1;\s+g_PudimQuartelFalhas = 0;/.test(panel));
+	/st\.ultimoPonto = null;\s+st\.progresso = -1;\s+st\.falhas = 0;/.test(panel));
 check("a serie cancelada devolve a equipe ao trabalho",
-	/ordens seguidas sem fundacao[\s\S]{0,220}?pudim_QuartelLiberarEquipe\(\);/.test(panel));
+	/ordens seguidas sem fundacao[\s\S]{0,220}?pudim_QuartelLiberarEquipe\(tipo\);/.test(panel));
 
 // O log mentia: SUCCESS para uma ordem que so tinha sido emitida.
 check("o log nao chama de SUCCESS uma ordem apenas emitida",
-	/pudim_Log\("INFO", "QUARTEL", pudim_QuartelNome\(g_PudimQuartelTipo\) \+ " ordenado em \("/.test(panel));
+	/pudim_Log\("INFO", "QUARTEL", pudim_QuartelNome\(tipo\) \+ " ordenado em \("/.test(panel));
 check("e o SUCCESS ficou reservado para a serie concluida",
-	/pudim_Log\("SUCCESS", "QUARTEL", g_PudimQuartelAlvo \+ " "/.test(panel));
+	/pudim_Log\("SUCCESS", "QUARTEL", st\.alvo \+ " "/.test(panel));
+
+// -- Cada tipo tem a sua serie --------------------------------------------------------
+//
+// "mandei fazer 4 quarteis, e no meio da construcao do primeiro, mandei fazer 4 estabulos,
+// so terminou o que tinha comecado e n fez os quarteis... tem que fazer em paralelo, e ter
+// a opcao de cancelar uma das ordens".
+//
+// A causa era estrutural: OITO variaveis escalares para UMA serie. Trocar o tipo no
+// dropdown e apertar reescrevia o mesmo estado — a serie de quarteis nao era cancelada, era
+// SOBRESCRITA. O que ja estava em obra terminava porque o motor nao sabe do mod; o resto
+// deixava de existir sem uma linha de log.
+console.log("\ncada tipo tem a sua serie");
+
+check("o estado e por tipo, criado sob demanda",
+	/g_PudimSeries\[tipo\] = \{ ativo: false, alvo: 1, base: null/.test(panel));
+check("o laco processa TODAS as series ativas no mesmo tique",
+	/for \(const tipo of pudim_SeriesAtivas\(\)\)\s+pudim_ProcessSerie\(tipo, pudim_SerieEstado\(tipo\)\);/.test(panel));
+check("e a serie recebe o tipo e o estado dela, sem ler global nenhuma",
+	/function pudim_ProcessSerie\(tipo, st\)/.test(panel));
+check("a palicada fica fora do laco — ela tem processo proprio",
+	/filter\(t => t !== "palicada" && pudim_SerieEstado\(t\)\.ativo\)/.test(panel));
+
+// A segunda metade do pedido: cancelar uma sem derrubar a outra.
+const corpoT = (function() {
+	return corpoToggle;   // ja extraido acima
+})();
+check("o botao age so no tipo do dropdown",
+	/const tipo = g_PudimQuartelTipo;\s+const st = pudim_SerieEstado\(tipo\);/.test(corpoT));
+check("cancelar mexe so no estado daquele tipo",
+	/st\.ativo = false;/.test(corpoT) && corpoT.indexOf("g_PudimSeries = {}") < 0);
+check("e devolve so a equipe daquele tipo",
+	/pudim_QuartelLiberarEquipe\(tipo\);/.test(corpoT));
+check("cada tipo tem equipe propria",
+	/function pudim_QuartelLiberarEquipe\(tipo\)/.test(panel) &&
+	/const st = pudim_SerieEstado\(tipo\);\s+for \(const id of st\.equipe\)/.test(panel));
+check("o log diz com quais outras a nova serie vai correr em paralelo",
+	/em paralelo com/.test(panel));
+// Estado por tipo so serve se o TIPO chegar na consulta da simulacao — senao as duas series
+// pediriam dados do mesmo edificio.
+check("a consulta a simulacao leva o tipo da serie, nao o do dropdown",
+	/"tipo": tipo, "playerOrdered"/.test(panel));
 
 console.log(fails === 0 ? "\nTODOS OS TESTES PASSARAM" : "\n" + fails + " TESTE(S) FALHARAM");
 process.exit(fails === 0 ? 0 : 1);

@@ -102,7 +102,7 @@ check("existe um caminho unico de parada, que registra o motivo",
 const paradas = (panel.match(/parar\(/g) || []).length;
 check("e todas as saidas passam por ele", paradas >= 4, paradas);
 check("o log e limitado, para nao inundar a tela",
-	/agora - \(g_PudimQuartelLogAt \|\| 0\) > 15000/.test(panel));
+	/agora - \(st\.logAt \|\| 0\) > 15000/.test(panel));
 for (const motivo of ["o jogador apagou uma obra", "obra em andamento",
                       "sem trabalhador livre", "posicoes foi aceita pelo motor"])
 	check('diz "' + motivo.slice(0, 28) + '"', panel.indexOf(motivo) > 0);
@@ -217,7 +217,7 @@ check("quem já é da equipe entra ANTES do filtro de quem está construindo",
 	sim.indexOf('if (ord && ord.type === "Repair") continue;'));
 check("a equipe vem do painel — a simulação é consultada, não guarda estado",
 	/for \(const id of \(\(data && data\.equipeAtual\) \|\| \[\]\)\) jaNaEquipe\[id\] = 1;/.test(sim) &&
-	/"equipeAtual": g_PudimQuartelEquipe/.test(panel));
+	/"equipeAtual": st\.equipe/.test(panel));
 check("a equipe herdada vem na frente e o pool só completa o que faltar",
 	/const equipe = equipeAnterior\.slice\(0, PUDIM_QUARTEL_EQUIPE\);/.test(sim) &&
 	/if \(equipe\.length >= PUDIM_QUARTEL_EQUIPE\) break;\s+const lista = candidatosPorRecurso\[rec\];/.test(sim));
@@ -282,15 +282,15 @@ check("a simulação conta quantas estão em obra",
 check("a equipe é protegida enquanto constrói",
 	/pudim_ProtectBuilder\(id, agora \+ 60000\);/.test(panel));
 check("e liberada ao terminar a série",
-	/pudim_QuartelLiberarEquipe\(\);/.test(panel) &&
-	/function pudim_QuartelLiberarEquipe/.test(panel));
+	/pudim_QuartelLiberarEquipe\(tipo\);/.test(panel) &&
+	/function pudim_QuartelLiberarEquipe\(tipo\)/.test(panel));
 // Liberar é só soltar a proteção: o despacho já recolhe unidade ociosa a cada 500ms. Emitir
 // uma ordem de coleta aqui competiria com ele — o mesmo erro de dois sistemas mandando na
 // mesma unidade que já custou caro em outras partes do mod.
 check("liberar é soltar a proteção, não emitir ordem concorrente",
 	/pudim_ProtectBuilder\(id, 0\);/.test(panel));
 check("cancelar no meio também devolve a equipe",
-	/g_PudimQuartelAtivo = false;\s*\n\s*\/\/ Cancelar devolve/.test(panel));
+	/st\.ativo = false;\s*\n\s*\/\/ Cancelar devolve/.test(panel));
 
 // ── Integração com o resto do mod ──────────────────────────────────────────────────────
 // A ordem inverteu de proposito: a lista de tipos disponiveis precisa atualizar mesmo sem
@@ -300,9 +300,12 @@ check("respeita a pausa de 10s depois de o jogador apagar uma obra",
 	/if \(pudim_ObrasPausadas\(\)\) return;/.test(panel) &&
 	panel.indexOf("if (pudim_ObrasPausadas()) return;") <
 	panel.indexOf('"entities": d.builderIds'));
-check("e a lista de tipos atualiza antes de qualquer checagem de serie ativa",
-	panel.indexOf("pudim_QuartelAtualizarLista(d.disponiveis)") <
-	panel.indexOf("if (!g_PudimQuartelAtivo) { g_PudimQuartelUltima = agora; return; }"));
+// Desde 01/09 a lista de tipos e atualizada no LACO (pudim_ProcessQuartel), antes de
+// despachar as series ativas — e nao dentro de cada serie. O jogador precisa ver a forja
+// liberar ao mudar de fase mesmo sem nenhuma serie rodando.
+check("e a lista de tipos atualiza antes de despachar as series",
+	panel.indexOf("pudim_QuartelAtualizarLista(d0.disponiveis)") <
+	panel.indexOf("for (const tipo of pudim_SeriesAtivas())"));
 check("e não constrói onde o jogador já cancelou",
 	/if \(pudim_IsCancelledSpot\(pos\.x, pos\.z\)\) continue;[\s\S]{0,400}?SetBuildingPlacementPreview/.test(panel));
 check("a posição é validada pelo preview do próprio motor",
@@ -335,7 +338,7 @@ check("o painel escreve só por PostNetworkCommand", (function() {
 		/Engine\.PostNetworkCommand/.test(panel.slice(i, j + 60));
 })());
 check("e o estado da série vive só na GUI",
-	/var g_PudimQuartelAtivo = false;/.test(panel) && !/g_PudimQuartelAtivo/.test(sim));
+	/var g_PudimSeries = \{\};/.test(panel) && !/g_PudimSeries/.test(sim));
 
 // ── A série termina, e no número certo ────────────────────────────────────────────────
 //
@@ -353,11 +356,11 @@ console.log("");
 console.log("a serie termina no numero pedido");
 
 check("o sentinela não colide com um valor legítimo",
-	/var g_PudimQuartelBase = null;/.test(panel));
+	/base: null/.test(panel));
 check("e o teste é contra null, não contra zero",
-	/if \(g_PudimQuartelBase === null\) g_PudimQuartelBase = d\.prontos;/.test(panel));
+	/if \(st\.base === null\) st\.base = d\.prontos;/.test(panel));
 check("começar uma série nova reseta para o sentinela, não para zero",
-	/g_PudimQuartelBase = null;\s*\n\s*g_PudimQuartelUltima = 0;/.test(panel));
+	/st\.base = null;\s*\n\s*st\.ultima = 0;/.test(panel));
 
 // A contagem, espelhada: quantas obras a série chega a erguer.
 function quantasErgue(alvo, jaTinha) {

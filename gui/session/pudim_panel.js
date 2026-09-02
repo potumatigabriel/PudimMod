@@ -4053,11 +4053,9 @@ const PUDIM_QUARTEL_FOLGA = 1500;
 const PUDIM_QUARTEL_POP_PARALELO = 180;
 
 var g_PudimQuartelTipo = "quartel";
-var g_PudimQuartelAlvo = 1;         // quantos ainda faltam construir
-var g_PudimQuartelAtivo = false;
+// O ALVO e o ATIVO sao POR TIPO — ver g_PudimSeries / pudim_SerieEstado. Eram escalares, e
+// era por isso que mandar estabulos apagava a serie de quarteis.
 var g_PudimQuartelAccum = 0;
-var g_PudimQuartelUltima = 0;
-var g_PudimQuartelEquipe = [];      // quem foi recrutado, para devolver ao trabalho
 // Quantos daquele tipo já existiam quando a série começou. null = ainda não medido.
 //
 // Era 0, e 0 significava DUAS coisas: "ainda não medi" e "não havia nenhum". Quem começa a
@@ -4065,7 +4063,7 @@ var g_PudimQuartelEquipe = [];      // quem foi recrutado, para devolver ao trab
 // até a primeira obra concluir — quando prontos virava 1, a base virava 1 junto e aquela
 // primeira obra deixava de ser contada. Resultado: pedir 3 construía 4, sempre que se
 // começava do zero. Um sentinela que não colide com um valor legítimo resolve.
-var g_PudimQuartelBase = null;
+
 // ── A ORDEM VIROU FUNDACAO? ───────────────────────────────────────────────────────────
 //
 // "mandei fazer torres e nada aconteceu". O log de 01/09 mostra a ordem sendo emitida 28
@@ -4092,11 +4090,7 @@ var g_PudimQuartelBase = null;
 // proxima tentativa sai em outro lugar. Depois de PUDIM_QUARTEL_FALHAS_MAX seguidas sem
 // nenhum progresso, a serie para e diz — melhor parar avisando do que gastar comando a cada
 // 3 segundos para sempre.
-var g_PudimQuartelUltimoPonto = null;
-var g_PudimQuartelProgresso = -1;
-var g_PudimQuartelFalhas = 0;
 const PUDIM_QUARTEL_FALHAS_MAX = 5;
-var g_PudimQuartelLogAt = 0;
 
 /** Chamado pelo dropdown de tipo. */
 function pudim_QuartelSetTipo()
@@ -4114,7 +4108,8 @@ function pudim_QuartelSetQtd()
 {
 	const dd = Engine.GetGUIObjectByName("pudim_quartelQtd");
 	if (!dd) return;
-	if (!g_PudimQuartelAtivo) g_PudimQuartelAlvo = dd.selected + 1;
+	const stQtd = pudim_SerieEstado(g_PudimQuartelTipo);
+	if (!stQtd.ativo) stQtd.alvo = dd.selected + 1;
 	pudim_QuartelAtualizarLabel();
 }
 
@@ -4126,23 +4121,29 @@ function pudim_QuartelToggle()
 	// conveniencia — o numero ali passa a significar VOLTAS em vez de quantidade.
 	if (g_PudimQuartelTipo === "palicada") { pudim_PalicadaToggle(); return; }
 
-	if (g_PudimQuartelAtivo) {
-		g_PudimQuartelAtivo = false;
+	// O botao age SO no tipo que esta no dropdown. E o "cancelar uma das ordens" do pedido:
+	// com quartel e estabulo correndo juntos, parar um nao encosta no outro.
+	const tipo = g_PudimQuartelTipo;
+	const st = pudim_SerieEstado(tipo);
+	if (st.ativo) {
+		st.ativo = false;
 		// Cancelar devolve a equipe ao trabalho na hora. Deixá-los parados seria pior do
 		// que nunca ter começado.
-		pudim_QuartelLiberarEquipe();
-		pudim_Log("INFO", "QUARTEL", "série cancelada pelo jogador");
+		pudim_QuartelLiberarEquipe(tipo);
+		pudim_Log("INFO", "QUARTEL", pudim_QuartelNome(tipo) + ": série cancelada pelo jogador");
 	} else {
 		const dd = Engine.GetGUIObjectByName("pudim_quartelQtd");
-		g_PudimQuartelAlvo = dd ? dd.selected + 1 : 1;
-		g_PudimQuartelAtivo = true;
-		g_PudimQuartelBase = null;
-		g_PudimQuartelUltima = 0;
-		g_PudimQuartelUltimoPonto = null;
-		g_PudimQuartelProgresso = -1;
-		g_PudimQuartelFalhas = 0;
-		pudim_Log("INFO", "QUARTEL", "série iniciada: " + g_PudimQuartelAlvo + " " +
-			pudim_QuartelNome(g_PudimQuartelTipo));
+		st.alvo = dd ? dd.selected + 1 : 1;
+		st.ativo = true;
+		st.base = null;
+		st.ultima = 0;
+		st.ultimoPonto = null;
+		st.progresso = -1;
+		st.falhas = 0;
+		const outras = pudim_SeriesAtivas().filter(t => t !== tipo).map(pudim_QuartelNome);
+		pudim_Log("INFO", "QUARTEL", "série iniciada: " + st.alvo + " " +
+			pudim_QuartelNome(tipo) +
+			(outras.length ? " (em paralelo com " + outras.join(", ") + ")" : ""));
 	}
 	pudim_QuartelAtualizarLabel();
 }
@@ -4155,11 +4156,12 @@ function pudim_QuartelToggle()
  * coleta aqui competiria com esse despacho e cairia no mesmo erro de dois sistemas
  * mandando na mesma unidade que já custou caro em outras partes do mod.
  */
-function pudim_QuartelLiberarEquipe()
+function pudim_QuartelLiberarEquipe(tipo)
 {
-	for (const id of g_PudimQuartelEquipe)
+	const st = pudim_SerieEstado(tipo);
+	for (const id of st.equipe)
 		pudim_ProtectBuilder(id, 0);
-	g_PudimQuartelEquipe = [];
+	st.equipe = [];
 }
 
 function pudim_QuartelAtualizarLabel()
@@ -4169,7 +4171,7 @@ function pudim_QuartelAtualizarLabel()
 	const nome = pudim_QuartelNome(g_PudimQuartelTipo);
 	// Com as DUAS correndo, o rotulo diz as duas — senao a que nao esta no dropdown some da
 	// tela e parece que o mod nao aceita simultaneas.
-	if (g_PudimQuartelAtivo && g_PudimPalicadaAtiva) {
+	if (pudim_SeriesAtivas().length + (g_PudimPalicadaAtiva ? 1 : 0) > 1) {
 		lbl.caption = pudim_T("cap.serieStop") + " " + pudim_SerieStatusTexto();
 		return;
 	}
@@ -4180,9 +4182,10 @@ function pudim_QuartelAtualizarLabel()
 			" " + nome + ": " + voltas + " " + pudim_T("cap.laps");
 		return;
 	}
-	lbl.caption = g_PudimQuartelAtivo
-		? pudim_T("cap.serieStop") + " " + g_PudimQuartelAlvo + " " + nome
-		: pudim_T("cap.serieBuild") + " " + g_PudimQuartelAlvo + " " + nome;
+	// So esta selecionada corre (ou nenhuma): o rotulo fala dela, como sempre falou.
+	const stLbl = pudim_SerieEstado(g_PudimQuartelTipo);
+	lbl.caption = (stLbl.ativo ? pudim_T("cap.serieStop") : pudim_T("cap.serieBuild")) +
+		" " + stLbl.alvo + " " + nome;
 }
 
 /**
@@ -4202,9 +4205,8 @@ function pudim_QuartelAtualizarLabel()
 function pudim_SerieStatusTexto()
 {
 	const partes = [];
-	if (g_PudimQuartelAtivo)
-		partes.push(pudim_QuartelNome(g_PudimQuartelTipo === "palicada" ? "quartel" : g_PudimQuartelTipo) +
-			" x" + g_PudimQuartelAlvo);
+	for (const t of pudim_SeriesAtivas())
+		partes.push(pudim_QuartelNome(t) + " x" + pudim_SerieEstado(t).alvo);
 	if (g_PudimPalicadaAtiva)
 		partes.push(pudim_QuartelNome("palicada") + ": " + g_PudimPalicadaVoltas + " " + pudim_T("cap.laps"));
 	return partes.join("  +  ");
@@ -4426,25 +4428,70 @@ function pudim_ProcessPalicada()
 var g_PudimPalicadaTemplate = "";
 var g_PudimPalicadaWallSet = null;
 
+/**
+ * Estado de UMA serie. Ha um por tipo, e e por isso que elas correm juntas.
+ *
+ * Pedido de 01/09: "mandei fazer 4 quarteis, e no meio da construcao do primeiro, mandei
+ * fazer 4 estabulos, so terminou o que tinha comecado e n fez os quarteis... tem que fazer
+ * em paralelo, e ter a opcao de cancelar uma das ordens".
+ *
+ * A causa era estrutural: o estado da serie eram OITO variaveis escalares
+ * (g_PudimQuartelAtivo, ...Alvo, ...Base, ...Equipe e o resto) para UMA serie so. Trocar o
+ * tipo no dropdown e apertar reescrevia esse mesmo estado — a serie de quarteis nao era
+ * cancelada, era SOBRESCRITA. O que ja estava em obra terminava porque o motor nao sabe do
+ * mod, e o resto simplesmente deixava de existir.
+ *
+ * Agora cada tipo tem o seu, e o laco processa todos os ativos no mesmo tique. Cancelar um
+ * mexe so no dele, que e a segunda metade do pedido.
+ */
+var g_PudimSeries = {};
+function pudim_SerieEstado(tipo)
+{
+	if (!g_PudimSeries[tipo])
+		g_PudimSeries[tipo] = { ativo: false, alvo: 1, base: null, ultima: 0, logAt: 0,
+		                        equipe: [], ultimoPonto: null, progresso: -1, falhas: 0 };
+	return g_PudimSeries[tipo];
+}
+
+/** As series em andamento agora, na ordem fixa de PUDIM_QUARTEL_TIPOS. */
+function pudim_SeriesAtivas()
+{
+	return PUDIM_QUARTEL_TIPOS.filter(t => t !== "palicada" && pudim_SerieEstado(t).ativo);
+}
+
 function pudim_ProcessQuartel()
 {
+	// A lista de tipos disponiveis e atualizada mesmo sem serie ativa: o jogador precisa ver
+	// a forja liberar quando muda de fase, nao so depois de mandar construir alguma coisa.
+	// Uma consulta so, com o tipo que esta no dropdown, serve para isso.
+	try {
+		const d0 = Engine.GuiInterfaceCall("pudim_GetBarracksBuildData",
+			{ "tipo": g_PudimQuartelTipo, "playerOrdered": pudim_GetPlayerOrderedIds(),
+			  "equipeAtual": pudim_SerieEstado(g_PudimQuartelTipo).equipe });
+		if (d0) pudim_QuartelAtualizarLista(d0.disponiveis);
+	} catch (e) {}
+
+	for (const tipo of pudim_SeriesAtivas())
+		pudim_ProcessSerie(tipo, pudim_SerieEstado(tipo));
+}
+
+function pudim_ProcessSerie(tipo, st)
+{
 	const agora = Date.now();
-	if (agora - g_PudimQuartelUltima < PUDIM_QUARTEL_INTERVALO) return;
+	if (agora - st.ultima < PUDIM_QUARTEL_INTERVALO) return;
 
 	let d;
 	try {
 		d = Engine.GuiInterfaceCall("pudim_GetBarracksBuildData",
-			{ "tipo": g_PudimQuartelTipo, "playerOrdered": pudim_GetPlayerOrderedIds(),
-			  "equipeAtual": g_PudimQuartelEquipe });
+			{ "tipo": tipo, "playerOrdered": pudim_GetPlayerOrderedIds(),
+			  "equipeAtual": st.equipe });
 	} catch (e) { return; }
 	if (!d) return;
 
 	// A LISTA ATUALIZA MESMO SEM SERIE ATIVA. O jogador precisa ver a forja liberar quando
 	// muda de fase, e nao so depois de mandar construir alguma coisa — a checagem de "serie
 	// ativa" vem DEPOIS desta linha de proposito.
-	try { pudim_QuartelAtualizarLista(d.disponiveis); } catch (e) {}
 
-	if (!g_PudimQuartelAtivo) { g_PudimQuartelUltima = agora; return; }
 
 	/**
 	 * Toda saida daqui em diante DIZ por que parou.
@@ -4455,9 +4502,9 @@ function pudim_ProcessQuartel()
 	 * dois dias.
 	 */
 	const parar = function(motivo, extra) {
-		g_PudimQuartelUltima = agora;
-		if (agora - (g_PudimQuartelLogAt || 0) > 15000) {
-			g_PudimQuartelLogAt = agora;
+		st.ultima = agora;
+		if (agora - (st.logAt || 0) > 15000) {
+			st.logAt = agora;
 			pudim_Log("DEBUG", "QUARTEL", "parado: " + motivo + (extra ? " (" + extra + ")" : ""));
 		}
 	};
@@ -4467,50 +4514,50 @@ function pudim_ProcessQuartel()
 
 	if (!d.template) {
 		pudim_Log("WARN", "QUARTEL", "esta civilização não constrói " +
-			pudim_QuartelNome(g_PudimQuartelTipo) + " — série cancelada");
-		g_PudimQuartelAtivo = false;
+			pudim_QuartelNome(tipo) + " — série cancelada");
+		st.ativo = false;
 		pudim_QuartelAtualizarLabel();
 		return;
 	}
 
 	// Na primeira volta, guarda quantos já existiam: o alvo é quantos NOVOS, não um total.
-	// O teste é contra null, não contra 0 — ver a declaração de g_PudimQuartelBase.
-	if (g_PudimQuartelBase === null) g_PudimQuartelBase = d.prontos;
+	// O teste é contra null, não contra 0 — ver a declaração de st.base.
+	if (st.base === null) st.base = d.prontos;
 
-	// A ordem anterior virou fundacao? (ver a declaracao de g_PudimQuartelUltimoPonto)
+	// A ordem anterior virou fundacao? (ver a declaracao de st.ultimoPonto)
 	const progressoAgora = d.prontos + d.emObra;
-	if (g_PudimQuartelUltimoPonto !== null) {
-		if (progressoAgora === g_PudimQuartelProgresso) {
-			g_PudimDecayedSpots.push({ x: g_PudimQuartelUltimoPonto.x,
-			                           z: g_PudimQuartelUltimoPonto.z,
+	if (st.ultimoPonto !== null) {
+		if (progressoAgora === st.progresso) {
+			g_PudimDecayedSpots.push({ x: st.ultimoPonto.x,
+			                           z: st.ultimoPonto.z,
 			                           until: Date.now() + 90000 });
-			g_PudimQuartelFalhas++;
+			st.falhas++;
 			pudim_Log("WARN", "QUARTEL", "ordem em (" +
-				g_PudimQuartelUltimoPonto.x.toFixed(0) + "," +
-				g_PudimQuartelUltimoPonto.z.toFixed(0) + ") nao virou fundacao — " +
-				"ponto adiado (" + g_PudimQuartelFalhas + " de " + PUDIM_QUARTEL_FALHAS_MAX + ")");
-			if (g_PudimQuartelFalhas >= PUDIM_QUARTEL_FALHAS_MAX) {
-				pudim_Log("ERROR", "QUARTEL", pudim_QuartelNome(g_PudimQuartelTipo) +
+				st.ultimoPonto.x.toFixed(0) + "," +
+				st.ultimoPonto.z.toFixed(0) + ") nao virou fundacao — " +
+				"ponto adiado (" + st.falhas + " de " + PUDIM_QUARTEL_FALHAS_MAX + ")");
+			if (st.falhas >= PUDIM_QUARTEL_FALHAS_MAX) {
+				pudim_Log("ERROR", "QUARTEL", pudim_QuartelNome(tipo) +
 					": " + PUDIM_QUARTEL_FALHAS_MAX + " ordens seguidas sem fundacao — " +
 					"o motor esta recusando (limite do edificio? terreno?). Serie cancelada.");
-				g_PudimQuartelAtivo = false;
-				pudim_QuartelLiberarEquipe();
+				st.ativo = false;
+				pudim_QuartelLiberarEquipe(tipo);
 				pudim_QuartelAtualizarLabel();
 				return;
 			}
 		} else {
-			g_PudimQuartelFalhas = 0;
+			st.falhas = 0;
 		}
-		g_PudimQuartelUltimoPonto = null;
+		st.ultimoPonto = null;
 	}
 
-	const feitos = Math.max(0, d.prontos - g_PudimQuartelBase);
-	const faltam = g_PudimQuartelAlvo - feitos;
+	const feitos = Math.max(0, d.prontos - st.base);
+	const faltam = st.alvo - feitos;
 	if (faltam <= 0) {
-		pudim_Log("SUCCESS", "QUARTEL", g_PudimQuartelAlvo + " " +
-			pudim_QuartelNome(g_PudimQuartelTipo) + " prontos — equipe volta ao trabalho");
-		g_PudimQuartelAtivo = false;
-		pudim_QuartelLiberarEquipe();
+		pudim_Log("SUCCESS", "QUARTEL", st.alvo + " " +
+			pudim_QuartelNome(tipo) + " prontos — equipe volta ao trabalho");
+		st.ativo = false;
+		pudim_QuartelLiberarEquipe(tipo);
 		pudim_QuartelAtualizarLabel();
 		return;
 	}
@@ -4573,19 +4620,19 @@ function pudim_ProcessQuartel()
 	});
 	pudim_MarkModBuilt(escolhida.x, escolhida.z);
 	// Guardado para o ciclo seguinte conferir se isto virou fundacao de verdade.
-	g_PudimQuartelUltimoPonto = { x: escolhida.x, z: escolhida.z };
-	g_PudimQuartelProgresso = d.prontos + d.emObra;
+	st.ultimoPonto = { x: escolhida.x, z: escolhida.z };
+	st.progresso = d.prontos + d.emObra;
 	// Protege a equipe enquanto ela constrói, senão o despacho a puxa de volta para o
 	// recurso no tique seguinte e a obra fica sem ninguém.
-	g_PudimQuartelEquipe = d.builderIds.slice();
+	st.equipe = d.builderIds.slice();
 	for (const id of d.builderIds)
 		pudim_ProtectBuilder(id, agora + 60000);
 
-	g_PudimQuartelUltima = agora;
+	st.ultima = agora;
 	const distCC = (d._dbg && d._dbg.ccx !== undefined)
 		? Math.round(Math.sqrt(Math.pow(escolhida.x - d._dbg.ccx, 2) +
 		                       Math.pow(escolhida.z - d._dbg.ccz, 2))) : -1;
-	pudim_Log("INFO", "QUARTEL", pudim_QuartelNome(g_PudimQuartelTipo) + " ordenado em (" +
+	pudim_Log("INFO", "QUARTEL", pudim_QuartelNome(tipo) + " ordenado em (" +
 		escolhida.x.toFixed(0) + "," + escolhida.z.toFixed(0) + ") a " + distCC + "m do CC com " +
 		d.builderIds.length + " trabalhador(es) (" +
 		((d._dbg && d._dbg.herdados) || 0) + " da equipe anterior) — faltam " + faltam +

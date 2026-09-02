@@ -2169,11 +2169,30 @@ function pudim_ProcessAutoQueue()
 			}
 		}
 
+		// PROPORÇÃO E AUTO-FILA NATIVA NÃO CONVIVEM.
+		//
+		// A auto-fila do motor repete o ÚLTIMO template indefinidamente, sem consultar nada.
+		// O mod tentava corrigir depois do fato — cancelando o lote e re-semeando — mas só
+		// conseguia quando pegava a fila com progress == 0, janela estreita demais para um
+		// polling de 3s enquanto o motor reenfileira no instante em que o lote termina.
+		//
+		// Medido no replay 2026-09-02_0002, com peso IGUAL em lanceiro e escaramuça:
+		// 110 lanceiros contra 19 escaramuças, mais 31 stop-production de puro atrito.
+		//
+		// Com proporção configurada, a auto-fila nativa fica DESLIGADA e o próprio mod semeia
+		// cada lote. Assim toda decisão passa pela proporção, sem cancelamento e sem
+		// desperdiçar o progresso de unidades pela metade.
+		const propAtiva = pudim_ProporcaoAtiva();
+
 		// Detectar desativações manuais e ativar apenas novos edifícios
 		const toEnable = [];
+		const toDisable = [];
 		for (const b of buildings) {
 			if (!b.autoqueue) {
-				if (b.alwaysQueue) {
+				if (b.alwaysQueue && propAtiva) {
+					// Proporção ativa: quem semeia é o mod, lote a lote. Não religar aqui.
+					g_PudimAutoQueueManagedByMod.add(b.ent);
+				} else if (b.alwaysQueue) {
 					// Barracks/CC: sempre reativar, independente da causa da desativação —
 					// menos no teto de população ou sem recurso para uma unidade sequer, onde
 					// o motor recusa e o único efeito é a mensagem de erro na tela.
@@ -2229,6 +2248,11 @@ function pudim_ProcessAutoQueue()
 					}
 				}
 				// Se está em UserDisabled (e não é alwaysQueue): ignorar completamente
+			} else if (propAtiva && g_PudimAutoQueueManagedByMod.has(b.ent)) {
+				// Estava ligada por nossa conta e a proporção entrou em cena: desliga, para o
+				// motor parar de repetir o último template por cima da escolha do jogador.
+				// Só mexemos no que NÓS ligamos — auto-fila que o jogador ligou é dele.
+				toDisable.push(b.ent);
 			} else {
 				// autoqueue=true: registrar como gerenciado
 				g_PudimAutoQueueManagedByMod.add(b.ent);
@@ -2241,6 +2265,11 @@ function pudim_ProcessAutoQueue()
 		}
 		if (toEnable.length > 0) {
 			Engine.PostNetworkCommand({ "type": "autoqueue-on", "entities": toEnable });
+		}
+		if (toDisable.length > 0) {
+			Engine.PostNetworkCommand({ "type": "autoqueue-off", "entities": toDisable });
+			pudim_Log("INFO", "QUEUE", "auto-fila nativa desligada em " + toDisable.length +
+				" edifício(s): a proporção de unidades semeia cada lote");
 		}
 
 		// Template feminino: support_civilian* ou *female* (Gaul usa support_civilian/_house)

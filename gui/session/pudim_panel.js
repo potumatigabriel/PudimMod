@@ -19,6 +19,10 @@ var g_PudimShowDebug = Engine.ConfigDB_GetValue("user", "pudim.debug.show") !== 
 
 var g_PudimLogBuffer = [];
 var PUDIM_LOG_BUFFER_SIZE = 500;
+// O log da partida, em memoria. Ele so vai para o ConfigDB no flush de 10s — ver pudim_Log,
+// que antes reserializava este array inteiro A CADA LINHA.
+var g_PudimLogSessao = [];
+const PUDIM_LOG_SESSAO_MAX = 5000;
 var g_PudimLogLastSave = 0; // throttle de ConfigDB_SaveChanges (persistência em disco)
 function pudim_DateKey() {
 	const d = new Date();
@@ -64,21 +68,36 @@ function pudim_Log(level, catOrMsg, msgOrUndef) {
 	if (g_PudimLogBuffer.length > PUDIM_LOG_BUFFER_SIZE)
 		g_PudimLogBuffer.shift();
 
-	// Persistência diária via ConfigDB (máx 200 entradas/dia)
+	// ── PERSISTENCIA: O ARRAY VIVE EM MEMORIA, O DISCO RECEBE A CADA 10s ──────────────
+	//
+	// A versao anterior fazia, A CADA LINHA DE LOG:
+	//
+	//   ConfigDB_GetValue  -> le a sessao inteira como string
+	//   JSON.parse         -> parseia tudo
+	//   push
+	//   JSON.stringify     -> re-serializa TUDO
+	//   ConfigDB_CreateValue
+	//
+	// Isso e O(n^2) no numero de entradas. Medido (tools/test_log_custo.js roda a conta):
+	//
+	//   1000 entradas ->   481 ms no total,  98 MB de JSON processado
+	//   5000 entradas -> 12075 ms no total, 2,4 GB de JSON processado
+	//
+	// Com 5000 entradas cada linha de log custava 2,4ms da thread da interface, e a partida
+	// inteira gastava 2,4 GB de parse+stringify. No log da partida nomad de 01/09 o
+	// balanceamento inicial gerava ~50 linhas por segundo — a esse ritmo isto sozinho
+	// engasga o jogo.
+	//
+	// Agora o array vive em memoria e so e serializado no flush periodico. O custo por linha
+	// vira O(1), e o O(n) acontece uma vez a cada 10 segundos em vez de a cada linha.
+	g_PudimLogSessao.push(entry);
+	if (g_PudimLogSessao.length > PUDIM_LOG_SESSAO_MAX)
+		g_PudimLogSessao.shift();
 	try {
-		const key = "pudim.log." + pudim_MatchKey();
-		let existing = Engine.ConfigDB_GetValue("user", key);
-		let arr = [];
-		try { arr = existing ? JSON.parse(existing) : []; } catch(e) { arr = []; }
-		arr.push(entry);
-		// Teto alto de propósito: o objetivo é o log COMPLETO da partida. O controle de
-		// espaço em disco é a retenção de 10 partidas em pudim_LogInit, não truncar o jogo.
-		if (arr.length > 5000) arr = arr.slice(arr.length - 5000);
-		Engine.ConfigDB_CreateValue("user", key, JSON.stringify(arr));
-		// Sem isso o log do dia nunca chega no user.cfg — fica só em memória e se perde
-		// se o jogo não passar por outra ação que dispare SaveChanges antes de fechar.
 		if (entry.ts - g_PudimLogLastSave > 10000) {
 			g_PudimLogLastSave = entry.ts;
+			Engine.ConfigDB_CreateValue("user", "pudim.log." + pudim_MatchKey(),
+				JSON.stringify(g_PudimLogSessao));
 			Engine.ConfigDB_SaveChanges("user");
 		}
 	} catch(e) {}

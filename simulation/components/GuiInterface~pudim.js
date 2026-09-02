@@ -5750,8 +5750,40 @@ GuiInterface.prototype.pudim_GetProactiveFarmsteadData = function(player, data)
 	const cmpTerrain = Engine.QueryInterface(SYSTEM_ENTITY, IID_Terrain);
 	const mapSize = cmpTerrain ? cmpTerrain.GetMapSize() : 512;
 	const allEnts = cmpRangeManager.GetEntitiesByPlayer(player);
-	const nearX = data.nearX, nearZ = data.nearZ;
+	let nearX = data.nearX, nearZ = data.nearZ;
 	const protectedIds = new Set((data.protectedIds || []).map(Number));
+
+	// ÂNCORA NO MEIO DOS ARBUSTOS, não no primeiro que apareceu.
+	//
+	// nearX/nearZ e apenas a fruta que UM trabalhador foi coletar. Com duas moitas
+	// proximas, o celeiro nascia colado numa delas e a outra ficava fora de alcance —
+	// exigindo um segundo celeiro para cobrir o que um so cobriria se estivesse no meio.
+	// (O armazem de madeira ja fazia esse reposicionamento; o celeiro nao.)
+	//
+	// Centroide ponderado pela comida restante: moita grande puxa mais que um arbusto
+	// solitario, entao o celeiro fica perto de onde esta o volume de verdade.
+	// Raio de 70m para a busca: um dropsite serve ~55m, logo arbustos ate 70m de distancia
+	// entre si acabam ambos dentro do alcance quando o predio fica no meio. Alem disso
+	// centralizar so afastaria de todos.
+	{
+		const nearby = cmpRangeManager.ExecuteQueryAroundPos(
+			{ x: nearX, z: nearZ }, 0, 70, [0], IID_ResourceSupply, false);
+		let sx = 0, sz = 0, peso = 0;
+		for (const f of nearby) {
+			const rs = Engine.QueryInterface(f, IID_ResourceSupply);
+			if (!rs || !rs.IsAvailable()) continue;
+			const rt = rs.GetType();
+			if (!rt || rt.generic !== "food" || rt.specific !== "fruit") continue;
+			const fid = Engine.QueryInterface(f, IID_Identity);
+			if (fid && (fid.HasClass("Predator") || fid.HasClass("Dangerous"))) continue;
+			const fp = Engine.QueryInterface(f, IID_Position);
+			if (!fp || !fp.IsInWorld()) continue;
+			const fpp = fp.GetPosition2D();
+			const q = Math.max(1, rs.GetCurrentAmount());
+			sx += fpp.x * q; sz += fpp.y * q; peso += q;
+		}
+		if (peso > 0) { nearX = sx / peso; nearZ = sz / peso; }
+	}
 
 	// Abortar se já há farmstead (ou dropsite de comida) a ≤ 50m desta fruta
 	for (const ent of allEnts) {

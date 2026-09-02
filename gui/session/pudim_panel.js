@@ -2450,11 +2450,18 @@ function pudim_ProcessAutoQueue()
 				continue;
 			}
 
-			// A escolha do jogador manda, sempre. Se ele pos alguma coisa na fila deste
-			// edificio, a auto-fila repoe EXATAMENTE aquilo — sem preferencia por aldea e sem
-			// a troca do limite de 50 mulheres. O mod so escolhe o tipo quando voce nunca
-			// escolheu nada ali.
-			let template = g_PudimPlayerQueueTpl[b.ent] || null;
+			// REGRA DE PRECEDENCIA, decidida pelo jogador:
+			//   proporcao toda zerada -> manda a auto-fila (repoe o que ele enfileirou ali)
+			//   qualquer peso > 0     -> manda SO a proporcao, a auto-fila e ignorada
+			//
+			// g_PudimPlayerQueueTpl guarda o que o jogador enfileirou naquele edificio para a
+			// auto-fila REPOR depois. Isso e parte do sistema de auto-fila, e nao uma ordem
+			// viva dele: a ordem viva ja esta na fila e ninguem a toca (so mexemos no que o
+			// proprio mod semeou, via isOurs). Enquanto essa reposicao tinha precedencia, um
+			// edificio semeado com lanceiro no inicio da partida continuava repondo lanceiro
+			// para sempre, mesmo com o peso do lanceiro zerado depois.
+			const propAtivaAqui = pudim_ProporcaoAtiva();
+			let template = propAtivaAqui ? null : (g_PudimPlayerQueueTpl[b.ent] || null);
 			const doJogador = !!template;
 
 			// A PROPORCAO DE UNIDADES entra aqui, e so aqui.
@@ -5435,6 +5442,16 @@ function pudim_RunCombatEstimator()
 let g_PudimLastCounterTrain = 0;
 function pudim_RunCounterTrain()
 {
+	// A PROPORCAO DE UNIDADES TEM PRECEDENCIA ABSOLUTA.
+	//
+	// Regra do jogador: proporcao toda zerada -> vale o auto-fila e este contra-treino;
+	// qualquer peso > 0 -> so a proporcao decide o que sai das filas.
+	// Sem esta guarda o contra-treino continuava semeando fila vazia por conta propria —
+	// mulher no centro civico, outra coisa no quartel — passando por cima justamente do
+	// que o jogador tinha pedido, e ainda gastando a populacao que iria para a unidade
+	// escolhida por ele.
+	if (pudim_ProporcaoAtiva()) return;
+
 	let now = Date.now();
 	if (now - g_PudimLastCounterTrain < 3000) return; // Roda a cada 3 segundos para nao floodar a engine
 	g_PudimLastCounterTrain = now;

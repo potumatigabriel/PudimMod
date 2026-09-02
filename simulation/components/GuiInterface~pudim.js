@@ -3880,6 +3880,65 @@ GuiInterface.prototype.pudim_GetBarracksBuildData = function(player, data)
 		});
 	}
 
+	// ── A DISTANCIA MINIMA QUE O PROPRIO TEMPLATE EXIGE ──────────────────────────────
+	//
+	// "mandei fazer torres e nada aconteceu": o log mostrou a ordem emitida 28 vezes na
+	// mesma coordenada, sempre recusada em silencio. A causa esta no template:
+	//
+	//   template_structure_defensive_tower.xml
+	//     <BuildRestrictions>
+	//       <Category>Tower</Category>
+	//       <Distance><FromClass>Tower</FromClass><MinDistance>60</MinDistance></Distance>
+	//
+	// Torre exige 60m de outra torre. E a ordenacao em anel da torre classifica por
+	// separacao ANGULAR das existentes, nao por distancia — entao ela escolhia um ponto
+	// angularmente oposto que ainda estava dentro dos 60m, e o motor recusava.
+	//
+	// O numero NAO fica escrito aqui. Ele e lido do template, que e o que faz isto valer
+	// para qualquer civilizacao e para qualquer tipo que ganhe uma restricao dessas — e
+	// evita que o mod discorde do jogo quando o jogo mudar.
+	if (result.template) {
+		let minDist = 0, deClasse = "";
+		try {
+			// Declarado AQUI: esta funcao nao tinha cmpTemplateManager, e sem isto a leitura
+			// caia no catch em silencio — minDist ficava 0 e o filtro nunca agia. Quem pegou
+			// foi o tools/test_scope.js, antes de a partida pegar.
+			const cmpTM = Engine.QueryInterface(SYSTEM_ENTITY, IID_TemplateManager);
+			const tpl = cmpTM && cmpTM.GetTemplate(result.template);
+			const br = tpl && tpl.BuildRestrictions;
+			if (br && br.Distance && br.Distance.MinDistance) {
+				minDist = +br.Distance.MinDistance || 0;
+				deClasse = br.Distance.FromClass || "";
+			}
+		} catch (e) {}
+		if (minDist > 0 && deClasse) {
+			const proibidos = [];
+			for (const ent of allEnts) {
+				const cid = Engine.QueryInterface(ent, IID_Identity);
+				if (!cid || !cid.HasClass(deClasse)) continue;
+				const pp = Engine.QueryInterface(ent, IID_Position);
+				if (!pp || !pp.IsInWorld()) continue;
+				const q = pp.GetPosition2D();
+				proibidos.push({ x: q.x, z: q.y });
+			}
+			if (proibidos.length) {
+				const antes = candidatos.length;
+				const md2 = minDist * minDist;
+				const sobram = candidatos.filter(function(c) {
+					for (const p of proibidos) {
+						const dx = c.x - p.x, dz = c.z - p.z;
+						if (dx*dx + dz*dz < md2) return false;
+					}
+					return true;
+				});
+				candidatos.length = 0;
+				for (const c of sobram) candidatos.push(c);
+				result._dbg.minDist = minDist + "de" + deClasse;
+				result._dbg.cortados = antes - candidatos.length;
+			}
+		}
+	}
+
 	result.candidatePositions = candidatos;
 	result._dbg.reason = "ok";
 	result._dbg.cands = candidatos.length;

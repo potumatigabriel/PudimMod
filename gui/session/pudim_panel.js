@@ -23,6 +23,9 @@ var PUDIM_LOG_BUFFER_SIZE = 500;
 // que antes reserializava este array inteiro A CADA LINHA.
 var g_PudimLogSessao = [];
 const PUDIM_LOG_SESSAO_MAX = 5000;
+// 32 KB por partida no user.cfg. Antes uma unica linha chegou a 228 KB — ver o comentario
+// do teto em pudim_Log, e a investigacao dos fechamentos de 01/09.
+const PUDIM_LOG_BYTES_MAX = 32768;
 var g_PudimLogLastSave = 0; // throttle de ConfigDB_SaveChanges (persistência em disco)
 function pudim_DateKey() {
 	const d = new Date();
@@ -96,8 +99,36 @@ function pudim_Log(level, catOrMsg, msgOrUndef) {
 	try {
 		if (entry.ts - g_PudimLogLastSave > 10000) {
 			g_PudimLogLastSave = entry.ts;
-			Engine.ConfigDB_CreateValue("user", "pudim.log." + pudim_MatchKey(),
-				JSON.stringify(g_PudimLogSessao));
+			// ── TETO EM BYTES, NAO SO EM ENTRADAS ─────────────────────────────────────
+			//
+			// Investigacao de 01/09, "o jogo esta fechando": os oito fechamentos desde
+			// 25/08 sao IDENTICOS no registro do Windows —
+			//
+			//   modulo ucrtbase.dll, excecao 0xc0000409, deslocamento 0x11858
+			//
+			// que e o CRT abortando o processo de proposito, sempre no mesmo ponto. Nao e
+			// falta de memoria (17,6 GB livres no crashlog).
+			//
+			// O que o mod estava fazendo: 97% do user.cfg era log dele, e a maior LINHA
+			// unica do arquivo tinha 228.326 bytes. Uma linha de configuracao de 228 KB esta
+			// muito fora do uso normal de um .cfg, e e o tipo de coisa que estoura buffer de
+			// leitor de linha.
+			//
+			// NAO esta provado que era a causa — a correlacao entre tamanho do log e
+			// fechamento existe mas nao e limpa, porque varias partidas cabem num mesmo
+			// processo. Mas 228 KB numa linha de config nao se defende de qualquer forma, e
+			// cortar isso e o teste: se os fechamentos pararem, era.
+			//
+			// O teto e em BYTES porque e o byte que chega no arquivo. Contar entradas nao
+			// garante nada: uma mensagem longa vale por dez curtas.
+			let texto = JSON.stringify(g_PudimLogSessao);
+			while (texto.length > PUDIM_LOG_BYTES_MAX && g_PudimLogSessao.length > 20) {
+				// Corta um quarto de uma vez: cortar de um em um refaria o stringify a cada
+				// volta, que e exatamente o custo quadratico que acabei de tirar daqui.
+				g_PudimLogSessao.splice(0, Math.max(1, Math.floor(g_PudimLogSessao.length / 4)));
+				texto = JSON.stringify(g_PudimLogSessao);
+			}
+			Engine.ConfigDB_CreateValue("user", "pudim.log." + pudim_MatchKey(), texto);
 			Engine.ConfigDB_SaveChanges("user");
 		}
 	} catch(e) {}

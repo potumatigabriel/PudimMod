@@ -113,16 +113,76 @@ check("e NÃO lê o ConfigDB a cada linha",
 	corpoExec.indexOf("ConfigDB_GetValue") < 0);
 check("nem faz JSON.parse a cada linha",
 	corpoExec.indexOf("JSON.parse") < 0);
+// Contra o corpo SEM comentários: a explicação da investigação vive dentro deste bloco e
+// empurraria qualquer janela fixa para fora do alvo.
 check("a serialização acontece só dentro do flush de 10s",
-	/if \(entry\.ts - g_PudimLogLastSave > 10000\) \{[\s\S]{0,400}?JSON\.stringify\(g_PudimLogSessao\)/.test(corpo));
+	/if \(entry\.ts - g_PudimLogLastSave > 10000\) \{[\s\S]*?JSON\.stringify\(g_PudimLogSessao\)/.test(corpoExec));
 check("e o SaveChanges também",
-	/if \(entry\.ts - g_PudimLogLastSave > 10000\) \{[\s\S]{0,400}?ConfigDB_SaveChanges\("user"\)/.test(corpo));
+	/if \(entry\.ts - g_PudimLogLastSave > 10000\) \{[\s\S]*?ConfigDB_SaveChanges\("user"\)/.test(corpoExec));
 check("o array tem teto, senão a memória cresce sem limite numa partida longa",
 	/if \(g_PudimLogSessao\.length > PUDIM_LOG_SESSAO_MAX\)\s*\n\s*g_PudimLogSessao\.shift\(\);/.test(panel));
 check("o teto é declarado como constante",
 	/const PUDIM_LOG_SESSAO_MAX = \d+;/.test(panel));
 check("os números medidos ficam no código, não só neste teste",
 	/2,4 GB de JSON processado/.test(panel));
+
+// -- Teto em BYTES: nenhuma linha de config gigante ----------------------------------
+//
+// Investigacao dos fechamentos (01/09). Os oito desde 25/08 sao IDENTICOS no registro de
+// erros do Windows:
+//
+//   modulo ucrtbase.dll, excecao 0xc0000409, deslocamento 0x11858
+//
+// que e o CRT abortando o processo de proposito, sempre no mesmo ponto. Nao e falta de
+// memoria: o crashlog registra 17,6 GB livres.
+//
+// O que o mod fazia: 97% do user.cfg era log dele, e a maior LINHA unica do arquivo tinha
+// 228.326 bytes. Isso esta muito fora do uso normal de um .cfg.
+//
+// NAO esta provado que era a causa, e o teste nao afirma que esta. O que ele garante e que
+// o mod nao produz mais linhas desse tamanho — o resto e a proxima partida que diz.
+console.log("\nteto em bytes do log persistido");
+
+const BYTES_MAX = +/const PUDIM_LOG_BYTES_MAX = (\d+);/.exec(panel)[1];
+check("ha um teto em bytes declarado", BYTES_MAX > 0, (BYTES_MAX/1024).toFixed(0) + " KB");
+check("e ele e bem menor que a linha de 228 KB que apareceu no user.cfg",
+	BYTES_MAX < 228326 / 4, (BYTES_MAX/1024).toFixed(0) + " KB vs 223 KB");
+check("mas grande o bastante para uma partida util", BYTES_MAX >= 16384);
+
+// Espelha o corte: enquanto passar do teto, joga fora um quarto das entradas mais antigas.
+function cortar(n, bytesMax) {
+	const arr = [];
+	for (let i = 0; i < n; i++) arr.push(Object.assign({}, ENTRADA, { ts: i }));
+	let texto = JSON.stringify(arr);
+	let voltas = 0;
+	while (texto.length > bytesMax && arr.length > 20) {
+		arr.splice(0, Math.max(1, Math.floor(arr.length / 4)));
+		texto = JSON.stringify(arr);
+		voltas++;
+	}
+	return { bytes: texto.length, restantes: arr.length, voltas: voltas };
+}
+
+const r = cortar(5000, BYTES_MAX);
+check("5000 entradas cabem no teto depois do corte",
+	r.bytes <= BYTES_MAX, r.bytes + " bytes");
+check("e sobra log de verdade, nao duas linhas",
+	r.restantes >= 100, r.restantes + " entradas");
+// Cortar de um em um refaria o stringify a cada volta — o custo quadratico que acabou de
+// sair daqui. Um quarto por vez resolve em poucas voltas.
+check("o corte converge em poucas voltas", r.voltas <= 12, r.voltas + " voltas");
+
+const pequeno = cortar(50, BYTES_MAX);
+check("log pequeno nao e cortado", pequeno.restantes === 50 && pequeno.voltas === 0);
+
+check("o corte esta no codigo, dentro do flush",
+	/while \(texto\.length > PUDIM_LOG_BYTES_MAX && g_PudimLogSessao\.length > 20\)/.test(panel));
+check("e corta um quarto por vez, nao um por vez",
+	/g_PudimLogSessao\.splice\(0, Math\.max\(1, Math\.floor\(g_PudimLogSessao\.length \/ 4\)\)\);/.test(panel));
+check("a investigacao fica registrada no codigo, com o codigo de excecao",
+	/0xc0000409/.test(panel) && /ucrtbase\.dll/.test(panel));
+check("e esta escrito que a causa NAO esta provada",
+	/NAO esta provado que era a causa/.test(panel));
 
 console.log(fails === 0 ? "\nTODOS OS TESTES PASSARAM" : "\n" + fails + " TESTE(S) FALHARAM");
 process.exit(fails === 0 ? 0 : 1);

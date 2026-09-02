@@ -2447,6 +2447,18 @@ function pudim_ProcessAutoQueue()
 				pudim_ProporcaoDiag(b, atrasada);
 			}
 
+			// PESO ZERO E ORDEM, NAO SUGESTAO.
+			//
+			// Com a proporcao configurada, um edificio que nao treina NADA do que o jogador
+			// pediu tem de ficar PARADO. Antes ele seguia para os fallbacks abaixo e semeava
+			// trainerEntities[0] — o primeiro da lista do edificio, escolhido pelo motor.
+			// Em jogo: o jogador deixou peso so na cavalaria, e o quartel (que nao treina
+			// cavalaria) encheu a fila de lanceiros ate 90, justamente o tipo zerado.
+			// Preencher com outra coisa nao e "melhor que nada": e desobedecer, e ainda
+			// consome recursos e populacao que iriam para a unidade pedida.
+			if (!template && pudim_ProporcaoAtiva())
+				continue;
+
 			if (!template) {
 				// Usar trainerEntities do servidor (mais confiável que GetEntityState para barracas novas)
 				const trainerEnts = b.trainerEntities || [];
@@ -5046,7 +5058,20 @@ function pudim_AtualizarUnidades()
 			? u.nomeGenerico + " (" + u.nomeEspecifico + ")"
 			: u.nomeGenerico;
 
-	g_PudimUnitLista = lista.slice(0, PUDIM_UNIT_LINHAS);
+	// ORDEM DE EXIBIÇÃO FIXA.
+	//
+	// O sort por peso lá em cima serve para ESCOLHER quais tipos ocupam as linhas
+	// disponíveis — sem ele, justamente o que o jogador configurou poderia ficar de fora.
+	// Mas usar a mesma ordenação para DESENHAR fazia a lista pular a cada clique em + ou -:
+	// mudar o peso reordenava tudo na hora e o botão fugia de baixo do cursor, então dois
+	// cliques seguidos caíam em unidades diferentes.
+	// Escolhe por peso, exibe por nome. Como o conjunto das 5 linhas só muda quando um tipo
+	// entra ou sai da seleção, ajustar o peso de quem já está na tela não mexe mais na ordem.
+	g_PudimUnitLista = lista.slice(0, PUDIM_UNIT_LINHAS).sort(function(a, b) {
+		const na = a.nome || a.tpl, nb = b.nome || b.tpl;
+		if (na !== nb) return na < nb ? -1 : 1;
+		return a.tpl < b.tpl ? -1 : (a.tpl > b.tpl ? 1 : 0); // desempate estável
+	});
 	g_PudimUnitTodas = lista;
 	pudim_DesenharUnidades();
 }

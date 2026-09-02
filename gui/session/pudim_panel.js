@@ -1405,6 +1405,10 @@ function pudim_LimparAndadas(agora)
 }
 
 
+// Tempo sem ameaca para devolver as unidades ao trabalho. Era 10s; a economia parada
+// custa mais que o risco de soltar cedo, ainda mais agora que so sao recolhidos os
+// trabalhadores de fato proximos do inimigo.
+const PUDIM_PANIC_CALMA_MS = 5000;
 var PUDIM_PANIC_MAX_DURATION = 120000; // 2min: força retorno mesmo se detecção ficar "presa" (ex: inimigo parado perto do CC sem atacar)
 
 
@@ -3798,7 +3802,7 @@ function pudim_ProcessPanic()
 			// paralisava a economia inteira, que e o oposto do que este ramo existe para
 			// fazer. A ameaca aqui ja foi classificada como trivial (<=2 inimigos e com
 			// defesa suficiente), entao o timer de 10s sozinho e critério de sobra.
-			if (g_PudimPanicMode && now - g_PudimPanicLastThreat > 10000) {
+			if (g_PudimPanicMode && now - g_PudimPanicLastThreat > PUDIM_PANIC_CALMA_MS) {
 				if (statusEl) statusEl.caption = "Retornando ao trabalho...";
 				pudim_ReturnPanicUnitsToWork();
 			} else if (statusEl && !g_PudimPanicMode) {
@@ -4010,7 +4014,7 @@ function pudim_ProcessPanic()
 			shelter.freeSlots--;
 		}
 
-	} else if (g_PudimPanicMode && (now - g_PudimPanicLastThreat > 10000 && g_PudimCalmStreak >= PUDIM_CALM_CYCLES_TO_RELEASE)) {
+	} else if (g_PudimPanicMode && (now - g_PudimPanicLastThreat > PUDIM_PANIC_CALMA_MS && g_PudimCalmStreak >= PUDIM_CALM_CYCLES_TO_RELEASE)) {
 		// Ameaça cessou há 10 segundos — retorno automático ao trabalho
 		if (statusEl) statusEl.caption = "Retornando ao trabalho...";
 		pudim_ReturnPanicUnitsToWork();

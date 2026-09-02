@@ -2005,7 +2005,15 @@ GuiInterface.prototype.pudim_GetPanicData = function(player, data)
 	}
 	result.sheltersUnderSiege = occupiedUnderSiege;
 
-	// Trabalhadores e soldados em risco (dentro de 120m de inimigo)
+	// Trabalhadores e soldados REALMENTE em risco.
+	//
+	// O raio era 120m, e numa base isso cobre praticamente todo mundo — "em risco" virava
+	// "todos", e um unico batedor esvaziava a economia inteira. 120m tambem esta muito alem
+	// do alcance de ataque de qualquer unidade: quem esta a essa distancia nao corre perigo,
+	// so foi pego pelo raio.
+	// 60m e o compromisso: cavalaria cobre isso em poucos segundos, entao ainda da tempo de
+	// chegar a um abrigo, mas quem esta coletando do outro lado da base segue trabalhando.
+	const PUDIM_RISCO_RAIO = 60;
 	for (const ent of myEnts) {
 		const id = Engine.QueryInterface(ent, IID_Identity);
 		if (!id) continue;
@@ -2017,7 +2025,7 @@ GuiInterface.prototype.pudim_GetPanicData = function(player, data)
 		let nearEnemy = false;
 		for (const ep2 of enemyPos) {
 			const dx = ep.x - ep2.x, dz = ep.y - ep2.y;
-			if (dx*dx + dz*dz < 120*120) { nearEnemy = true; break; }
+			if (dx*dx + dz*dz < PUDIM_RISCO_RAIO*PUDIM_RISCO_RAIO) { nearEnemy = true; break; }
 		}
 		if (!nearEnemy) continue;
 

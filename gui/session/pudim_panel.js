@@ -1723,6 +1723,32 @@ var g_PudimAutoQueueManagedByMod = new Set();
 var g_PudimAutoQueueUserDisabled = new Set();
 
 /**
+ * Edifícios que nasceram com a auto-fila DESLIGADA POR PADRÃO — decisão do mod, não do
+ * jogador. Este conjunto existe porque os dois estados estavam misturados num só.
+ *
+ * "o criador automatico de unidades no estabulo não funciona" (02/09). Medido no replay
+ * 2026-09-02_0004 e no log da mesma partida, não por inspeção:
+ *
+ *   - alwaysQueue = isCC || isBarracks. Estábulo não é nenhum dos dois, então caía no ramo
+ *     "demais construções: off por padrão" — que ADICIONAVA o estábulo a UserDisabled.
+ *   - a semeadura começa com `if (UserDisabled.has(ent)) continue`, então o mod nunca
+ *     semeava nada ali, com peso na cavalaria ou sem.
+ *   - o que aparece no replay nos 4 estábulos (9072, 9334, 9537, 10223) são ordens x1
+ *     irregulares, e em vários instantes DOIS templates diferentes no mesmo segundo
+ *     (1057s, 1301s, 1341s, 1474s: cavalry_javelineer_b x1 + cavalry_swordsman_b x1).
+ *     O mod nunca manda dois tipos ao mesmo edifício no mesmo tique — era o jogador
+ *     clicando na mão. O quartel 7308, no mesmo intervalo, recebia lote a cada ~18s.
+ *   - e o jogador tentou ligar a auto-fila nativa do estábulo pelo botão do jogo seis
+ *     vezes (872s, 926s, 1027s, 1055s, 1249s, 1260s); em todas o mod desligou 2s depois,
+ *     porque com proporção ativa a auto-fila nativa fica off de propósito. Só que a
+ *     semeadura do mod, que deveria substituí-la, estava barrada pelo UserDisabled.
+ *
+ * Com os dois estados separados, "desligado por padrão" deixa de significar "o jogador
+ * mandou não mexer": com proporção configurada o mod semeia esses edifícios também.
+ */
+var g_PudimAutoQueuePadraoOff = new Set();
+
+/**
  * Quando cada edifício teve a auto-fila desligada. { ent: [timestamps recentes] }
  *
  * Relato de 25/08: "no quartel nao consigo desabilitar o treinamento automatico das
@@ -2206,8 +2232,13 @@ function pudim_ProcessAutoQueue()
 					toEnable.push(b.ent);
 					g_PudimAutoQueueManagedByMod.add(b.ent);
 					g_PudimAutoQueueUserDisabled.delete(b.ent);
-				} else if (g_PudimAutoQueueManagedByMod.has(b.ent) && !g_PudimAutoQueueUserDisabled.has(b.ent)) {
-					// Pudim tinha ativado, agora está off. Só é o USUÁRIO se havia recursos
+				} else if (g_PudimAutoQueueManagedByMod.has(b.ent) &&
+				           !g_PudimAutoQueueUserDisabled.has(b.ent) &&
+				           !g_PudimAutoQueuePadraoOff.has(b.ent)) {
+					// Pudim tinha ativado, agora está off.
+					// PadraoOff fica de fora: ele nunca esteve ligado, então "desligou" não
+					// diz nada sobre ele — sem esta guarda o estábulo entraria aqui todo
+					// ciclo e acabaria carimbado como decisão do jogador. Só é o USUÁRIO se havia recursos
 					// suficientes pro template — senão é o bug nativo do motor (falta de
 					// recursos/limite de treino) desligando sozinho: reativa sem penalizar.
 					const agoraQ = Date.now();
@@ -2242,9 +2273,12 @@ function pudim_ProcessAutoQueue()
 						toEnable.push(b.ent);
 						g_PudimAutoQueueManagedByMod.add(b.ent);
 					} else {
-						// Demais construções: off por padrão; usuário habilita individualmente
+						// Demais construções: off por padrão; usuário habilita individualmente.
+						// PadraoOff, NÃO UserDisabled: isto é escolha do mod, e escolha do mod
+						// não pode calar a proporção que o jogador configurou. Era daqui que
+						// saía o estábulo mudo.
 						g_PudimAutoQueueManagedByMod.add(b.ent);
-						g_PudimAutoQueueUserDisabled.add(b.ent);
+						g_PudimAutoQueuePadraoOff.add(b.ent);
 					}
 				}
 				// Se está em UserDisabled (e não é alwaysQueue): ignorar completamente
@@ -2261,6 +2295,9 @@ function pudim_ProcessAutoQueue()
 					g_PudimAutoQueueUserDisabled.delete(b.ent);
 					pudim_Log("INFO", "QUEUE", "edifício " + b.ent + " reativado pelo usuário");
 				}
+				// Ligar na mão é o jogador dizendo que quer produção ali: o padrão do mod
+				// não vale mais para este edifício.
+				g_PudimAutoQueuePadraoOff.delete(b.ent);
 			}
 		}
 		if (toEnable.length > 0) {
@@ -2283,6 +2320,12 @@ function pudim_ProcessAutoQueue()
 		const nowQueue = Date.now();
 		for (const b of buildings) {
 			if (g_PudimAutoQueueUserDisabled.has(b.ent)) continue;
+			// Desligado por PADRÃO do mod: sem proporção configurada continua parado, como
+			// sempre foi. Com proporção, semeia — é a única forma de o estábulo, o forte e a
+			// doca obedecerem ao peso que o jogador pôs numa unidade que só eles treinam.
+			// Não há risco de treinar o que ele não pediu: mais abaixo, edifício que não
+			// treina NADA com peso sai por `if (!template && pudim_ProporcaoAtiva()) continue`.
+			if (g_PudimAutoQueuePadraoOff.has(b.ent) && !propAtiva) continue;
 
 			// CC: padrão 3; barracks: padrão 1; demais: 1. O tamanho que o JOGADOR usou vem
 			// na frente de tudo: ele pos 5, repoe 5. (Quanto disso cabe no estoque ainda e

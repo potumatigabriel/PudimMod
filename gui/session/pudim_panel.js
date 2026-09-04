@@ -1143,7 +1143,15 @@ function pudim_RunAutoWork()
 			const partes = [];
 			for (const r of ["food", "wood", "stone", "metal"])
 				if (q[r] !== undefined) partes.push(r.charAt(0).toUpperCase() + (c[r] || 0) + "/" + q[r]);
+			// O fator de escassez entra no log porque sem ele "alvo 23" não se explica: o
+			// alvo deixou de ser só o peso do jogador, e a única forma de conferir a conta
+			// depois da partida é ver o fator que valia na hora.
+			const esc = result._bal.esc || {};
+			const fat = [];
+			for (const r of ["food", "wood", "stone", "metal"])
+				if (esc[r] !== undefined) fat.push(r.charAt(0).toUpperCase() + esc[r]);
 			pudim_Log("DEBUG", "BALANCE", "atual/alvo " + partes.join(" ") +
+				(fat.length ? " | escassez " + fat.join(" ") : "") +
 				" | ociosos=" + (result._bal.idle || 0) +
 				" | semvaga=" + (result._bal.foodBlocked || 0));
 		}
@@ -5045,12 +5053,28 @@ function pudim_AtualizarUnidades()
 	catch (e) { return; }
 	if (!d || !d.unidades) return;
 
-	// Cabem sete linhas. Com mais tipos disponíveis, os que o jogador já pesou vêm primeiro
-	// — esconder justamente o que ele configurou seria o pior corte possível.
+	// QUEM OCUPA AS LINHAS DISPONÍVEIS.
+	//
+	// Primeiro o que o jogador já pesou — esconder justamente o que ele configurou seria o
+	// pior corte possível. O desempate seguinte era ALFABÉTICO, e foi ele que produziu o
+	// relato de 03/09: "algumas unidades sumiram ao longo do jogo, como aldeãs".
+	//
+	// Os templates são units/<civ>/<nome>, então em ordem alfabética a aldeã
+	// (support_female_citizen) é a ÚLTIMA de todas — sempre a primeira a ser cortada. Na
+	// captura da Fase III as cinco linhas mostravam Brennus (0), cavalaria espadachim,
+	// dardeiro de cavalaria, Trompetista e Vercingetórix (1): dois heróis e um músico
+	// ocupando lugar, e a aldeã fora da tela.
+	//
+	// O desempate agora é por QUANTAS O JOGADOR TEM (mais fila): o que ele usa de verdade
+	// fica na tela, e herói limitado a um nunca desloca a unidade que ele produz aos montes.
+	// O alfabético continua como último critério, para a ordem não dançar no empate.
 	let lista = d.unidades.slice();
 	lista.sort(function(a, b) {
 		const pa = g_PudimUnitPesos[a.tpl] || 0, pb = g_PudimUnitPesos[b.tpl] || 0;
 		if (pa !== pb) return pb - pa;
+		const ua = (a.existentes || 0) + (a.emFila || 0);
+		const ub = (b.existentes || 0) + (b.emFila || 0);
+		if (ua !== ub) return ub - ua;
 		return a.tpl < b.tpl ? -1 : (a.tpl > b.tpl ? 1 : 0);
 	});
 	// NOME TRADUZIDO, E SEM AMBIGUIDADE.

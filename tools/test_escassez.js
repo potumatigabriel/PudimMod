@@ -124,10 +124,16 @@ check("banco vazio não quebra a conta (divisão por zero)",
 
 // A raiz quadrada é o que impede o extremo de virar tudo-ou-nada; sem ela, 9582 contra 86
 // daria fator 111 na comida e 0,009 na madeira.
+// Em 03/09 esta conta saiu daqui para pudim_PesosEfetivos, compartilhada com a cota de
+// coleta — ela estava duplicada, e a duplicacao escondeu que a cota nunca a aplicava. As
+// duas linhas abaixo seguiam o nome local antigo (bancoFarm) e passaram a apontar para o
+// parametro da funcao. A REGRA nao mudou; so o lugar onde ela mora.
 check("a suavização é raiz quadrada, não razão crua",
-	/Math\.sqrt\(media \/ Math\.max\(\+bancoFarm\[r\] \|\| 0, 1\)\)/.test(sim));
+	/Math\.sqrt\(media \/ Math\.max\(\+banco\[r\] \|\| 0, 1\)\)/.test(sim));
 check("e a média só considera recursos com peso",
-	/if \(\(weights\[r\] \|\| 0\) > 0\) \{ soma \+= \(\+bancoFarm\[r\] \|\| 0\); n\+\+; \}/.test(sim));
+	/if \(\(\(weights && weights\[r\]\) \|\| 0\) > 0\) \{ soma \+= \(\+banco\[r\] \|\| 0\); n\+\+; \}/.test(sim));
+check("e o modulo de fazendas usa a funcao compartilhada, nao uma copia",
+	/const efFarm = pudim_PesosEfetivos\(weights, bancoFarm\);/.test(sim));
 
 // ── O ocioso conta ─────────────────────────────────────────────────────────────────────
 console.log("\no ocioso e mao de obra, nao ausencia");

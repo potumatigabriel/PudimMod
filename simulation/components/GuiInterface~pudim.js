@@ -452,6 +452,49 @@ function pudim_LimiarObra(ent, generico)
 	return Math.max(PUDIM_WALK_PISO_OBRA, (cap * vel) / (2 * taxa));
 }
 
+// ─── O QUE ESTA SOBRANDO CEDE VEZ AO QUE ESTA FALTANDO ────────────────────────────────
+//
+// Esta conta nasceu em 31/08 para as fazendas ("se um recurso esta muito abundante, tem que
+// focar no que esta pouco") e ficou SO la. A cota de coleta — quem decide para onde vai cada
+// trabalhador — continuou usando os pesos crus, e por isso o desequilibrio voltou em 03/09:
+//
+//   madeira 1281 e metal 1072 parados, comida 220 caindo, com "Recursos insuficientes -
+//   59 Comida" repetindo na tela. A contagem de gente estava CERTA pelos pesos (comida 4,
+//   madeira 3, metal 1 -> alvo 23/17/6 com 27/18/1 de fato). Errado era o alvo: peso
+//   distribui PESSOAS, e o que faltava era ESTOQUE.
+//
+// Agora as duas pontas usam a mesma funcao. O fator sai da razao entre o estoque do recurso
+// e a MEDIA dos recursos que o jogador pesou: ser relativo a media e o que faz isso valer
+// aos 5 e aos 40 minutos, e quando os estoques estao parelhos todos os fatores dao 1 e os
+// pesos valem exatamente como ele os escreveu. A raiz quadrada suaviza (sem ela, 9922 contra
+// 61 zeraria a madeira) e os limites impedem que um recurso zerado sequestre a base inteira.
+//
+// Peso zero continua zero: recurso que o jogador nao quer nao entra por escassez.
+const PUDIM_ESCASSEZ_MIN = 0.25;
+const PUDIM_ESCASSEZ_MAX = 4;
+const PUDIM_RECURSOS = ["food", "wood", "stone", "metal"];
+
+function pudim_PesosEfetivos(weights, banco)
+{
+	const pesoEf = {}, fatores = {};
+	let soma = 0, n = 0;
+	if (banco)
+		for (const r of PUDIM_RECURSOS)
+			if (((weights && weights[r]) || 0) > 0) { soma += (+banco[r] || 0); n++; }
+	const media = n > 0 ? soma / n : 0;
+	for (const r of PUDIM_RECURSOS) {
+		const p = (weights && weights[r]) || 0;
+		let f = 1;
+		if (p > 0 && media > 0) {
+			f = Math.sqrt(media / Math.max(+banco[r] || 0, 1));
+			f = Math.max(PUDIM_ESCASSEZ_MIN, Math.min(PUDIM_ESCASSEZ_MAX, f));
+		}
+		pesoEf[r] = p * f;
+		fatores[r] = f;
+	}
+	return { "pesos": pesoEf, "fatores": fatores };
+}
+
 GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, data)
 {
 	// suggestStorehouse/suggestFarmstead são LISTAS: se vários workers forem despachados pra
@@ -1132,10 +1175,18 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 	// saíram passava a parecer vazio, e todo ocioso era despachado para lá. Contando dos
 	// dois lados, as cotas fecham e ninguém desaparece do censo enquanto constrói.
 	let totalWorkers = idleWorkersList.length;
-	for (const type of ["food", "wood", "stone", "metal"]) {
+	// A COTA SEGUE O ESTOQUE, NAO SO O PESO. Ver pudim_PesosEfetivos: peso distribui
+	// PESSOAS, e em 03/09 a contagem estava certa pelos pesos enquanto a madeira acumulava
+	// 1281 e a comida caia a 220. O peso do jogador continua mandando — a escassez so
+	// desempata entre os recursos que ele ja escolheu, e some quando os estoques emparelham.
+	const bancoCota = cmpPlayer && cmpPlayer.GetResourceCounts ? cmpPlayer.GetResourceCounts() : null;
+	const efCota = pudim_PesosEfetivos(weights, bancoCota);
+	for (const type of PUDIM_RECURSOS) {
 		if (weights[type] > 0) {
 			activeWeights.push(type);
-			totalWeight += weights[type];
+			totalWeight += efCota.pesos[type];
+			result._bal.esc = result._bal.esc || {};
+			result._bal.esc[type] = Math.round(efCota.fatores[type] * 100) / 100;
 		}
 		totalWorkers += activeGatherers[type].length;
 	}
@@ -1163,7 +1214,7 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 		let worstSurplusRes = null;
 		
 		for (const type of activeWeights) {
-			const targetQuota = (weights[type] / totalWeight) * totalWorkers;
+			const targetQuota = (efCota.pesos[type] / totalWeight) * totalWorkers;
 			const currentCount = activeGatherers[type].length;
 			const diff = targetQuota - currentCount; // Positivo: precisa de gente. Negativo: excesso.
 			deficits[type] = diff;
@@ -1209,8 +1260,18 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 				return 0;
 			});
 
-			// Apenas 1 worker por ciclo — novos trabalhadores da produção resolvem o resto
-			const pullCount = 1;
+			// Quantos tirar por ciclo. Um só, sempre, era o certo enquanto cada trabalhador
+			// pesava no total — mas em 03/09, com 169 de população, o metal tinha 50 coletores
+			// para uma cota de 21. A 1 por ciclo de 5s isso leva mais de dois minutos para
+			// corrigir, e enquanto isso a comida ficava em 91 com 43 coletores.
+			//
+			// Continua conservador: com pop baixa é 1, como sempre foi, porque ali a viagem
+			// perdida pesa de verdade. Acima de 100 de população o excesso é drenado a até 4
+			// por ciclo, e mesmo assim proporcional — excesso de 9 tira 1, de 32 tira 4.
+			// Nunca mais que um quarto do excesso, para não abrir buraco do outro lado.
+			const pullCount = bigPopRb
+				? Math.max(1, Math.min(4, Math.floor(worstSurplus / 8)))
+				: 1;
 			let count = 0;
 			for (const ent of candidates) {
 				if (count >= pullCount) break;
@@ -2735,28 +2796,15 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	// fatores dao 1 e os pesos do jogador valem exatamente como ele os escreveu. A raiz
 	// quadrada suaviza (sem ela, 9922 contra 61 zeraria a madeira), e os limites impedem que
 	// um recurso zerado sequestre a base inteira.
-	const PUDIM_ESCASSEZ_MIN = 0.25;
-	const PUDIM_ESCASSEZ_MAX = 4;
+	// A conta vive em pudim_PesosEfetivos, junto da cota de coleta. Ela estava duplicada
+	// aqui, e foi a duplicacao que escondeu o defeito de 03/09: corrigir a fazenda nao
+	// corrigia quem despacha os trabalhadores. Uma funcao so, os dois lados iguais.
 	const bancoFarm = cmpPlayer.GetResourceCounts ? cmpPlayer.GetResourceCounts() : null;
-	const pesoEf = {};
-	{
-		const rs = ["food", "wood", "stone", "metal"];
-		let soma = 0, n = 0;
-		if (bancoFarm)
-			for (const r of rs)
-				if ((weights[r] || 0) > 0) { soma += (+bancoFarm[r] || 0); n++; }
-		const media = n > 0 ? soma / n : 0;
-		for (const r of rs) {
-			const p = weights[r] || 0;
-			let f = 1;
-			if (p > 0 && media > 0) {
-				f = Math.sqrt(media / Math.max(+bancoFarm[r] || 0, 1));
-				f = Math.max(PUDIM_ESCASSEZ_MIN, Math.min(PUDIM_ESCASSEZ_MAX, f));
-			}
-			pesoEf[r] = p * f;
-			if (p > 0) result._dbg["esc_" + r] = Math.round(f * 100) / 100;
-		}
-	}
+	const efFarm = pudim_PesosEfetivos(weights, bancoFarm);
+	const pesoEf = efFarm.pesos;
+	for (const r of PUDIM_RECURSOS)
+		if ((weights[r] || 0) > 0)
+			result._dbg["esc_" + r] = Math.round(efFarm.fatores[r] * 100) / 100;
 
 	const foodW = pesoEf.food || 0;
 	const totalW = (pesoEf.food || 0) + (pesoEf.wood || 0) + (pesoEf.stone || 0) + (pesoEf.metal || 0);

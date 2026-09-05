@@ -1933,6 +1933,18 @@ GuiInterface.prototype.pudim_GetPanicData = function(player, data)
 	result.enemyCount = enemyNear.length;
 	result.isLargeArmy = enemyNear.length >= 5;
 
+	// QUANTOS DOS INVASORES SÃO RÁPIDOS.
+	//
+	// Um raide de cavalaria não vai embora quando some do raio: ele dá a volta. O painel usa
+	// isto para exigir uma calma mais longa antes de soltar — 6s bastam para tropa a pé, que
+	// leva o dobro do tempo para voltar, e são pouco demais para cavalo.
+	let rapidos = 0;
+	for (const e of enemyNear) {
+		const eid2 = Engine.QueryInterface(e, IID_Identity);
+		if (eid2 && eid2.HasClass("FastMoving")) rapidos++;
+	}
+	result.fastEnemies = rapidos;
+
 	// Posições dos inimigos próximos
 	const enemyPos = [];
 	for (const e of enemyNear) {
@@ -2083,12 +2095,23 @@ GuiInterface.prototype.pudim_GetPanicData = function(player, data)
 		if (!cmpHealth || !pos || !pos.IsInWorld()) continue;
 		const ep = pos.GetPosition2D();
 
-		let nearEnemy = false;
+		// A DISTÂNCIA AO INIMIGO MAIS PRÓXIMO, não só "sim ou não".
+		//
+		// O painel tem um cooldown de 20s que impede re-guarnecer uma unidade recém-solta
+		// (anti vai-e-volta). Contra CAVALARIA esse cooldown vira sentença: o raide se
+		// afasta 80m atrás do próximo alvo, a soltura dispara com 6s de calma, e quando ele
+		// volta — poucos segundos depois — o aldeão fica 20 segundos parado no campo aberto
+		// com o cavalo em cima. Para saber quando romper o cooldown o painel precisa saber
+		// QUÃO perto o inimigo está, e isso não subia daqui.
+		let nearEnemy = false, perto2 = Infinity;
 		for (const ep2 of enemyPos) {
 			const dx = ep.x - ep2.x, dz = ep.y - ep2.y;
-			if (dx*dx + dz*dz < PUDIM_RISCO_RAIO*PUDIM_RISCO_RAIO) { nearEnemy = true; break; }
+			const d2 = dx*dx + dz*dz;
+			if (d2 < perto2) perto2 = d2;
+			if (d2 < PUDIM_RISCO_RAIO*PUDIM_RISCO_RAIO) nearEnemy = true;
 		}
 		if (!nearEnemy) continue;
+		const distInimigo = Math.round(Math.sqrt(perto2));
 
 		const isWorker = id.HasClass("FemaleCitizen") ||
 			(id.HasClass("Organic") && !id.HasClass("CitizenSoldier") && !id.HasClass("FastMoving") &&
@@ -2113,6 +2136,7 @@ GuiInterface.prototype.pudim_GetPanicData = function(player, data)
 			const fuga = wp2 ? pudimFleePoint(wp2) : null;
 			result.atRiskWorkers.push({ id: ent, currentOrder: currentOrder,
 			                            x: wp2 ? wp2.x : null, z: wp2 ? wp2.y : null,
+			                            dist: distInimigo,
 			                            fleeX: fuga ? fuga.x : null, fleeZ: fuga ? fuga.z : null });
 		} else if (isSoldier) {
 			// Posicao tambem para o soldado, pela mesma razao do trabalhador: a torre MAIS

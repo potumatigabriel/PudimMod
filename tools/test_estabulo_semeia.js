@@ -26,6 +26,15 @@
  */
 "use strict";
 const fs = require("fs");
+// A cópia de trabalho é CRLF (autocrlf do git) e as verificações deste arquivo casam
+// trechos de MAIS DE UMA LINHA, com \n literal. Sem normalizar, elas falham sem que nada
+// no mod tenha mudado — foi o que deixou 8 testes vermelhos por dias. Ver
+// tools/test_fim_de_linha.js, que impede a regressão.
+const _pudimLerOriginal = fs.readFileSync;
+fs.readFileSync = function() {
+	const r = _pudimLerOriginal.apply(fs, arguments);
+	return typeof r === "string" ? r.split("\r\n").join("\n") : r;
+};
 const path = require("path");
 
 const base = path.join(__dirname, "..");

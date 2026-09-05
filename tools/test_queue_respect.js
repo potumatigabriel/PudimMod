@@ -8,6 +8,15 @@
  */
 "use strict";
 const fs = require("fs");
+// A cópia de trabalho é CRLF (autocrlf do git) e as verificações deste arquivo casam
+// trechos de MAIS DE UMA LINHA, com \n literal. Sem normalizar, elas falham sem que nada
+// no mod tenha mudado — foi o que deixou 8 testes vermelhos por dias. Ver
+// tools/test_fim_de_linha.js, que impede a regressão.
+const _pudimLerOriginal = fs.readFileSync;
+fs.readFileSync = function() {
+	const r = _pudimLerOriginal.apply(fs, arguments);
+	return typeof r === "string" ? r.split("\r\n").join("\n") : r;
+};
 const path = require("path");
 
 const PANEL = fs.readFileSync(
@@ -34,8 +43,20 @@ check("o tamanho so e lido com o lote fresco (o motor decrementa count)",
 	/if \(\(qItem\.progress \|\| 0\) < 0\.15\) \{\s*\n\s*const obs = qItem\.count \|\| 1;/.test(PANEL));
 
 // ── 2. A semeadura usa a escolha do jogador ────────────────────────────────────────────
-check("a semeadura comeca pela escolha do jogador",
-	/let template = g_PudimPlayerQueueTpl\[b\.ent\] \|\| null;/.test(PANEL));
+// A REGRA MUDOU DE PROPOSITO, e este teste ficou para tras.
+//
+// Ate o commit "Proporcao de unidades tem precedencia absoluta sobre a auto-fila" a linha
+// era `let template = g_PudimPlayerQueueTpl[b.ent] || null;`. Hoje a reposicao automatica do
+// que o jogador enfileirou naquele edificio SO vale com a proporcao zerada: com peso
+// configurado, um edificio semeado com lanceiro no inicio da partida repunha lanceiro para
+// sempre, mesmo com o peso do lanceiro zerado depois.
+//
+// Isto NAO afrouxa "ordem do jogador manda": a ordem VIVA esta na fila e ninguem a toca (a
+// trava e `isOurs`). g_PudimPlayerQueueTpl e memoria da auto-fila, nao ordem viva.
+check("com a proporcao zerada, a semeadura repoe o que o jogador escolheu",
+	/let template = propAtivaAqui \? null : \(g_PudimPlayerQueueTpl\[b\.ent\] \|\| null\);/.test(PANEL));
+check("e com peso configurado a proporcao decide, nao a memoria da auto-fila",
+	/const propAtivaAqui = pudim_ProporcaoAtiva\(\);/.test(PANEL));
 check("a preferencia por aldea so vale quando o jogador nunca escolheu",
 	/if \(!template\) \{\s*\n\s*\/\/ Usar trainerEntities/.test(PANEL));
 check("o limite de 50 mulheres nao troca um template do jogador",

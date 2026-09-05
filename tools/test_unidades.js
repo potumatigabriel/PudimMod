@@ -24,6 +24,15 @@
  */
 "use strict";
 const fs = require("fs");
+// A cópia de trabalho é CRLF (autocrlf do git) e as verificações deste arquivo casam
+// trechos de MAIS DE UMA LINHA, com \n literal. Sem normalizar, elas falham sem que nada
+// no mod tenha mudado — foi o que deixou 8 testes vermelhos por dias. Ver
+// tools/test_fim_de_linha.js, que impede a regressão.
+const _pudimLerOriginal = fs.readFileSync;
+fs.readFileSync = function() {
+	const r = _pudimLerOriginal.apply(fs, arguments);
+	return typeof r === "string" ? r.split("\r\n").join("\n") : r;
+};
 const path = require("path");
 
 const base = path.join(__dirname, "..");
@@ -160,10 +169,14 @@ check("peso zero nunca é escolhido",
 
 // ── Onde ela entra na auto-fila ────────────────────────────────────────────────────────
 // A ordem importa e já custou caro: o jogador pôs 5 guerreiros e voltavam 2 aldeões.
-const iJogador = panel.indexOf("let template = g_PudimPlayerQueueTpl[b.ent] || null;");
+// A ORDEM MUDOU DE PROPOSITO. Ver a mesma nota em test_queue_respect.js: a reposicao do que
+// o jogador enfileirou naquele edificio hoje so vale com a proporcao ZERADA, senao um
+// edificio semeado com lanceiro no inicio repunha lanceiro para sempre com o peso dele
+// zerado. A ordem VIVA dele continua intocada — ela esta na fila, e a trava e `isOurs`.
+const iJogador = panel.indexOf("let template = propAtivaAqui ? null : (g_PudimPlayerQueueTpl[b.ent] || null);");
 const iProporcao = panel.indexOf("const atrasada = pudim_UnidadeMaisAtrasada(");
 const iPalpite = panel.indexOf("const trainerEnts = b.trainerEntities || [];");
-check("a escolha do jogador vem primeiro", iJogador > 0 && iJogador < iProporcao);
+check("a escolha do jogador é avaliada antes da proporção", iJogador > 0 && iJogador < iProporcao);
 check("a proporção vem depois dela", iProporcao > 0 && iProporcao < iPalpite);
 check("e o palpite antigo fica por último", iPalpite > 0);
 // Pedir cavalaria num quartel faz o motor recusar em silêncio e a fila fica parada.

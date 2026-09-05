@@ -1337,8 +1337,32 @@ const PUDIM_CALM_CYCLES_TO_RELEASE = 4;  // ~6s de calma antes de soltar
 // impede o vai-e-volta patológico (soltar e re-guarnecer em segundos) que travava a coleta.
 const PUDIM_REGARRISON_COOLDOWN = 20000;
 
-/** true se a unidade pode ser guarnecida agora (não foi solta há pouquíssimo tempo) */
-function pudim_CanGarrison(entId) {
+// Distância a partir da qual o inimigo é perigo IMEDIATO e o anti vai-e-volta cede.
+//
+// Relato de 05/09, sobre a derrota do replay 2026-09-05_0005: "ele veio com cavalos na
+// minha base muito cedo e matou aldeoes de comida".
+//
+// O cooldown existe por um bom motivo (guarnecer→soltar→guarnecer travava a economia), mas
+// contra cavalaria ele matava: o raide se afasta atrás do próximo alvo, os 6s de calma
+// disparam a soltura, e quando ele volta poucos segundos depois o aldeão fica ATÉ 20
+// SEGUNDOS parado no campo com o cavalo em cima, porque acabou de ser solto.
+//
+// Isso está medido no replay: 162 guarnições no minuto 13, 57 solturas no minuto 14 — e a
+// população continuou caindo DEPOIS delas (139 no minuto 14,5 para 132 no 15), com a
+// coleta de comida em 149/30s contra os 927/30s de antes do raide.
+//
+// 30m é a régua: dentro disso a cavalaria alcança o aldeão em ~2s, e nenhum cooldown de
+// conveniência pode valer mais que isso. Fora disso o anti vai-e-volta continua mandando.
+const PUDIM_PERIGO_IMEDIATO = 30;
+
+/**
+ * true se a unidade pode ser guarnecida agora.
+ *
+ * `dist` é a distância ao inimigo mais próximo (vem de atRiskWorkers). Com o inimigo em
+ * cima, o cooldown não se aplica — proteger vence o anti vai-e-volta.
+ */
+function pudim_CanGarrison(entId, dist) {
+	if (dist !== undefined && dist !== null && dist <= PUDIM_PERIGO_IMEDIATO) return true;
 	const last = g_PudimLastReleaseTime[entId];
 	return !last || (Date.now() - last) > PUDIM_REGARRISON_COOLDOWN;
 }
@@ -1417,6 +1441,15 @@ function pudim_LimparAndadas(agora)
 // custa mais que o risco de soltar cedo, ainda mais agora que so sao recolhidos os
 // trabalhadores de fato proximos do inimigo.
 const PUDIM_PANIC_CALMA_MS = 5000;
+// A mesma calma, quando quem invadiu era cavalaria. 25s é o tempo de o raide dar a volta:
+// ver o bloco "CAVALARIA NÃO VAI EMBORA" na atualização do pânico.
+const PUDIM_PANIC_CALMA_RAPIDA_MS = 25000;
+/** true enquanto o pânico atual tiver sido causado por invasores rápidos. */
+var g_PudimAmeacaRapida = false;
+/** Quanto tempo de calma é preciso agora para soltar as unidades abrigadas. */
+function pudim_CalmaExigida() {
+	return g_PudimAmeacaRapida ? PUDIM_PANIC_CALMA_RAPIDA_MS : PUDIM_PANIC_CALMA_MS;
+}
 var PUDIM_PANIC_MAX_DURATION = 120000; // 2min: força retorno mesmo se detecção ficar "presa" (ex: inimigo parado perto do CC sem atacar)
 
 
@@ -3856,6 +3889,20 @@ function pudim_ProcessPanic()
 	if (panicData.underAttack) { g_PudimThreatStreak++; g_PudimCalmStreak = 0; }
 	else { g_PudimCalmStreak++; g_PudimThreatStreak = 0; }
 
+	// CAVALARIA NÃO VAI EMBORA: DÁ A VOLTA.
+	//
+	// A calma exigida para soltar é medida em tempo desde a última ameaça. Contra tropa a pé
+	// 6s é razoável — ela leva bem mais que isso para voltar ao mesmo ponto. Contra cavalo é
+	// o intervalo entre duas passadas do mesmo raide, e foi isso que pôs os aldeões de volta
+	// no campo no minuto 14 do replay 2026-09-05_0005, com a população ainda caindo.
+	//
+	// Enquanto o raide que causou o pânico tiver cavalaria, a calma exigida é a longa. Ela
+	// zera quando um pânico novo começa, para não herdar a memória de um ataque antigo.
+	if (panicData.underAttack && (panicData.fastEnemies || 0) > 0)
+		g_PudimAmeacaRapida = true;
+	else if (!g_PudimPanicMode)
+		g_PudimAmeacaRapida = false;
+
 	// Ameaça ainda não confirmada: espera ciclos consecutivos antes de guarnecer qualquer um
 	if (panicData.underAttack && !g_PudimPanicMode &&
 	    g_PudimThreatStreak < PUDIM_THREAT_CYCLES_TO_PANIC) {
@@ -3904,7 +3951,7 @@ function pudim_ProcessPanic()
 			// paralisava a economia inteira, que e o oposto do que este ramo existe para
 			// fazer. A ameaca aqui ja foi classificada como trivial (<=2 inimigos e com
 			// defesa suficiente), entao o timer de 10s sozinho e critério de sobra.
-			if (g_PudimPanicMode && now - g_PudimPanicLastThreat > PUDIM_PANIC_CALMA_MS) {
+			if (g_PudimPanicMode && now - g_PudimPanicLastThreat > pudim_CalmaExigida()) {
 				if (statusEl) statusEl.caption = "Retornando ao trabalho...";
 				pudim_ReturnPanicUnitsToWork();
 			} else if (statusEl && !g_PudimPanicMode) {
@@ -3963,7 +4010,8 @@ function pudim_ProcessPanic()
 				if (g_PudimPanicGarrisoned[worker.id]) continue;
 				// Só bloqueia se foi solto agora há pouco (anti vai-e-volta). Ataque novo
 				// depois do cooldown protege a unidade normalmente, quantas vezes for preciso.
-				if (!pudim_CanGarrison(worker.id)) continue;
+				// worker.dist rompe o cooldown com o inimigo em cima — ver PUDIM_PERIGO_IMEDIATO.
+				if (!pudim_CanGarrison(worker.id, worker.dist)) continue;
 				if (!g_PudimPanicPreTask[worker.id] && worker.currentOrder)
 					g_PudimPanicPreTask[worker.id] = worker.currentOrder;
 				const shelter = escolherAbrigo(worker);
@@ -4062,8 +4110,9 @@ function pudim_ProcessPanic()
 		for (const worker of panicData.atRiskWorkers) {
 			if (g_PudimPanicGarrisoned[worker.id]) continue;
 			// Anti vai-e-volta (ver PUDIM_REGARRISON_COOLDOWN) — não limita quantas vezes a
-			// unidade pode ser protegida ao longo da partida
-			if (!pudim_CanGarrison(worker.id)) continue;
+			// unidade pode ser protegida ao longo da partida, e cede quando o inimigo já
+			// está em cima (PUDIM_PERIGO_IMEDIATO).
+			if (!pudim_CanGarrison(worker.id, worker.dist)) continue;
 
 			// Salvar tarefa anterior (só na primeira vez)
 			if (!g_PudimPanicPreTask[worker.id] && worker.currentOrder)
@@ -4116,7 +4165,7 @@ function pudim_ProcessPanic()
 			shelter.freeSlots--;
 		}
 
-	} else if (g_PudimPanicMode && (now - g_PudimPanicLastThreat > PUDIM_PANIC_CALMA_MS && g_PudimCalmStreak >= PUDIM_CALM_CYCLES_TO_RELEASE)) {
+	} else if (g_PudimPanicMode && (now - g_PudimPanicLastThreat > pudim_CalmaExigida() && g_PudimCalmStreak >= PUDIM_CALM_CYCLES_TO_RELEASE)) {
 		// Ameaça cessou há 10 segundos — retorno automático ao trabalho
 		if (statusEl) statusEl.caption = "Retornando ao trabalho...";
 		pudim_ReturnPanicUnitsToWork();

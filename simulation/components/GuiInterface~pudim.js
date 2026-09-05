@@ -3718,11 +3718,38 @@ GuiInterface.prototype.pudim_GetBarracksBuildData = function(player, data)
 		// Torre em ANEL: o pedido foi "as torres circulando o centro civico, pra proteger a
 		// base". Um anel cobre as aproximacoes por igual; a espiral normal agruparia as
 		// primeiras todas de um lado, deixando o resto da base descoberto ate a ultima.
-		"torre":    { classe: "Tower",    tpl: "defense_tower", anel: true }
+		"torre":    { classe: "Tower",    tpl: "defense_tower", anel: true },
+		// CURRAL SEM CLASSE, DE PROPOSITO.
+		//
+		// O template "corral" esta conferido: aparece como structures/gaul/corral,
+		// structures/rome/corral, structures/mace/corral e structures/spart/corral nos
+		// comandos `construct` dos replays — dado do proprio motor, nao suposicao.
+		//
+		// O NOME DA CLASSE eu nao consegui conferir: o public.zip fica travado com o jogo
+		// aberto, e foi pedido com a partida em curso. Chutar "Corral" seria repetir o erro
+		// da torre: o censo contaria zero, "faltam N" nunca desceria, e a falha seria
+		// silenciosa. Com classe nula o censo passa a identificar pelo TEMPLATE, que serve
+		// para qualquer civilizacao e nao depende de eu adivinhar nada.
+		"curral":   { classe: null,       tpl: "corral",        anel: false }
 	};
 	const tipo = (data && data.tipo) || "quartel";
 	const spec = PUDIM_SERIE[tipo] || PUDIM_SERIE["quartel"];
 	const classe = spec.classe;
+
+	// "E deste tipo?" — por classe quando ela e conhecida, por template quando nao e.
+	// O nome corrente de uma fundacao vem como "foundation|structures/<civ>/<x>" (ver
+	// Commands.js), entao o prefixo sai antes da comparacao. A comparacao e por IGUALDADE
+	// no fim do caminho, pelo mesmo motivo do comentario acima: "house" pegaria storehouse.
+	const cmpTMSerie = Engine.QueryInterface(SYSTEM_ENTITY, IID_TemplateManager);
+	const ehDoTipo = function(ent, cmpId) {
+		if (classe) return !!(cmpId && cmpId.HasClass(classe));
+		if (!cmpTMSerie) return false;
+		let nome = null;
+		try { nome = cmpTMSerie.GetCurrentTemplateName(ent); } catch (e) { return false; }
+		if (!nome) return false;
+		if (nome.indexOf("foundation|") === 0) nome = nome.slice(11);
+		return nome.slice(nome.lastIndexOf("/") + 1) === spec.tpl;
+	};
 	const ordenados = (data && data.playerOrdered) ? data.playerOrdered : {};
 	const allEnts = cmpRangeManager.GetEntitiesByPlayer(player);
 
@@ -3732,7 +3759,7 @@ GuiInterface.prototype.pudim_GetBarracksBuildData = function(player, data)
 		const cmpId = Engine.QueryInterface(ent, IID_Identity);
 		if (!cmpId) continue;
 		const fundacao = Engine.QueryInterface(ent, IID_Foundation);
-		if (cmpId.HasClass(classe)) {
+		if (ehDoTipo(ent, cmpId)) {
 			if (fundacao) result.emObra++;
 			else result.prontos++;
 		}
@@ -3947,7 +3974,7 @@ GuiInterface.prototype.pudim_GetBarracksBuildData = function(player, data)
 		const mesmosDePe = [];
 		for (const ent of allEnts) {
 			const cid = Engine.QueryInterface(ent, IID_Identity);
-			if (!cid || !cid.HasClass(classe)) continue;
+			if (!ehDoTipo(ent, cid)) continue;
 			const pp = Engine.QueryInterface(ent, IID_Position);
 			if (!pp || !pp.IsInWorld()) continue;
 			const q = pp.GetPosition2D();
@@ -3982,7 +4009,7 @@ GuiInterface.prototype.pudim_GetBarracksBuildData = function(player, data)
 		const jaTem = [];
 		for (const ent of allEnts) {
 			const cid = Engine.QueryInterface(ent, IID_Identity);
-			if (!cid || !cid.HasClass(classe)) continue;
+			if (!ehDoTipo(ent, cid)) continue;
 			const pp = Engine.QueryInterface(ent, IID_Position);
 			if (!pp || !pp.IsInWorld()) continue;
 			const q = pp.GetPosition2D();

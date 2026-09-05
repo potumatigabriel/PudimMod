@@ -4260,7 +4260,7 @@ function pudim_ProcessHeroAura()
 //
 // E por que a exceção dele é certa: perto do teto de população o gargalo deixa de ser
 // recurso e passa a ser quantos lugares treinam ao mesmo tempo. Aí paralelo ganha.
-const PUDIM_QUARTEL_TIPOS = ["quartel", "estabulo", "casa", "forja", "torre", "palicada"];
+const PUDIM_QUARTEL_TIPOS = ["quartel", "estabulo", "casa", "forja", "torre", "curral", "palicada"];
 // Os nomes saem do dicionário, não de literais: o dropdown e o botão têm de falar a
 // mesma língua do resto do painel.
 const PUDIM_QUARTEL_CHAVES = {
@@ -4269,6 +4269,7 @@ const PUDIM_QUARTEL_CHAVES = {
 	casa:     "cap.house",
 	forja:    "cap.forge",
 	torre:    "cap.tower",
+	curral:   "cap.corral",
 	palicada: "cap.palisade"
 };
 function pudim_QuartelNome(tipo) {
@@ -4714,7 +4715,7 @@ function pudim_SerieFaltam(tipo)
  * A ordem e a de PUDIM_QUARTEL_TIPOS, fixa: lista que reordena sozinha faz o jogador clicar
  * no X de uma e acertar outra. Foi o mesmo cuidado da lista de unidades.
  */
-const PUDIM_SERIE_VAGAS = 6;
+const PUDIM_SERIE_VAGAS = 7;
 
 function pudim_SerieDesenharLista()
 {
@@ -4987,6 +4988,7 @@ const PUDIM_ABAIXO_DO_COMBATE = [
 	"pudim_serieRot0", "pudim_serieX0", "pudim_serieRot1", "pudim_serieX1",
 	"pudim_serieRot2", "pudim_serieX2", "pudim_serieRot3", "pudim_serieX3",
 	"pudim_serieRot4", "pudim_serieX4", "pudim_serieRot5", "pudim_serieX5",
+	"pudim_serieRot6", "pudim_serieX6",
 	"pudim_backToWorkBtn2", "pudim_selectWarriorsBtn",
 	"pudim_optionsHint", "pudim_unitHeader", "pudim_unitLabel0",
 	"pudim_unitMinus0", "pudim_unitPlus0", "pudim_unitVal0", "pudim_unitVazio",

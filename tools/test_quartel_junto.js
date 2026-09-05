@@ -182,17 +182,23 @@ check("cada série tem equipe própria", EQ_SERIE === 5 && EQ_PALI === 3,
 // "poderia ficar uma lista de coisas sendo construidas, com um botao X pra parar, de forma
 // individual". O rotulo unico nao escalava: com tres series ativas ele quebrava em duas
 // linhas ("PARAR — faltam Quartel x10 + Estabulo x3 + Casa x5") e nao deixava cancelar uma.
+// O numero nao fica cravado aqui: em 05/09 entrou o curral e este teste caiu por causa do
+// 6 literal, sem que a REGRA tivesse mudado. A regra e "uma vaga por tipo possivel", e e ela
+// que o teste deve verificar — cada tipo novo precisa ganhar vaga junto.
+const VAGAS = +/const PUDIM_SERIE_VAGAS = (\d+);/.exec(panel)[1];
+const vagasIdx = Array.from({ length: VAGAS }, (_, i) => i);
 check("ha uma vaga de lista por tipo possivel",
-	/const PUDIM_SERIE_VAGAS = 6;/.test(panel) &&
-	PUDIM_QUARTEL_TIPOS_N === 6, "tipos=" + PUDIM_QUARTEL_TIPOS_N);
+	VAGAS === PUDIM_QUARTEL_TIPOS_N,
+	"vagas=" + VAGAS + " tipos=" + PUDIM_QUARTEL_TIPOS_N);
 check("cada vaga tem rotulo e X proprios no XML",
-	[0,1,2,3,4,5].every(i =>
+	vagasIdx.every(i =>
 		xml.indexOf('name="pudim_serieRot' + i + '"') > 0 &&
 		xml.indexOf('name="pudim_serieX' + i + '"') > 0));
 check("o X de cada vaga chama o cancelamento com o indice dela",
-	[0,1,2,3,4,5].every(i => xml.indexOf("pudim_SerieCancelar(" + i + ");") > 0));
+	vagasIdx.every(i => xml.indexOf("pudim_SerieCancelar(" + i + ");") > 0));
 check("as vagas nascem escondidas — a lista e dinamica",
-	(xml.match(/name="pudim_serie(Rot|X)\d"[^>]*hidden="true"/g) || []).length === 12);
+	(xml.match(/name="pudim_serie(Rot|X)\d+"[^>]*hidden="true"/g) || []).length === VAGAS * 2,
+	(xml.match(/name="pudim_serie(Rot|X)\d+"[^>]*hidden="true"/g) || []).length + " de " + VAGAS * 2);
 
 // Cancelar uma nao pode encostar nas outras: e a metade do pedido que faltava.
 const corpoCanc = (function() {

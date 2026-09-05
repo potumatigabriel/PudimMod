@@ -96,6 +96,7 @@ const PUDIM_STRINGS = {
 	"cap.stable":        ["Stable", "Estábulo"],
 	"cap.house":         ["House", "Casa"],
 	"cap.forge":         ["Forge", "Forja"],
+	"cap.corral":        ["Corral", "Curral"],
 	"cap.tower":         ["Tower", "Torre"],
 	"cap.palisade":      ["Palisade", "Paliçada"],
 	"cap.selWarriors": ["Select Warriors", "Selecionar Guerreiros"],

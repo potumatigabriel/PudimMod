@@ -69,7 +69,10 @@ check("e ela começa a contar quando o cancelamento é registrado",
 for (const [rot, re] of [
 	["casas", /g_PudimAutoHouseThreshold > 0 && !pudim_ObrasPausadas\(\)/],
 	["armazéns e celeiros", /g_PudimAdvancedAIEnabled\["dropsites"\] && !pudim_ObrasPausadas\(\)/],
-	["fazendas", /if \(pudim_ObrasPausadas\(\)\) return;\s*\n\s*const farmData/]
+	// O alvo é a adjacência LÓGICA (a pausa é consultada imediatamente antes da chamada),
+	// não a adjacência de LINHAS: em 05/09 um comentário entre as duas quebrou este teste
+	// sem que nada da regra tivesse mudado.
+	["fazendas", /if \(pudim_ObrasPausadas\(\)\) return;(?:\s*\/\/[^\n]*\n)*\s*const farmData/]
 ])
 	check("a pausa vale para " + rot, re.test(panel));
 

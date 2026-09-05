@@ -2815,8 +2815,11 @@ function pudim_ProcessFarms()
 		g_PudimFarmUrgente = false;
 
 		if (pudim_ObrasPausadas()) return;
+		// playerOrdered vai junto: sem ele a expulsão de soldados da fazenda passava por
+		// cima de ordem sua — era o único módulo do mod que não recebia esta lista.
 		const farmData = Engine.GuiInterfaceCall("pudim_GetFarmBuildData",
-			{ "weights": g_PudimResourceWeights, "builderOrigin": g_PudimGathererRes });
+			{ "weights": g_PudimResourceWeights, "builderOrigin": g_PudimGathererRes,
+			  "playerOrdered": pudim_GetPlayerOrderedIds() });
 		if (!farmData) return;
 
 		// Log de diagnóstico a cada 30s (throttled)
@@ -5311,6 +5314,19 @@ var g_PudimPropDiagUltimo = {};
 function pudim_ProporcaoDiag(b, escolhida)
 {
 	if (!g_PudimShowDebug || !pudim_ProporcaoAtiva()) return;
+	// EDIFÍCIO QUE NÃO TREINA NADA COM PESO NÃO TEM DIAGNÓSTICO A DAR.
+	//
+	// Regressão minha, de 04/09: ao liberar os edifícios "desligados por padrão" para a
+	// semeadura, casa, celeiro e armazém passaram a chegar até aqui — todos com zero ou um
+	// treinável, todos escolhendo NADA, todos logando a cada 20s. Medido no log de 05/09:
+	// 85 das 127 entradas eram esta linha, e a janela inteira do log encolheu para 32
+	// SEGUNDOS de partida. O log é a ferramenta de diagnóstico do mod; entupi-lo custa mais
+	// do que qualquer coisa que ele possa mostrar.
+	//
+	// A linha existe para responder "por que ESTE edifício escolheu aquilo" — pergunta que
+	// só faz sentido quando ele podia ter escolhido algo.
+	const podia = (b.trainerEntities || []).some(t => (g_PudimUnitPesos[t] || 0) > 0);
+	if (!podia) return;
 	const agora = Date.now();
 	if (agora - (g_PudimPropDiagUltimo[b.ent] || 0) < 20000) return;
 	g_PudimPropDiagUltimo[b.ent] = agora;

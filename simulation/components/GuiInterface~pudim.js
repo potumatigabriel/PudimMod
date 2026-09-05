@@ -2667,7 +2667,44 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	let currentFoodGatherersCount = 0;
 	let farFoodWorkers = [];
 	let idleBuilders = [];
-	
+
+	// ── SOLDADO NA FAZENDA: SÓ SAI SE HOUVER ALDEÃO PARA ENTRAR ───────────────────────────
+	//
+	// "quando esta sem aldeoes, use guerreiros nas fazendas... no ultimo jogo fiquei
+	// colocando la e o mod tirando".
+	//
+	// Ele estava certo, e a regra antiga era cega em dois pontos: expulsava TODO soldado de
+	// TODA fazenda, todo ciclo, mesmo sem nenhum aldeao livre para ocupar a vaga — e sem
+	// olhar se a ordem tinha vindo DELE. Este e o unico modulo do mod que nao recebia
+	// playerOrdered (conferido: zero ocorrencias na funcao inteira), entao a regra "se um
+	// trabalhador receber uma ordem do jogador, nao pode receber nenhuma ordem do mod" nao
+	// valia aqui.
+	//
+	// O replay 2026-09-05_0005 mostra o preco: madeira colhida praticamente empatada com o
+	// pand-_- (29.811 contra 30.553) e comida pela METADE (17.475 contra 35.485). Soldado
+	// expulso da fazenda vai para a madeira — e era exatamente esse o desenho da economia.
+	//
+	// Agora a expulsao exige as duas coisas: a ordem nao ser do jogador, e existir aldeao
+	// de fato disponivel. "Disponivel" e aldeao ocioso ou na madeira — quem ja esta na
+	// comida nao e troca, e so mudaria a vaga de lugar.
+	const playerOrderedFarm = new Set(((data && data.playerOrdered) || []).map(Number));
+	let aldeoesDisponiveis = 0;
+	for (const ent of allEnts) {
+		const cid = Engine.QueryInterface(ent, IID_Identity);
+		if (!cid || cid.HasClass("CitizenSoldier") || cid.HasClass("FastMoving")) continue;
+		if (!Engine.QueryInterface(ent, IID_Builder)) continue;
+		if (playerOrderedFarm.has(ent)) continue;
+		const uai = Engine.QueryInterface(ent, IID_UnitAI);
+		if (!uai) continue;
+		const oq = uai.orderQueue;
+		if (!oq || oq.length === 0) { aldeoesDisponiveis++; continue; }
+		const o0 = oq[0];
+		if (o0.type !== "Gather" || !o0.data || !o0.data.target) continue;
+		const rsA = Engine.QueryInterface(o0.data.target, IID_ResourceSupply);
+		if (rsA && rsA.GetType().generic === "wood") aldeoesDisponiveis++;
+	}
+	result._dbg.aldLivres = aldeoesDisponiveis;
+
 	for (const ent of allEnts) {
 		const cmpUnitAI = Engine.QueryInterface(ent, IID_UnitAI);
 		const cmpBuilder = Engine.QueryInterface(ent, IID_Builder);
@@ -2684,15 +2721,27 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 						const tgtId = Engine.QueryInterface(tgt, IID_Identity);
 						const cmpEntId = Engine.QueryInterface(ent, IID_Identity);
 						if (tgtId && tgtId.HasClass("Field")) {
-							// Worker numa fazenda — verificar se é soldado (deve ser trocado por aldeão)
+							// Worker numa fazenda — soldado só sai se houver aldeão para entrar.
+							// Ver o bloco "SOLDADO NA FAZENDA" acima.
 							if (cmpEntId && cmpEntId.HasClass("CitizenSoldier")) {
-								const cmpSolPos = Engine.QueryInterface(ent, IID_Position);
-								if (cmpSolPos && cmpSolPos.IsInWorld()) {
-									const sp = cmpSolPos.GetPosition2D();
-									result.soldierEvictions.push({ soldierId: ent, farmId: tgt, soldierX: sp.x, soldierZ: sp.y });
+								const dele = playerOrderedFarm.has(ent);
+								if (!dele && aldeoesDisponiveis > 0) {
+									const cmpSolPos = Engine.QueryInterface(ent, IID_Position);
+									if (cmpSolPos && cmpSolPos.IsInWorld()) {
+										const sp = cmpSolPos.GetPosition2D();
+										result.soldierEvictions.push({ soldierId: ent, farmId: tgt, soldierX: sp.x, soldierZ: sp.y });
+										// Cada expulsão consome um aldeão do saldo: sem isto, um
+										// único aldeão livre autorizava esvaziar TODAS as fazendas.
+										aldeoesDisponiveis--;
+									}
+									// Não contar soldado como food worker: a fazenda ficará "vaga"
+									// para o sistema enviar um aldeão no lugar
+								} else {
+									// Fica. E se fica, é trabalhador de comida como qualquer
+									// outro — contá-lo como vaga livre inflava o déficit e fazia
+									// o mod erguer campo para um buraco que não existe.
+									currentFoodGatherersCount++;
 								}
-								// Não contar soldado como food worker: a fazenda ficará "vaga"
-								// para o sistema enviar um aldeão no lugar
 							} else {
 								currentFoodGatherersCount++;
 							}

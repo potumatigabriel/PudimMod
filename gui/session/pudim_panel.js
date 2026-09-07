@@ -2014,6 +2014,15 @@ function pudim_Tick(dt)
 		pudim_LogSnapshot();
 	}
 
+	// Indicador de obras: fora do try de qualquer outro sistema, para uma falha dele não
+	// derrubar o resto do tique — e vice-versa.
+	g_PudimObrasAccum += dt;
+	if (g_PudimObrasAccum >= PUDIM_OBRAS_INTERVAL)
+	{
+		g_PudimObrasAccum = 0;
+		try { pudim_AtualizarObras(); } catch (e) {}
+	}
+
 	// Auto-Trabalho: bloqueado durante pânico (não redirecionar trabalhadores em batalha)
 	if (g_PudimAutoWorkEnabled && g_PudimAutoWorkAccum >= PUDIM_AUTOWORK_INTERVAL && g_PudimInitialBalanceDone && !g_PudimPanicFull)
 	{
@@ -5108,6 +5117,90 @@ function pudim_UnitWeightDelta(linha, delta)
 	const novo = Math.max(0, Math.min(10, atual + delta));
 	g_PudimUnitPesos[u.tpl] = novo;
 	pudim_DesenharUnidades();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// OBRAS EM ANDAMENTO — o indicador de canto
+// ═══════════════════════════════════════════════════════════════════
+//
+// Pedido de 06/09, apontando o indicador de pesquisa do jogo ("Colheitadeira", com o relógio
+// verde): "igual esse icone, mostrar as unidades contruindo".
+//
+// O retrato sai de GetTemplateData(tpl).icon, montado como
+// "stretched:session/portraits/<icon>". Esse caminho NÃO é chute: é a forma que o
+// selection_details do moderngui usa contra este mesmo motor, conferida no disco. Quando o
+// template não traz ícone, a linha fica sem retrato em vez de com um quadrado quebrado.
+//
+// Só entra fundação COM construtor em cima: fundação parada não é obra em andamento, e
+// mostrá-la faria o indicador mentir sobre onde está a mão de obra.
+const PUDIM_OBRAS_LINHAS = 4;
+const PUDIM_OBRAS_INTERVAL = 1000;
+const PUDIM_OBRAS_ALTURA = 40;
+// As duas pontas da barra de progresso, em pixel. Têm de bater com o size do
+// pudimObrasBarBg no 06_pudim_obras.xml — tools/test_obras.js confere que batem.
+const PUDIM_OBRAS_BAR_X1 = 44;
+const PUDIM_OBRAS_BAR_X2 = 178;
+var g_PudimObrasAccum = 0;
+
+function pudim_AtualizarObras()
+{
+	const painel = Engine.TryGetGUIObjectByName("pudimObras");
+	if (!painel) return;
+
+	let d = null;
+	try { d = Engine.GuiInterfaceCall("pudim_GetObrasEmAndamento", {}); } catch (e) { return; }
+	const obras = (d && d.obras) || [];
+
+	// Some junto com a última obra, como o indicador de pesquisa do jogo.
+	painel.hidden = obras.length === 0;
+
+	for (let i = 0; i < PUDIM_OBRAS_LINHAS; i++) {
+		const row = Engine.TryGetGUIObjectByName("pudimObrasRow[" + i + "]");
+		if (!row) continue;
+		const o = obras[i];
+		if (!o) { row.hidden = true; continue; }
+		row.hidden = false;
+
+		// Empilha as linhas. Mesmo padrão da barra de aliados: lê o size, mexe nas pontas,
+		// devolve — atribuir campo a campo no objeto lido não tem efeito.
+		const sz = row.size;
+		sz.top = i * PUDIM_OBRAS_ALTURA;
+		sz.bottom = (i + 1) * PUDIM_OBRAS_ALTURA;
+		row.size = sz;
+
+		let nome = o.tpl.slice(o.tpl.lastIndexOf("/") + 1);
+		let icone = null;
+		try {
+			const td = GetTemplateData(o.tpl);
+			if (td) {
+				if (td.name && td.name.specific) nome = td.name.specific;
+				else if (td.name && td.name.generic) nome = td.name.generic;
+				if (td.icon) icone = td.icon;
+			}
+		} catch (e) {}
+
+		const ic = Engine.TryGetGUIObjectByName("pudimObrasIcon[" + i + "]");
+		if (ic) ic.sprite = icone ? "stretched:session/portraits/" + icone : "color: 0 0 0 0";
+
+		const lbl = Engine.TryGetGUIObjectByName("pudimObrasNome[" + i + "]");
+		if (lbl) lbl.caption = nome + "  " + Math.round((o.progresso || 0) * 100) + "%";
+
+		// O número que o jogador pediu ver: quantas unidades estão naquela obra.
+		const selo = Engine.TryGetGUIObjectByName("pudimObrasSeloTxt[" + i + "]");
+		if (selo) selo.caption = String(o.construtores);
+
+		// Barra: a esquerda fica parada e só a direita anda, senão ela desliza em vez de
+		// crescer. Os dois números são os MESMOS do XML — ver o comentário lá sobre por que
+		// isto é em pixel e não em porcentagem.
+		const bar = Engine.TryGetGUIObjectByName("pudimObrasBar[" + i + "]");
+		if (bar) {
+			const frac = Math.max(0, Math.min(1, o.progresso || 0));
+			const b = bar.size;
+			b.left = PUDIM_OBRAS_BAR_X1;
+			b.right = PUDIM_OBRAS_BAR_X1 + (PUDIM_OBRAS_BAR_X2 - PUDIM_OBRAS_BAR_X1) * frac;
+			bar.size = b;
+		}
+	}
 }
 
 function pudim_AtualizarUnidades()

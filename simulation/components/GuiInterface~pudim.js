@@ -5675,6 +5675,57 @@ GuiInterface.prototype.pudim_GetProductionBuildings = function(player, data) {
 	         "popCount": cmpPlayer ? cmpPlayer.GetPopulationCount() : 0,
 	         "popMax":   cmpPlayer ? cmpPlayer.GetMaxPopulation()  : 0 };
 };
+// ─── Obras em andamento, para o indicador de canto ───────────────────────────────────
+//
+// Pedido de 06/09, apontando o indicador de pesquisa do jogo ("Colheitadeira", com o relógio
+// verde): "igual esse icone, mostrar as unidades contruindo".
+//
+// Devolve UMA LINHA POR FUNDAÇÃO que tenha construtor em cima. Sem construtor não é obra em
+// andamento — é uma fundação parada, e mostrá-la faria o indicador mentir sobre onde a mão
+// de obra está.
+//
+// Tudo aqui já era usado no mod: GetBuildProgress e GetNumBuilders aparecem no censo de
+// fundações, e GetCurrentTemplateName na contagem de unidades. Nada foi inventado.
+GuiInterface.prototype.pudim_GetObrasEmAndamento = function(player, data)
+{
+	const result = { "obras": [] };
+	const cmpRangeManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_RangeManager);
+	const cmpTM = Engine.QueryInterface(SYSTEM_ENTITY, IID_TemplateManager);
+	if (!cmpRangeManager || !cmpTM) return result;
+
+	for (const ent of cmpRangeManager.GetEntitiesByPlayer(player)) {
+		const cmpFnd = Engine.QueryInterface(ent, IID_Foundation);
+		if (!cmpFnd) continue;
+
+		const construtores = cmpFnd.GetNumBuilders ? cmpFnd.GetNumBuilders() : 0;
+		if (construtores <= 0) continue;
+
+		// O nome corrente de uma fundação vem como "foundation|structures/<civ>/<x>" (ver
+		// Commands.js). O painel precisa do template FINAL para achar o retrato: o da
+		// fundação não tem ícone próprio.
+		let tpl = null;
+		try { tpl = cmpTM.GetCurrentTemplateName(ent); } catch (e) { continue; }
+		if (!tpl) continue;
+		if (tpl.indexOf("foundation|") === 0) tpl = tpl.slice(11);
+
+		result.obras.push({
+			"id": ent,
+			"tpl": tpl,
+			"construtores": construtores,
+			"progresso": cmpFnd.GetBuildProgress ? cmpFnd.GetBuildProgress() : 0
+		});
+	}
+
+	// Mais adiantada primeiro: é a que termina antes, e é a que o jogador quer ver no topo.
+	// Desempate pelo id, para a lista não dançar entre duas obras no mesmo progresso — o
+	// mesmo cuidado da lista de unidades e da lista de séries.
+	result.obras.sort(function(a, b) {
+		if (a.progresso !== b.progresso) return b.progresso - a.progresso;
+		return a.id - b.id;
+	});
+	return result;
+};
+
 GuiInterface.prototype.pudim_GetPlayerKD = function(player, data) { return null; };
 
 
@@ -7309,7 +7360,8 @@ var pudim_exposedFunctions = {
   	"pudim_GetFarmBuildData": 1,
   	"pudim_GetPlayerKD": 1,
   	"pudim_GetAutoResearchData": 1,
-  	"pudim_GetDropsiteFoundationData": 1
+  	"pudim_GetDropsiteFoundationData": 1,
+  	"pudim_GetObrasEmAndamento": 1
 };
 
 if (typeof pudim_patchApplyN !== "undefined") {

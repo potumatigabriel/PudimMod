@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  PudimMod - Obras em andamento
+
+  Pedido de 06/09, apontando o indicador de pesquisa do jogo ("Colheitadeira", com o relógio
+  verde): "igual esse icone, mostrar as unidades contruindo".
+
+  Mesma forma do original: retrato do que está sendo feito e, ao lado, um selo com o número.
+  Aqui o número são os CONSTRUTORES em cima da obra — é o que foi pedido, "mostrar as
+  unidades construindo" — com a barra de progresso por baixo.
+
+  Fica escondido quando não há obra, exatamente como o indicador de pesquisa, que só aparece
+  enquanto há pesquisa. Painel que nunca some vira moldura e para de ser lido.
+
+  As linhas nascem todas em 0 0 100% 40 e o JS acerta o topo de cada uma, como faz a barra
+  de aliados (pudim_ally_bar.js: lê row.size, mexe em .top/.bottom, devolve).
+
+  z=200: o mesmo do painel do explorador (04_pudim_scout_panel.xml). Acima do chat (z=0) e
+  da barra de aliados (z=-1).
+-->
+<object name="pudimObras" hidden="true" absolute="true" size="100%-232 170 100%-8 350" z="200" ghost="true">
+  <repeat count="4" var="n">
+    <object name="pudimObrasRow[n]" hidden="true" size="0 0 100% 40" type="image" sprite="color: 0 0 0 150" ghost="true">
+      <object name="pudimObrasIcon[n]" type="image" ghost="true" size="2 2 38 38"/>
+      <object name="pudimObrasNome[n]" type="text" ghost="true" size="44 2 178 22"
+              font="sans-bold-12" text_align="left" text_valign="center" textcolor="235 235 235 255"/>
+      <!-- A BARRA É EM PIXEL, NÃO EM PORCENTAGEM, DE PROPÓSITO.
+           obj.size.right de um "100%-46" devolve -46 (o deslocamento), não a largura: a
+           conta da barra daria negativa e ela nunca encheria. Com o painel de largura fixa
+           (232-8 = 224), 44..178 é exato e o JS interpola entre os mesmos dois números —
+           PUDIM_OBRAS_BAR_X1/X2 em pudim_panel.js. Mudar um lado exige mudar o outro. -->
+      <object name="pudimObrasBarBg[n]" type="image" ghost="true" size="44 24 178 34" sprite="color: 30 30 40 220"/>
+      <object name="pudimObrasBar[n]" type="image" ghost="true" size="44 24 44 34" sprite="color: 60 190 80 220"/>
+      <object name="pudimObrasSelo[n]" type="image" ghost="true" size="182 6 220 34" sprite="color: 40 120 50 230">
+        <object name="pudimObrasSeloTxt[n]" type="text" ghost="true" size="0 0 100% 100%"
+                font="sans-bold-13" text_align="center" text_valign="center" textcolor="255 255 255 255"/>
+      </object>
+    </object>
+  </repeat>
+</object>

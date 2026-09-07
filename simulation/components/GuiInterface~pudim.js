@@ -3035,7 +3035,9 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 			const cmpPQ = Engine.QueryInterface(ent, IID_ProductionQueue);
 			if (!cmpPQ) continue;
 			for (const item of cmpPQ.GetQueue())
-				if (item.productiontype === "unit") trainingCount += (item.count || 1);
+				// item.productiontype NAO EXISTE. Ver o bloco "A FILA NAO TEM productiontype"
+				// mais abaixo: lote de unidade e o que TEM unitTemplate, e so.
+				if (item.unitTemplate) trainingCount += (item.count || 1);
 		}
 		result._dbg.trn = trainingCount;
 		// Teto de UMA FAZENDA por ciclo (5 vagas), não de 1 trabalhador.
@@ -4207,7 +4209,8 @@ GuiInterface.prototype.pudim_GetTrainableUnits = function(player, data)
 		const cmpPQ = Engine.QueryInterface(ent, IID_ProductionQueue);
 		try {
 			if (cmpPQ) for (const item of cmpPQ.GetQueue())
-				if (item.productiontype === "unit" && item.unitTemplate && porTpl[item.unitTemplate])
+				// AQUI ESTAVA O DEFEITO DA PROPORCAO. Ver "A FILA NAO TEM productiontype".
+				if (item.unitTemplate && porTpl[item.unitTemplate])
 					porTpl[item.unitTemplate].emFila += (item.count || 1);
 		} catch (e) {}
 	}
@@ -4457,7 +4460,8 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 		if (!cmpPQ) continue;
 		const q = cmpPQ.GetQueue();
 		for (const item of q) {
-			if (item.productiontype === "unit") trainingCount += (item.count || 1);
+			// item.productiontype NAO EXISTE — ver "A FILA NAO TEM productiontype" abaixo.
+			if (item.unitTemplate) trainingCount += (item.count || 1);
 		}
 	}
 	const projectedHeadroom = rawHeadroom - trainingCount;
@@ -5772,14 +5776,24 @@ GuiInterface.prototype.pudim_GetObrasEmAndamento = function(player, data)
 		// censo de armazéns já usa (`onSite: new Set(cmpFoundation.GetBuilders())`). Sai de
 		// graça aqui: já estamos dentro do laço das fundações.
 		if (cmpFnd.GetBuilders) {
+			const progObra = cmpFnd.GetBuildProgress ? cmpFnd.GetBuildProgress() : 0;
 			let lista = [];
 			try { lista = cmpFnd.GetBuilders() || []; } catch (e) { lista = []; }
 			for (const b of lista) {
 				let bt = null;
 				try { bt = cmpTM.GetCurrentTemplateName(b); } catch (e) { continue; }
 				if (!bt) continue;
-				if (!porConstrutor[bt]) porConstrutor[bt] = { "quantos": 0, "id": b };
+				if (!porConstrutor[bt]) porConstrutor[bt] = { "quantos": 0, "id": b, "progresso": 0 };
 				porConstrutor[bt].quantos++;
+				// O PROGRESSO DA LINHA É O DA OBRA MAIS ADIANTADA EM QUE ESSE TIPO ESTÁ.
+				//
+				// "mas nesse que apareceu, n mostra o progresso". Construtor não tem
+				// progresso próprio — quem progride é a obra —, mas a linha sem barra não
+				// informava nada. A obra mais adiantada responde "o que essa gente entrega
+				// primeiro?", que é a mesma regra já usada no lote de treino: a mais perto
+				// de terminar, nunca soma nem média (que não corresponderia a obra nenhuma).
+				if (progObra > porConstrutor[bt].progresso)
+					porConstrutor[bt].progresso = progObra;
 				// Menor id de desempate: a lista não pode dançar quando um construtor
 				// termina e outro entra no lugar.
 				if (b < porConstrutor[bt].id) porConstrutor[bt].id = b;
@@ -5810,8 +5824,33 @@ GuiInterface.prototype.pudim_GetObrasEmAndamento = function(player, data)
 	// "quando sai a próxima?". Somar ou tirar média dos lotes daria um número que não
 	// corresponde a nenhuma unidade real.
 	//
-	// GetQueue e os campos unitTemplate/count/progress/productiontype já são usados pela
-	// auto-fila do mod. Nada aqui é novo.
+	// ── A FILA NÃO TEM productiontype ───────────────────────────────────────────────────
+	//
+	// QUARTA API INVENTADA NESTE ARQUIVO. As outras três foram
+	// ProductionQueue.GetEntitiesList, RangeManager.GetMapSize e Identity.GetTemplateName.
+	// Esta eu não inventei — herdei — mas usei de novo sem conferir, que dá no mesmo.
+	//
+	// COMO APARECEU: o indicador de obras nunca mostrava uma linha de treino, com a fila
+	// visivelmente cheia na tela ("olha a construção quando seleciono todos os quartéis e
+	// cc"). E o diagnóstico da proporção, em TODAS as linhas de log de todas as partidas,
+	// dizia `fila0` — mesmo com o centro cívico treinando. Dois sintomas, uma causa: a
+	// condição `item.productiontype === "unit"` nunca era verdadeira.
+	//
+	// O QUE É VERDADE: na Alpha 28 a produção foi partida em ProductionQueue (a fila),
+	// Trainer (lotes de unidade) e Researcher (tecnologia). Conferido no disco, em
+	// moderngui/simulation/components/GuiInterface~moderngui.js: ele percorre
+	// `cmpProductionQueue.queue` e separa os dois casos por `queue.entity` (lote) contra
+	// `queue.technology` (pesquisa) — não há campo `productiontype` em lugar nenhum.
+	//
+	// O que ESTÁ conferido em GetQueue() é `unitTemplate`, e por prova de comportamento: o
+	// log traz "edifício 150 lote degradado x3 trocado por x10 infantry_spearman_b", e essa
+	// troca só acontece lendo `cur.unitTemplate` da fila. Então lote de unidade é o item que
+	// TEM unitTemplate, e pesquisa é o que não tem. É esse o teste agora, aqui e nos outros
+	// três lugares que usavam o campo fantasma.
+	//
+	// A proporção de unidades ganha de brinde a correção de `emFila`: ela contava zero na
+	// fila desde sempre, então repetia o pedido da mesma unidade enquanto a primeira ainda
+	// nem tinha saído.
 	const porUnidade = {};
 	for (const ent of cmpRangeManager.GetEntitiesByPlayer(player)) {
 		const cmpPQ = Engine.QueryInterface(ent, IID_ProductionQueue);
@@ -5819,7 +5858,7 @@ GuiInterface.prototype.pudim_GetObrasEmAndamento = function(player, data)
 		let fila = [];
 		try { fila = cmpPQ.GetQueue() || []; } catch (e) { continue; }
 		for (const item of fila) {
-			if (item.productiontype !== "unit" || !item.unitTemplate) continue;
+			if (!item.unitTemplate) continue;
 			const t = item.unitTemplate;
 			if (!porUnidade[t]) porUnidade[t] = { "quantos": 0, "progresso": 0, "id": ent };
 			porUnidade[t].quantos += (item.count || 1);
@@ -7021,7 +7060,10 @@ GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 		if (!cmpPQ) continue;
 		// Pular se já há pesquisa ativa neste edifício
 		const queue = cmpPQ.GetQueue();
-		const hasActiveResearch = queue && queue.some(function(q) { return q.productiontype === "technology"; });
+		// Pesquisa é o que NÃO é lote de unidade. Testar pelo campo conferido (unitTemplate)
+		// em vez de inventar o nome do campo de tecnologia — foi inventando nome de campo
+		// que este arquivo chegou aqui.
+		const hasActiveResearch = queue && queue.some(function(q) { return !q.unitTemplate; });
 		if (hasActiveResearch) continue;
 
 		// IID_Researcher expõe GetTechnologiesList() — lista de techs disponíveis no building

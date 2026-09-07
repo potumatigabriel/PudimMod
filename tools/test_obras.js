@@ -63,8 +63,27 @@ check("a ordem é estável: progresso e, no empate, o id",
 
 // ── Unidades em treinamento ────────────────────────────────────────────────────────────
 // "só mostra construções, tem que mostrar as unidades tambem".
+// LOTE DE UNIDADE É O ITEM QUE TEM unitTemplate — não existe `productiontype`.
+//
+// Quarta API inventada neste arquivo (as outras: ProductionQueue.GetEntitiesList,
+// RangeManager.GetMapSize, Identity.GetTemplateName). Esta eu herdei, e usei de novo sem
+// conferir. Dois sintomas, uma causa: o indicador nunca mostrava linha de treino com a fila
+// cheia na tela, e o log da proporção dizia `fila0` em TODAS as linhas de TODAS as partidas.
+//
+// Conferido no disco: moderngui/simulation/components/GuiInterface~moderngui.js percorre
+// `cmpProductionQueue.queue` e separa lote (`queue.entity`) de pesquisa (`queue.technology`)
+// — não há `productiontype` em lugar nenhum.
 check("a fila de produção também vira linha",
-	/if \(item\.productiontype !== "unit" \|\| !item\.unitTemplate\) continue;/.test(execS));
+	/if \(!item\.unitTemplate\) continue;/.test(execS));
+check("e o campo fantasma sumiu do código executável",
+	!/productiontype/.test(execS),
+	(execS.match(/[^\s]*productiontype[^\s]*/g) || []).join(", "));
+// Pesquisa é o que NÃO tem unitTemplate: testar pelo campo conferido em vez de inventar o
+// nome do campo de tecnologia, que seria repetir o erro.
+check("pesquisa é detectada pela ausência de unitTemplate, sem inventar outro nome",
+	/queue\.some\(function\(q\) \{ return !q\.unitTemplate; \}\)/.test(execS));
+check("a procedência da correção fica no código",
+	/GuiInterface~moderngui\.js/.test(sim) && /QUARTA API INVENTADA/.test(sim));
 // Agregado por TIPO: seis quartéis fazendo lanceiro são uma linha "×18", não seis iguais.
 check("agregado por tipo de unidade, não por edifício",
 	/porUnidade\[t\]\.quantos \+= \(item\.count \|\| 1\);/.test(execS));
@@ -167,6 +186,15 @@ check("o indicador é atualizado ANTES da trava de espectador",
 const iBarra = execP.indexOf("pudim_UpdateAllyBar();");
 check("a barra de aliados também, como sempre esteve",
 	iBarra > 0 && iBarra < iTrava);
+// 06/09, assistindo: "o estimador de batalha nao ta funcionando", e a Proporção de Unidades
+// dizendo "Nada para treinar ainda" com a base inteira produzindo. Os dois só leem e
+// desenham, e estavam abaixo do return.
+const iComb = execP.indexOf("pudim_RefreshCombat();", iBarra);
+check("o estimador de combate também é atualizado antes da trava",
+	iComb > 0 && iComb < iTrava, "estimador em " + iComb + ", trava em " + iTrava);
+const iUni = execP.indexOf("pudim_AtualizarUnidades(); } catch(e) {}");
+check("e a lista da proporção de unidades também",
+	iUni > 0 && iUni < iTrava, "lista em " + iUni + ", trava em " + iTrava);
 check("e a razão está escrita, para ninguém 'arrumar' movendo de volta",
 	/leitura em cima, comando embaixo/.test(panel));
 check("some quando não há obra, como o indicador de pesquisa do jogo",

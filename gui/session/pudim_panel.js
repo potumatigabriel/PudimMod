@@ -1984,6 +1984,24 @@ function pudim_Tick(dt)
 		try { pudim_AtualizarObras(); } catch (e) {}
 	}
 
+	// Estimativa de combate: a cada 3 segundos (apenas quando painel aberto).
+	// So le e desenha — "o estimador de batalha nao ta funcionando", assistindo. Estava
+	// abaixo do return e nunca rodava para quem assiste, com uma briga acontecendo na tela.
+	if (g_PudimPanelOpen && g_PudimCombatAccum >= PUDIM_COMBAT_INTERVAL)
+	{
+		g_PudimCombatAccum = 0;
+		pudim_RefreshCombat();
+	}
+
+	// Lista da Proporcao de Unidades: idem, so le e desenha. Assistindo, ela dizia "Nada
+	// para treinar ainda" com a base inteira produzindo.
+	g_PudimUnitAccum += dt;
+	if (g_PudimUnitAccum >= 1500)
+	{
+		g_PudimUnitAccum = 0;
+		try { pudim_AtualizarUnidades(); } catch(e) {}
+	}
+
 	// Não enviar comandos de rede se for espectador (causaria OOS)
 	if (typeof g_IsObserver !== "undefined" && g_IsObserver) return;
 
@@ -2039,13 +2057,6 @@ function pudim_Tick(dt)
 		pudim_RunAutoWork();
 	}
 
-	// Estimativa de combate: a cada 3 segundos (apenas quando painel aberto)
-	if (g_PudimPanelOpen && g_PudimCombatAccum >= PUDIM_COMBAT_INTERVAL)
-	{
-		g_PudimCombatAccum = 0;
-		pudim_RefreshCombat();
-	}
-
 	// Repetir Construção: a cada 1 segundo (sempre rodando em background se houver repeats ativos)
 	if (g_PudimRepeatAccum >= 1000)
 	{
@@ -2088,13 +2099,6 @@ function pudim_Tick(dt)
 	// nasce e, principalmente, cada uma que MORRE em batalha altera a proporcao real.
 	// Decidir o que treinar com contagem de 4s atras significa, no meio de uma briga,
 	// insistir em reforcar o tipo que acabou de ser dizimado ja estar coberto.
-	g_PudimUnitAccum += dt;
-	if (g_PudimUnitAccum >= 1500)
-	{
-		g_PudimUnitAccum = 0;
-		try { pudim_AtualizarUnidades(); } catch(e) {}
-	}
-
 	// Série de quartéis/estábulos: a cada 1s; o freio real é PUDIM_QUARTEL_INTERVALO.
 	g_PudimQuartelAccum += dt;
 	if (g_PudimQuartelAccum >= 1000)
@@ -5180,13 +5184,24 @@ function pudim_AtualizarObras()
 		sz.bottom = (i + 1) * PUDIM_OBRAS_ALTURA;
 		row.size = sz;
 
+		// NOME GENÉRICO, NÃO O ESPECÍFICO.
+		//
+		// "ta estranho, será q n vai pra aldeao?" — a linha dizia "Qeşet", e ele não tinha
+		// como saber que era o arqueiro. O nome ESPECÍFICO é o da civilização ("Qeşet",
+		// "Aḥuzāh", "Merkāz"); o GENÉRICO é o traduzido e comum a todas ("Arqueiro",
+		// "Celeiro", "Centro Cívico"). Num indicador de canto, que se lê de relance e sem
+		// clicar, o nome exótico não informa nada — obriga a decorar o glossário da civ.
+		//
+		// O retrato ao lado já distingue as variantes, então o genérico basta. É a mesma
+		// escolha da Proporção de Unidades, que só acrescenta o específico quando dois
+		// genéricos colidem.
 		let nome = o.tpl.slice(o.tpl.lastIndexOf("/") + 1);
 		let icone = null;
 		try {
 			const td = GetTemplateData(o.tpl);
 			if (td) {
-				if (td.name && td.name.specific) nome = td.name.specific;
-				else if (td.name && td.name.generic) nome = td.name.generic;
+				if (td.name && td.name.generic) nome = td.name.generic;
+				else if (td.name && td.name.specific) nome = td.name.specific;
 				if (td.icon) icone = td.icon;
 			}
 		} catch (e) {}

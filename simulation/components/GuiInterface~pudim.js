@@ -3424,8 +3424,26 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
     let cmpPlayerManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_PlayerManager);
     let cmpPlayer = QueryPlayerIDInterface(player, IID_Player);
-    if (!cmpPlayerManager || !cmpPlayer) return [];
-    
+    if (!cmpPlayerManager) return [];
+
+    // ── OBSERVADOR VÊ TODO MUNDO ────────────────────────────────────────────────────────
+    //
+    // Pedido de 06/09: "tambem quando sou observador, mostrar os status de todos os
+    // jogadores, separados por equipe".
+    //
+    // Sem jogador (assistindo sem seguir ninguém) esta função devolvia lista VAZIA e a barra
+    // sumia — era o `if (!cmpPlayer) return []` de antes. Agora a falta de jogador é o que
+    // LIGA o modo observador, em vez de desligar tudo.
+    //
+    // Só a falta de jogador NÃO basta. O jogo deixa quem assiste SEGUIR um jogador, e aí a
+    // chamada chega com o id dele: cmpPlayer existe, e a barra mostraria os aliados daquele
+    // jogador em vez de todo mundo — o pedido não seria atendido justamente enquanto se
+    // acompanha alguém, que é o uso normal de quem assiste. Por isso o painel também DIZ que
+    // está observando (args.todos), e quem manda é ele: g_IsObserver é a verdade do cliente.
+    //
+    // O caminho de quem está jogando não muda em nada: continua saindo por IsMutualAlly.
+    const observando = !cmpPlayer || !!(args && args.todos);
+
     const cmpRangeManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_RangeManager);
     let allies = [];
     let cmpDiplomacy = QueryPlayerIDInterface(player, IID_Diplomacy);
@@ -3437,7 +3455,16 @@ GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
     // apenas consulta o mapa. O resultado é o mesmo com uma fração do custo.
     const attackedByOwner = {};
     {
-        const globalEnemies = cmpDiplomacy ? (cmpDiplomacy.GetEnemies() || []) : [];
+        // Observando, não há "meus inimigos": qualquer ataque de qualquer um interessa, então
+        // a varredura passa por todos os jogadores. O mapa é montado por dono do ALVO, então
+        // o resto da conta continua igual — só a fonte da lista muda.
+        let globalEnemies;
+        if (observando) {
+            globalEnemies = [];
+            for (let p = 1; p < cmpPlayerManager.GetNumPlayers(); ++p) globalEnemies.push(p);
+        } else {
+            globalEnemies = cmpDiplomacy ? (cmpDiplomacy.GetEnemies() || []) : [];
+        }
         for (const ep of globalEnemies) {
             const eEnts = cmpRangeManager.GetEntitiesByPlayer(ep) || [];
             for (const eE of eEnts) {
@@ -3464,9 +3491,23 @@ GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
 
     for (let i = 1; i < cmpPlayerManager.GetNumPlayers(); ++i) {
         let cmpAlly = QueryPlayerIDInterface(i, IID_Player);
-        if (cmpAlly && cmpDiplomacy && (cmpDiplomacy.IsMutualAlly(i) || i === player)) {
+        const entra = observando
+            ? !!cmpAlly
+            : !!(cmpAlly && cmpDiplomacy && (cmpDiplomacy.IsMutualAlly(i) || i === player));
+        if (entra) {
+            // A EQUIPE VEM DE IID_Diplomacy, NAO DE IID_Player.
+            //
+            // Na Alpha 28 a diplomacia saiu do componente Player — o mod ja sabia disso no
+            // sistema de panico ("Diplomacia vem de IID_Diplomacy"). GetTeam ali esta
+            // conferido no disco: autociv e moderngui usam
+            // QueryPlayerIDInterface(player, IID_Diplomacy).GetTeam().
+            //
+            // -1 e o que o motor usa para "sem equipe" (cada um por si). Vai como esta para
+            // o painel decidir como mostrar; inventar um numero aqui esconderia o caso.
+            const cmpDipAlly = QueryPlayerIDInterface(i, IID_Diplomacy);
             let stats = {
                 "id": i,
+                "team": (cmpDipAlly && cmpDipAlly.GetTeam) ? cmpDipAlly.GetTeam() : -1,
                 // Cor do jogador (componentes 0..1). Sem isto o cliente cai no branco
                 // e todos os nomes da barra ficam iguais.
                 "color": cmpAlly.GetColor ? cmpAlly.GetColor() : null,

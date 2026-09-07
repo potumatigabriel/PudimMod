@@ -11,6 +11,9 @@ var g_PudimAllyFlashType = {};
 const PUDIM_PHASE_LABELS = { 1: "I", 2: "II", 3: "III", 4: "IV" };
 const PUDIM_PHASE_COLORS = { 1: "200 200 100", 2: "100 200 140", 3: "80 150 240", 4: "200 100 240" };
 const PUDIM_MAX_ROWS = 9;
+// Respiro entre blocos de equipe, no modo observador. 8 px chega para o olho separar sem
+// empurrar a barra para fora da tela: 8 jogadores em 4 equipes gastam 3 respiros = 24 px.
+const PUDIM_GAP_EQUIPE = 8;
 
 /**
  * Cor do jogador (componentes 0..1) clareada para leitura sobre fundo escuro.
@@ -108,8 +111,15 @@ function pudim_UpdateAllyBar() {
     if (now - g_PudimAllyBarLastUpdate < 1000) return;
     g_PudimAllyBarLastUpdate = now;
 
+    // Quem sabe que está assistindo é o CLIENTE, não a simulação: observador seguindo um
+    // jogador chega lá com o id dele, e a simulação não teria como distinguir isso de quem
+    // está jogando de verdade. Ver o bloco "OBSERVADOR VÊ TODO MUNDO" em
+    // GuiInterface~pudim.js.
+    const observando = (typeof g_IsObserver !== "undefined") && !!g_IsObserver;
+
     let allies;
-    try { allies = Engine.GuiInterfaceCall("pudim_GetAllyStats"); } catch(e) { return; }
+    try { allies = Engine.GuiInterfaceCall("pudim_GetAllyStats", { "todos": observando }); }
+    catch(e) { return; }
     const container = Engine.TryGetGUIObjectByName("pudimAllyBar");
 
     if (!allies || allies.length === 0) {
@@ -119,16 +129,36 @@ function pudim_UpdateAllyBar() {
 
     if (container) container.hidden = false;
 
-    // Maior população primeiro: quem está crescendo mais aparece no topo, que é a
-    // comparação que interessa de relance. Reordenar é seguro por construção — todo o
-    // estado de pisca-pisca é indexado por ID de jogador, nunca por número da linha.
+    // ── OBSERVANDO: TODO MUNDO, AGRUPADO POR EQUIPE ─────────────────────────────────────
+    //
+    // Pedido de 06/09: "quando sou observador, mostrar os status de todos os jogadores,
+    // separados por equipe".
+    //
+    // g_IsObserver é a global do jogo — a mesma que autociv, moderngui e localratings usam,
+    // conferida no disco. Não é um estado que o mod precise inventar nem manter.
+    //
+    // Jogando, a ordem continua a de sempre: maior população no topo, que é a comparação
+    // que interessa de relance entre aliados. (`observando` já foi lido lá em cima, na
+    // chamada da simulação — uma leitura só por ciclo.)
+
+    // -1 é "sem equipe" (cada um por si) e vai para o fim: são os avulsos, e deixá-los no
+    // meio quebraria a leitura dos blocos.
+    const ordemEquipe = t => (t === undefined || t === null || t < 0) ? 9999 : t;
+
     allies.sort(function(a, b) {
+        if (observando) {
+            const ta = ordemEquipe(a && a.team), tb = ordemEquipe(b && b.team);
+            if (ta !== tb) return ta - tb;
+        }
         const pa = (a && a.popCount) || 0, pb = (b && b.popCount) || 0;
         if (pb !== pa) return pb - pa;
         return ((a && a.id) || 0) - ((b && b.id) || 0); // empate: ordem estável por ID
     });
 
     pudim_AutoFlareCombat(now, allies);
+
+    // Deslocamento acumulado pelos respiros entre equipes (ver abaixo).
+    let desloc = 0;
 
     for (let i = 0; i < PUDIM_MAX_ROWS; ++i) {
         const row = Engine.TryGetGUIObjectByName("pudimAllyRow[" + i + "]");
@@ -143,9 +173,15 @@ function pudim_UpdateAllyBar() {
         const d = allies[i];
         const pid = d.id;
 
+        // Observando, um respiro entre equipes. É o que faz o olho ler BLOCOS em vez de uma
+        // lista corrida — sem isso, "separados por equipe" vira só uma ordenação, que ninguém
+        // enxerga. O deslocamento acumula, então cada bloco desce junto.
+        if (observando && i > 0 && ordemEquipe(d.team) !== ordemEquipe(allies[i - 1].team))
+            desloc += PUDIM_GAP_EQUIPE;
+
         const sz = row.size;
-        sz.top = i * 26;
-        sz.bottom = (i + 1) * 26;
+        sz.top = i * 26 + desloc;
+        sz.bottom = (i + 1) * 26 + desloc;
         row.size = sz;
 
         // Flash state keyed by player ID
@@ -185,7 +221,12 @@ function pudim_UpdateAllyBar() {
         // P1 é 10,10,190) que somem no fundo preto do painel. Clarear garante contraste.
         let colorStr = pudim_LightenPlayerColor(cColor) + " 255";
 
-        const prefix = d.isSelf ? "★" : " ";
+        // Observando, a equipe entra no rótulo. O respiro separa os blocos, mas quem chega
+        // no meio da partida precisa saber QUAL bloco é qual sem contar linhas.
+        // "-" para quem está sem equipe, que é o -1 do motor.
+        const prefix = observando
+            ? "[" + (ordemEquipe(d.team) === 9999 ? "-" : (d.team + 1)) + "] "
+            : (d.isSelf ? "★" : " ");
         let nick = (g_Players && g_Players[pid] && g_Players[pid].name) ? g_Players[pid].name : ("P" + pid);
         nick = nick.replace(/\s*\(\d+\)\s*$/, "").trim();
         if (nick.length > 16) nick = nick.slice(0, 15) + "~";

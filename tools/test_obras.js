@@ -95,6 +95,56 @@ check("construção vem antes de treinamento, mesmo com progresso menor",
 	ordenar([{ tipo: "treino", id: 5, progresso: 0.99 }, { tipo: "obra", id: 9, progresso: 0.01 }])
 		.join() === "o9,t5");
 
+// ── Quem está construindo, agrupado por tipo ───────────────────────────────────────────
+// "quero que mostre todas as unidades contruindo agrupadas por tipo".
+//
+// A linha da obra diz QUANTOS; esta diz QUEM. São perguntas diferentes: "o quartel tem 5"
+// não conta se são aldeãs ou lanceiros, e é isso que decide se a economia está pagando a
+// obra ou se o exército parou para construir.
+check("os construtores da fundação viram linhas, agrupados por tipo",
+	/lista = cmpFnd\.GetBuilders\(\) \|\| \[\];/.test(execS) &&
+	/porConstrutor\[bt\]\.quantos\+\+;/.test(execS));
+check("usa GetBuilders, a mesma chamada que o censo de armazéns já fazia",
+	/cmpFnd\.GetBuilders/.test(execS));
+check("com id de desempate estável quando um construtor troca pelo outro",
+	/if \(b < porConstrutor\[bt\]\.id\) porConstrutor\[bt\]\.id = b;/.test(execS));
+// Construtor não progride — quem progride é a obra.
+check("construtor não inventa progresso",
+	/"tipo": "construtor",[\s\S]{0,200}"progresso": 0/.test(execS));
+check("e o painel não escreve 0% nele",
+	/lbl\.caption = o\.tipo === "construtor"\s*\n\s*\? nome\s*\n\s*: nome \+ "  " \+ Math\.round/.test(execP));
+check("nem desenha a barra vazia, que sugeriria progresso parado em zero",
+	/if \(barBg\) barBg\.hidden = o\.tipo === "construtor";/.test(execP) &&
+	/if \(bar\) bar\.hidden = o\.tipo === "construtor";/.test(execP));
+
+check("a ordem dos grupos é obra, construtor, treino",
+	/const ordemTipo = \{ "obra": 0, "construtor": 1, "treino": 2 \};/.test(execS));
+check("e entre construtores vence o tipo mais numeroso",
+	/if \(a\.tipo === "construtor" && a\.quantos !== b\.quantos\) return b\.quantos - a\.quantos;/.test(execS));
+
+function ordenar3(obras) {
+	const ordemTipo = { "obra": 0, "construtor": 1, "treino": 2 };
+	return obras.slice().sort(function(a, b) {
+		if (a.tipo !== b.tipo) return ordemTipo[a.tipo] - ordemTipo[b.tipo];
+		if (a.tipo === "construtor" && a.quantos !== b.quantos) return b.quantos - a.quantos;
+		if (a.progresso !== b.progresso) return b.progresso - a.progresso;
+		return a.id - b.id;
+	}).map(o => o.tipo[0] + (o.quantos || 0));
+}
+const CENA = [
+	{ tipo: "treino", id: 1, progresso: 0.5, quantos: 3 },
+	{ tipo: "construtor", id: 2, progresso: 0, quantos: 2 },
+	{ tipo: "obra", id: 3, progresso: 0.55, quantos: 4 },
+	{ tipo: "construtor", id: 4, progresso: 0, quantos: 7 }
+];
+check("os três grupos saem na ordem certa, com o construtor maior na frente",
+	ordenar3(CENA).join() === "o4,c7,c2,t3", ordenar3(CENA).join());
+
+// Três grupos precisam caber: com poucas linhas o último nunca aparece. (O número de linhas
+// é lido mais abaixo, na seção da tela — aqui basta a regra de que são três grupos.)
+check("são três grupos, e a ordem entre eles é fixa",
+	/const ordemTipo = \{ "obra": 0, "construtor": 1, "treino": 2 \};/.test(execS));
+
 // ── O painel ───────────────────────────────────────────────────────────────────────────
 check("o painel chama a simulação",
 	/Engine\.GuiInterfaceCall\("pudim_GetObrasEmAndamento", \{\}\)/.test(execP));
@@ -128,9 +178,10 @@ check("template sem ícone não vira sprite quebrado",
 	/icone \? "stretched:session\/portraits\/" \+ icone : "color: 0 0 0 0"/.test(execP));
 check("o selo mostra o número: construtores na obra, ou unidades na fila",
 	/selo\.caption = String\(o\.quantos\);/.test(execP));
-// O mesmo "8" queria dizer duas coisas na mesma coluna. A cor separa.
-check("e a cor do selo diz o que o número significa",
-	/seloBg\.sprite = o\.tipo === "treino"\s*\n\s*\? "color: 40 80 140 230" : "color: 40 120 50 230";/.test(execP));
+// O mesmo "4" quer dizer três coisas diferentes na mesma coluna — construtores na obra,
+// unidades daquele tipo construindo, unidades na fila. A cor é o que separa.
+check("e a cor do selo diz o que o número significa, nos três casos",
+	/seloBg\.sprite = o\.tipo === "treino" \? "color: 40 80 140 230"\s*\n\s*: \(o\.tipo === "construtor" \? "color: 70 90 110 230" : "color: 40 120 50 230"\);/.test(execP));
 check("as linhas empilham lendo o size e devolvendo, como a barra de aliados",
 	/const sz = row\.size;\s*\n\s*sz\.top = i \* PUDIM_OBRAS_ALTURA;/.test(execP) &&
 	/row\.size = sz;/.test(execP));
@@ -168,6 +219,10 @@ const mRepeat = /<repeat count="(\d+)" var="n">/.exec(xml);
 check("o XML repete tantas linhas quantas o JS percorre",
 	mRepeat && +mRepeat[1] === LINHAS,
 	mRepeat ? (mRepeat[1] + " no XML vs " + LINHAS + " no JS") : "sem repeat");
+// São três grupos disputando as linhas (obra, construtor, treino). Com poucas, o último
+// nunca aparece — foi o defeito relatado duas vezes.
+check("e há linhas bastantes para os três grupos caberem",
+	LINHAS >= 6, LINHAS + " linhas para 3 grupos");
 check("o painel nasce escondido", /name="pudimObras"[^>]*hidden="true"/.test(xml));
 // ghost: o indicador não pode roubar clique do jogo por baixo dele.
 check("e é ghost, para não roubar clique do jogo",

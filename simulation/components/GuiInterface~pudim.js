@@ -5734,6 +5734,9 @@ GuiInterface.prototype.pudim_GetObrasEmAndamento = function(player, data)
 	const cmpTM = Engine.QueryInterface(SYSTEM_ENTITY, IID_TemplateManager);
 	if (!cmpRangeManager || !cmpTM) return result;
 
+	// tpl da unidade -> quantas dela estão construindo agora (ver o bloco no laço abaixo)
+	const porConstrutor = {};
+
 	for (const ent of cmpRangeManager.GetEntitiesByPlayer(player)) {
 		const cmpFnd = Engine.QueryInterface(ent, IID_Foundation);
 		if (!cmpFnd) continue;
@@ -5756,7 +5759,44 @@ GuiInterface.prototype.pudim_GetObrasEmAndamento = function(player, data)
 			"quantos": construtores,
 			"progresso": cmpFnd.GetBuildProgress ? cmpFnd.GetBuildProgress() : 0
 		});
+
+		// ── QUEM ESTÁ CONSTRUINDO, AGRUPADO POR TIPO ────────────────────────────────────
+		//
+		// "quero que mostre todas as unidades contruindo agrupadas por tipo".
+		//
+		// A linha da obra já diz QUANTOS estão nela; esta diz QUEM. São perguntas
+		// diferentes: "o quartel tem 5" não conta se são aldeãs ou lanceiros, e é isso que
+		// decide se a economia está pagando a obra ou se o exército parou para construir.
+		//
+		// GetBuilders devolve as entidades em cima da fundação — a mesma chamada que o
+		// censo de armazéns já usa (`onSite: new Set(cmpFoundation.GetBuilders())`). Sai de
+		// graça aqui: já estamos dentro do laço das fundações.
+		if (cmpFnd.GetBuilders) {
+			let lista = [];
+			try { lista = cmpFnd.GetBuilders() || []; } catch (e) { lista = []; }
+			for (const b of lista) {
+				let bt = null;
+				try { bt = cmpTM.GetCurrentTemplateName(b); } catch (e) { continue; }
+				if (!bt) continue;
+				if (!porConstrutor[bt]) porConstrutor[bt] = { "quantos": 0, "id": b };
+				porConstrutor[bt].quantos++;
+				// Menor id de desempate: a lista não pode dançar quando um construtor
+				// termina e outro entra no lugar.
+				if (b < porConstrutor[bt].id) porConstrutor[bt].id = b;
+			}
+		}
 	}
+
+	for (const t in porConstrutor)
+		result.obras.push({
+			"tipo": "construtor",
+			"id": porConstrutor[t].id,
+			"tpl": t,
+			"quantos": porConstrutor[t].quantos,
+			// Construtor não tem progresso próprio — quem progride é a obra. A barra fica
+			// vazia de propósito; inventar um número aqui seria mentir sobre o que ela mede.
+			"progresso": 0
+		});
 
 	// ── UNIDADES EM TREINAMENTO ──────────────────────────────────────────────────────────
 	//
@@ -5799,12 +5839,16 @@ GuiInterface.prototype.pudim_GetObrasEmAndamento = function(player, data)
 			"progresso": porUnidade[t].progresso
 		});
 
-	// Construção antes de treino: uma obra parada custa mais caro que uma fila lenta, e é a
-	// que o jogador precisa ver primeiro. Dentro de cada grupo, a mais adiantada em cima —
-	// é a que termina antes. Desempate pelo id, para a lista não dançar entre duas iguais,
-	// o mesmo cuidado da lista de unidades e da lista de séries.
+	// A ordem dos grupos: o que está sendo erguido, quem está erguendo, e por último o que
+	// está sendo treinado. Obra parada custa mais caro que fila lenta, e quem constrói é a
+	// resposta imediata para "por que está parada". Dentro de cada grupo, a mais adiantada
+	// em cima — é a que termina antes; entre construtores, o tipo mais numeroso.
+	// Desempate pelo id, para a lista não dançar entre duas iguais: o mesmo cuidado da lista
+	// de unidades e da lista de séries.
+	const ordemTipo = { "obra": 0, "construtor": 1, "treino": 2 };
 	result.obras.sort(function(a, b) {
-		if (a.tipo !== b.tipo) return a.tipo === "obra" ? -1 : 1;
+		if (a.tipo !== b.tipo) return ordemTipo[a.tipo] - ordemTipo[b.tipo];
+		if (a.tipo === "construtor" && a.quantos !== b.quantos) return b.quantos - a.quantos;
 		if (a.progresso !== b.progresso) return b.progresso - a.progresso;
 		return a.id - b.id;
 	});

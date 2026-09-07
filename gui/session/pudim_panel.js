@@ -5142,9 +5142,10 @@ function pudim_UnitWeightDelta(linha, delta)
 //
 // Só entra fundação COM construtor em cima: fundação parada não é obra em andamento, e
 // mostrá-la faria o indicador mentir sobre onde está a mão de obra.
-// Seis linhas: obras E treinamento cabem juntos. Com 4 uma base cheia só mostrava as
-// construções e o treino nunca aparecia — que era o defeito relatado ao contrário.
-const PUDIM_OBRAS_LINHAS = 6;
+// Oito linhas: são TRÊS grupos disputando espaço — o que está sendo erguido, quem está
+// erguendo, e o que está sendo treinado. Com poucas linhas o último grupo nunca aparece,
+// que foi exatamente o defeito relatado duas vezes.
+const PUDIM_OBRAS_LINHAS = 8;
 const PUDIM_OBRAS_INTERVAL = 1000;
 const PUDIM_OBRAS_ALTURA = 40;
 // As duas pontas da barra de progresso, em pixel. Têm de bater com o size do
@@ -5194,7 +5195,11 @@ function pudim_AtualizarObras()
 		if (ic) ic.sprite = icone ? "stretched:session/portraits/" + icone : "color: 0 0 0 0";
 
 		const lbl = Engine.TryGetGUIObjectByName("pudimObrasNome[" + i + "]");
-		if (lbl) lbl.caption = nome + "  " + Math.round((o.progresso || 0) * 100) + "%";
+		// Construtor não tem progresso próprio — quem progride é a obra. Mostrar "0%" nele
+		// seria dizer que a unidade não fez nada, que é falso e confunde.
+		if (lbl) lbl.caption = o.tipo === "construtor"
+			? nome
+			: nome + "  " + Math.round((o.progresso || 0) * 100) + "%";
 
 		// O número que o jogador pediu ver: construtores na obra, ou unidades na fila.
 		const selo = Engine.TryGetGUIObjectByName("pudimObrasSeloTxt[" + i + "]");
@@ -5202,14 +5207,19 @@ function pudim_AtualizarObras()
 		// A COR DIZ O QUE O NÚMERO SIGNIFICA. Verde: gente construindo. Azul: unidades na
 		// fila. Sem isso o mesmo "8" queria dizer duas coisas diferentes na mesma coluna.
 		const seloBg = Engine.TryGetGUIObjectByName("pudimObrasSelo[" + i + "]");
-		if (seloBg) seloBg.sprite = o.tipo === "treino"
-			? "color: 40 80 140 230" : "color: 40 120 50 230";
+		// Verde: obra em pe. Cinza-azulado: quem esta erguendo. Azul: fila de treino.
+		if (seloBg) seloBg.sprite = o.tipo === "treino" ? "color: 40 80 140 230"
+			: (o.tipo === "construtor" ? "color: 70 90 110 230" : "color: 40 120 50 230");
 
 		// Barra: a esquerda fica parada e só a direita anda, senão ela desliza em vez de
 		// crescer. Os dois números são os MESMOS do XML — ver o comentário lá sobre por que
 		// isto é em pixel e não em porcentagem.
 		const bar = Engine.TryGetGUIObjectByName("pudimObrasBar[" + i + "]");
-		if (bar) {
+		const barBg = Engine.TryGetGUIObjectByName("pudimObrasBarBg[" + i + "]");
+		// Sem obra, sem barra: o trilho vazio sugeriria progresso parado em zero.
+		if (barBg) barBg.hidden = o.tipo === "construtor";
+		if (bar) bar.hidden = o.tipo === "construtor";
+		if (bar && o.tipo !== "construtor") {
 			const frac = Math.max(0, Math.min(1, o.progresso || 0));
 			const b = bar.size;
 			b.left = PUDIM_OBRAS_BAR_X1;

@@ -18,8 +18,8 @@
   z=200: o mesmo do painel do explorador (04_pudim_scout_panel.xml). Acima do chat (z=0) e
   da barra de aliados (z=-1).
 -->
-<object name="pudimObras" hidden="true" absolute="true" size="100%-232 170 100%-8 410" z="200" ghost="true">
-  <repeat count="6" var="n">
+<object name="pudimObras" hidden="true" absolute="true" size="100%-232 170 100%-8 490" z="200" ghost="true">
+  <repeat count="8" var="n">
     <object name="pudimObrasRow[n]" hidden="true" size="0 0 100% 40" type="image" sprite="color: 0 0 0 150" ghost="true">
       <object name="pudimObrasIcon[n]" type="image" ghost="true" size="2 2 38 38"/>
       <object name="pudimObrasNome[n]" type="text" ghost="true" size="44 2 178 22"

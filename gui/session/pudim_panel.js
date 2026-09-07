@@ -5142,7 +5142,9 @@ function pudim_UnitWeightDelta(linha, delta)
 //
 // Só entra fundação COM construtor em cima: fundação parada não é obra em andamento, e
 // mostrá-la faria o indicador mentir sobre onde está a mão de obra.
-const PUDIM_OBRAS_LINHAS = 4;
+// Seis linhas: obras E treinamento cabem juntos. Com 4 uma base cheia só mostrava as
+// construções e o treino nunca aparecia — que era o defeito relatado ao contrário.
+const PUDIM_OBRAS_LINHAS = 6;
 const PUDIM_OBRAS_INTERVAL = 1000;
 const PUDIM_OBRAS_ALTURA = 40;
 // As duas pontas da barra de progresso, em pixel. Têm de bater com o size do
@@ -5194,9 +5196,14 @@ function pudim_AtualizarObras()
 		const lbl = Engine.TryGetGUIObjectByName("pudimObrasNome[" + i + "]");
 		if (lbl) lbl.caption = nome + "  " + Math.round((o.progresso || 0) * 100) + "%";
 
-		// O número que o jogador pediu ver: quantas unidades estão naquela obra.
+		// O número que o jogador pediu ver: construtores na obra, ou unidades na fila.
 		const selo = Engine.TryGetGUIObjectByName("pudimObrasSeloTxt[" + i + "]");
-		if (selo) selo.caption = String(o.construtores);
+		if (selo) selo.caption = String(o.quantos);
+		// A COR DIZ O QUE O NÚMERO SIGNIFICA. Verde: gente construindo. Azul: unidades na
+		// fila. Sem isso o mesmo "8" queria dizer duas coisas diferentes na mesma coluna.
+		const seloBg = Engine.TryGetGUIObjectByName("pudimObrasSelo[" + i + "]");
+		if (seloBg) seloBg.sprite = o.tipo === "treino"
+			? "color: 40 80 140 230" : "color: 40 120 50 230";
 
 		// Barra: a esquerda fica parada e só a direita anda, senão ela desliza em vez de
 		// crescer. Os dois números são os MESMOS do XML — ver o comentário lá sobre por que

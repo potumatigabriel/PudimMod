@@ -61,17 +61,39 @@ check("usa GetNumBuilders e GetBuildProgress, que o mod já usava",
 check("a ordem é estável: progresso e, no empate, o id",
 	/if \(a\.progresso !== b\.progresso\) return b\.progresso - a\.progresso;\s*\n\s*return a\.id - b\.id;/.test(execS));
 
-// A ordenação, espelhada: a mais adiantada em cima, e sem dançar no empate.
+// ── Unidades em treinamento ────────────────────────────────────────────────────────────
+// "só mostra construções, tem que mostrar as unidades tambem".
+check("a fila de produção também vira linha",
+	/if \(item\.productiontype !== "unit" \|\| !item\.unitTemplate\) continue;/.test(execS));
+// Agregado por TIPO: seis quartéis fazendo lanceiro são uma linha "×18", não seis iguais.
+check("agregado por tipo de unidade, não por edifício",
+	/porUnidade\[t\]\.quantos \+= \(item\.count \|\| 1\);/.test(execS));
+check("o progresso é o do lote mais adiantado — é o que diz quando sai a próxima",
+	/if \(p > porUnidade\[t\]\.progresso\) porUnidade\[t\]\.progresso = p;/.test(execS));
+// Somar ou tirar média dos lotes daria um número que não corresponde a unidade nenhuma.
+check("e NÃO é soma nem média dos lotes",
+	!/porUnidade\[t\]\.progresso \+=/.test(execS));
+check("o id de desempate é estável quando um edifício termina e outro assume",
+	/if \(ent < porUnidade\[t\]\.id\) porUnidade\[t\]\.id = ent;/.test(execS));
+
+// A ordenação, espelhada: obra antes de treino, a mais adiantada em cima, sem dançar.
 function ordenar(obras) {
 	return obras.slice().sort(function(a, b) {
+		if (a.tipo !== b.tipo) return a.tipo === "obra" ? -1 : 1;
 		if (a.progresso !== b.progresso) return b.progresso - a.progresso;
 		return a.id - b.id;
-	}).map(o => o.id);
+	}).map(o => o.tipo[0] + o.id);
 }
 check("a mais adiantada vem primeiro",
-	ordenar([{ id: 1, progresso: 0.2 }, { id: 2, progresso: 0.9 }]).join() === "2,1");
+	ordenar([{ tipo: "obra", id: 1, progresso: 0.2 }, { tipo: "obra", id: 2, progresso: 0.9 }])
+		.join() === "o2,o1");
 check("e duas no mesmo progresso não trocam de lugar entre ciclos",
-	ordenar([{ id: 7, progresso: 0.5 }, { id: 3, progresso: 0.5 }]).join() === "3,7");
+	ordenar([{ tipo: "obra", id: 7, progresso: 0.5 }, { tipo: "obra", id: 3, progresso: 0.5 }])
+		.join() === "o3,o7");
+// Obra parada custa mais caro que fila lenta: ela vem primeiro mesmo com menos progresso.
+check("construção vem antes de treinamento, mesmo com progresso menor",
+	ordenar([{ tipo: "treino", id: 5, progresso: 0.99 }, { tipo: "obra", id: 9, progresso: 0.01 }])
+		.join() === "o9,t5");
 
 // ── O painel ───────────────────────────────────────────────────────────────────────────
 check("o painel chama a simulação",
@@ -104,8 +126,11 @@ check("o retrato usa o caminho conferido no disco",
 // Sem ícone no template, melhor nada do que um quadrado quebrado.
 check("template sem ícone não vira sprite quebrado",
 	/icone \? "stretched:session\/portraits\/" \+ icone : "color: 0 0 0 0"/.test(execP));
-check("o selo mostra QUANTAS unidades estão na obra — é o que foi pedido",
-	/selo\.caption = String\(o\.construtores\);/.test(execP));
+check("o selo mostra o número: construtores na obra, ou unidades na fila",
+	/selo\.caption = String\(o\.quantos\);/.test(execP));
+// O mesmo "8" queria dizer duas coisas na mesma coluna. A cor separa.
+check("e a cor do selo diz o que o número significa",
+	/seloBg\.sprite = o\.tipo === "treino"\s*\n\s*\? "color: 40 80 140 230" : "color: 40 120 50 230";/.test(execP));
 check("as linhas empilham lendo o size e devolvendo, como a barra de aliados",
 	/const sz = row\.size;\s*\n\s*sz\.top = i \* PUDIM_OBRAS_ALTURA;/.test(execP) &&
 	/row\.size = sz;/.test(execP));

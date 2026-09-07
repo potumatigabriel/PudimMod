@@ -5750,17 +5750,61 @@ GuiInterface.prototype.pudim_GetObrasEmAndamento = function(player, data)
 		if (tpl.indexOf("foundation|") === 0) tpl = tpl.slice(11);
 
 		result.obras.push({
+			"tipo": "obra",
 			"id": ent,
 			"tpl": tpl,
-			"construtores": construtores,
+			"quantos": construtores,
 			"progresso": cmpFnd.GetBuildProgress ? cmpFnd.GetBuildProgress() : 0
 		});
 	}
 
-	// Mais adiantada primeiro: é a que termina antes, e é a que o jogador quer ver no topo.
-	// Desempate pelo id, para a lista não dançar entre duas obras no mesmo progresso — o
-	// mesmo cuidado da lista de unidades e da lista de séries.
+	// ── UNIDADES EM TREINAMENTO ──────────────────────────────────────────────────────────
+	//
+	// "só mostra construções, tem que mostrar as unidades tambem".
+	//
+	// AGREGADO POR TIPO DE UNIDADE, não por edifício. Com seis quartéis fazendo lanceiro,
+	// seis linhas iguais dizem menos que uma dizendo "Lanceiro ×18": o que interessa é o que
+	// está vindo e quanto falta, não em qual prédio.
+	//
+	// O progresso mostrado é o do lote MAIS ADIANTADO daquele tipo — é o que responde
+	// "quando sai a próxima?". Somar ou tirar média dos lotes daria um número que não
+	// corresponde a nenhuma unidade real.
+	//
+	// GetQueue e os campos unitTemplate/count/progress/productiontype já são usados pela
+	// auto-fila do mod. Nada aqui é novo.
+	const porUnidade = {};
+	for (const ent of cmpRangeManager.GetEntitiesByPlayer(player)) {
+		const cmpPQ = Engine.QueryInterface(ent, IID_ProductionQueue);
+		if (!cmpPQ || !cmpPQ.GetQueue) continue;
+		let fila = [];
+		try { fila = cmpPQ.GetQueue() || []; } catch (e) { continue; }
+		for (const item of fila) {
+			if (item.productiontype !== "unit" || !item.unitTemplate) continue;
+			const t = item.unitTemplate;
+			if (!porUnidade[t]) porUnidade[t] = { "quantos": 0, "progresso": 0, "id": ent };
+			porUnidade[t].quantos += (item.count || 1);
+			const p = item.progress || 0;
+			if (p > porUnidade[t].progresso) porUnidade[t].progresso = p;
+			// O id serve só de desempate estável na ordenação; fica o menor, para não trocar
+			// quando um edifício termina o lote e outro assume.
+			if (ent < porUnidade[t].id) porUnidade[t].id = ent;
+		}
+	}
+	for (const t in porUnidade)
+		result.obras.push({
+			"tipo": "treino",
+			"id": porUnidade[t].id,
+			"tpl": t,
+			"quantos": porUnidade[t].quantos,
+			"progresso": porUnidade[t].progresso
+		});
+
+	// Construção antes de treino: uma obra parada custa mais caro que uma fila lenta, e é a
+	// que o jogador precisa ver primeiro. Dentro de cada grupo, a mais adiantada em cima —
+	// é a que termina antes. Desempate pelo id, para a lista não dançar entre duas iguais,
+	// o mesmo cuidado da lista de unidades e da lista de séries.
 	result.obras.sort(function(a, b) {
+		if (a.tipo !== b.tipo) return a.tipo === "obra" ? -1 : 1;
 		if (a.progresso !== b.progresso) return b.progresso - a.progresso;
 		return a.id - b.id;
 	});

@@ -680,10 +680,47 @@ function pudim_RefreshCombat()
  * Atualiza os elementos visuais da seção de combate.
  * @param {Object} data - Resultado de pudim_GetCombatEstimation
  */
+/**
+ * O ESTIMADOR NUNCA REGISTROU UMA PREVISÃO.
+ *
+ * Pedido de 07/09: "analise os logs e replays e veja se o estimador de batalha está bom".
+ * Não dava: em nenhum log de nenhuma partida havia uma linha dele. Dá para auditar a MATEMÁTICA
+ * contra a fórmula do motor — e foi o que se fez —, mas a CALIBRAGEM ("quando ele diz 70%,
+ * ganha 70% das vezes?") só se responde comparando previsão com resultado, e não havia
+ * previsão gravada.
+ *
+ * Agora há. Uma linha a cada 20s, só quando há dois lados de verdade, com o que basta para
+ * conferir depois no replay: efetivos, vida, DPS dos dois lados, os dois tempos-para-matar e
+ * a chance. Throttle de 20s porque o estimador roda a cada 3s e o log é caro (ver
+ * test_log_custo.js).
+ */
+var g_PudimCombatLogAt = 0;
+const PUDIM_COMBAT_LOG_MS = 20000;
+
+function pudim_LogCombate(data)
+{
+	if (!data || !data.allies || !data.enemies) return;
+	// Sem os dois lados não há estimativa a conferir — é só uma seleção parada.
+	if (data.allies.count <= 0 || data.enemies.count <= 0) return;
+	const agora = Date.now();
+	if (agora - g_PudimCombatLogAt < PUDIM_COMBAT_LOG_MS) return;
+	g_PudimCombatLogAt = agora;
+
+	const a = data.allies, e = data.enemies;
+	pudim_Log("INFO", "ESTIM",
+		"nos " + a.count + "u hp" + Math.round(a.totalHP) + " dps" + Math.round(a.totalAttack) +
+		" | eles " + e.count + "u hp" + Math.round(e.totalHP) + " dps" + Math.round(e.totalAttack) +
+		" | matamos em " + (data.timeToKillEnemy === undefined ? "?" : data.timeToKillEnemy) + "s" +
+		" morremos em " + (data.timeToKillUs === undefined ? "?" : data.timeToKillUs) + "s" +
+		" | chance " + data.winChance + "%");
+}
+
 function pudim_UpdateCombatDisplay(data)
 {
 	if (!data)
 		return;
+
+	try { pudim_LogCombate(data); } catch (err) {}
 
 	const allies = data.allies;
 	const enemies = data.enemies;

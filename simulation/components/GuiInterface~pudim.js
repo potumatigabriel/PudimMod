@@ -65,14 +65,35 @@ function pudim_EffectiveDPS(ent, foe) {
 		try { eff = cmpAttack.GetAttackEffectsData(type); } catch(e) { continue; }
 		if (!eff || !eff.Damage) continue;
 
-		// 1) dano por golpe ja mitigado pela resistencia media do inimigo
+		// ESTE TIPO DE ATAQUE ALCANÇA ESSE INIMIGO?
+		//
+		// Attack.CanAttack (simulation/components/Attack.js) recusa o tipo quando o alvo casa
+		// com RestrictedClasses. Contar o dano de um ataque que o motor nunca deixaria
+		// acontecer infla o lado que tem a unidade restrita.
+		//
+		// A conta é pela fração do inimigo que o tipo PODE atingir: restrito a metade do
+		// exército vale metade do DPS.
+		let fracAlcancavel = 1;
+		let restritas = [];
+		try { restritas = cmpAttack.GetRestrictedClasses(type) || []; } catch(e) { restritas = []; }
+		if (restritas.length && foe.total > 0) {
+			let atingiveis = 0;
+			for (const cls in foe.classCount)
+				if (restritas.indexOf(cls) === -1) atingiveis += foe.classCount[cls];
+			fracAlcancavel = atingiveis / foe.total;
+			if (fracAlcancavel <= 0) continue;
+		}
+
+		// 1) dano por golpe já abatido pela resistência do inimigo. foe.mitig é a MÉDIA DO
+		//    FATOR 0.9^armadura, não 0.9^(média da armadura) — ver o comentário em buildFoe.
 		let perHit = 0;
 		for (const dt in eff.Damage) {
 			const dmg = +eff.Damage[dt] || 0;
 			if (dmg <= 0) continue;
-			perHit += dmg * Math.pow(0.9, foe.resist[dt] || 0);
+			perHit += dmg * (foe.mitig[dt] !== undefined ? foe.mitig[dt] : 1);
 		}
 		if (perHit <= 0) continue;
+		perHit *= fracAlcancavel;
 
 		// 2) bonus de classe, ponderado pela FRACAO do inimigo que casa com o bonus.
 		//    Ex.: 2.5x contra Cavalry valendo so para 40% do exercito inimigo -> 1.6x medio.
@@ -180,6 +201,14 @@ GuiInterface.prototype.pudim_GetCombatEstimation = function(player, data)
 		}
 		bucket.types[typeStr] = (bucket.types[typeStr] || 0) + 1;
 
+		// QUEM NÃO LUTA NÃO ENTRA NO BALANÇO DE FORÇA — mas continua na contagem de tipos
+		// acima, que é informação. Ver o bloco "OS DOIS LADOS PELA MESMA RÉGUA": a vida da
+		// aldeã no numerador de `totalHP / DPS inimigo` aumentava o tempo de sobrevivência
+		// sem aumentar o dano, e selecionar o exército junto com as aldeãs elevava a chance
+		// de vitória sem nada ter mudado no campo.
+		if (!cmpAttack)
+			return null;
+
 		// Calcular DPS usando todos os tipos de ataque disponíveis (Melee + Ranged)
 		let dps = 0;
 		if (cmpAttack)
@@ -253,6 +282,18 @@ GuiInterface.prototype.pudim_GetCombatEstimation = function(player, data)
 	const allyPositions = [];
 	const allyEntList = [];   // usados no calculo de DPS efetivo mais abaixo
 	const enemyEntList = [];
+	// ── OS DOIS LADOS PELA MESMA RÉGUA ──────────────────────────────────────────────────
+	//
+	// Do lado inimigo, quem não tem IID_Attack é descartado (ver o `if (!cmpAttack) continue`
+	// mais abaixo). Do lado aliado, TUDO que estivesse selecionado entrava — inclusive
+	// aldeãs, que não batem em ninguém mas somavam a vida delas ao nosso total.
+	//
+	// A conta de quem vence é `totalHP / DPS do outro lado`. Vida de não-combatente no
+	// numerador aumenta o nosso tempo de sobrevivência sem aumentar o dano: selecionar o
+	// exército junto com 20 aldeãs elevava a chance de vitória sem nada ter mudado no campo.
+	//
+	// Régua única: só entra de cada lado quem pode lutar. As aldeãs continuam aparecendo na
+	// contagem de tipos (`types.support`), que é informação, mas fora do balanço de força.
 	for (const ent of data.ents)
 	{
 		const cmpOwnership = Engine.QueryInterface(ent, IID_Ownership);
@@ -313,20 +354,37 @@ GuiInterface.prototype.pudim_GetCombatEstimation = function(player, data)
 	//   - bonus de classe eram ignorados (lanceiro 2.5x contra cavalaria nao aparecia).
 	// Agora usamos a formula real do motor e comparamos quem elimina o outro primeiro.
 
+	// ── MÉDIA DO ABATIMENTO, NÃO DA ARMADURA ────────────────────────────────────────────
+	//
+	// A fórmula do motor é, em simulation/helpers/Attack.js (GetTotalAttackEffects):
+	//
+	//   total += dano[tipo] * Math.pow(0.9, resistencia[tipo])
+	//
+	// O abatimento é EXPONENCIAL na armadura. Então tirar a média das armaduras e só depois
+	// elevar 0.9 — que era o que este código fazia — não dá o dano médio contra o grupo:
+	// 0.9^x é convexo, e por Jensen a média de 0.9^x é sempre MAIOR que 0.9^média. O
+	// estimador subestimava o próprio dano, e quanto mais desigual o exército inimigo, pior.
+	//
+	// Exemplo com dois alvos, armadura 0 e 10:
+	//   como era:  0.9^5   = 0.590
+	//   correto:  (0.9^0 + 0.9^10)/2 = (1 + 0.349)/2 = 0.674   →  14% a mais de dano
+	//
+	// Guardar o FATOR médio é exato: é a esperança do dano contra um alvo sorteado do grupo,
+	// que é precisamente o que a estimativa quer.
 	const buildFoe = (ents) => {
-		const foe = { resist: { Hack: 0, Pierce: 0, Crush: 0 }, classCount: {}, total: 0 };
+		const foe = { mitig: { Hack: 1, Pierce: 1, Crush: 1 }, classCount: {}, total: 0 };
+		const soma = { Hack: 0, Pierce: 0, Crush: 0 };
 		for (const e of ents) {
 			const r = pudim_ResistProfile(e);
-			foe.resist.Hack += r.Hack; foe.resist.Pierce += r.Pierce; foe.resist.Crush += r.Crush;
+			soma.Hack += Math.pow(0.9, r.Hack);
+			soma.Pierce += Math.pow(0.9, r.Pierce);
+			soma.Crush += Math.pow(0.9, r.Crush);
 			const b = pudim_UnitBucket(Engine.QueryInterface(e, IID_Identity));
 			foe.classCount[b] = (foe.classCount[b] || 0) + 1;
 			foe.total++;
 		}
-		if (foe.total > 0) { // resistencia MEDIA do grupo
-			foe.resist.Hack /= foe.total;
-			foe.resist.Pierce /= foe.total;
-			foe.resist.Crush /= foe.total;
-		}
+		if (foe.total > 0)
+			for (const t in soma) foe.mitig[t] = soma[t] / foe.total;
 		return foe;
 	};
 

@@ -18,26 +18,32 @@ DB[1]={A:{ GetAttackTypes:()=>["Melee"],
            GetAttackEffectsData:()=>({Damage:{Hack:20},Bonuses:{B:{Classes:"Cavalry",Multiplier:2.5}}}),
            GetRepeatTime:()=>1000 }};
 
+// 07/09: o campo `resist` (armadura MEDIA do grupo) virou `mitig` (fator 0.9^armadura
+// MEDIO). Nao e cosmetica: 0.9^x e convexo, entao media(0.9^x) >= 0.9^media(x), e a versao
+// antiga subestimava o proprio dano quanto mais desigual fosse o exercito inimigo. Os
+// cenarios abaixo passaram a trazer o fator ja calculado — o valor esperado nao mudou em
+// nenhum deles, porque todos usam grupo homogeneo, onde as duas contas coincidem.
+// Ver tools/test_estimador.js para o caso desigual, que e onde a diferenca aparece.
 console.log("== formula do motor: dano * 0.9^resistencia * bonus ==");
 // alvo sem resistencia, 100% infantaria -> 20 dano / 1s = 20 dps
-let foe={resist:{Hack:0,Pierce:0,Crush:0},classCount:{Infantry:10},total:10};
+let foe={mitig:{Hack:1.0,Pierce:1.0,Crush:1.0},classCount:{Infantry:10},total:10};
 ok(Math.abs(pudim_EffectiveDPS(1,foe)-20)<1e-9,"sem resistencia, sem bonus aplicavel = 20 dps");
 
 // resistencia Hack 3 -> 20 * 0.9^3 = 14.58
-foe={resist:{Hack:3,Pierce:0,Crush:0},classCount:{Infantry:10},total:10};
+foe={mitig:{Hack:0.729,Pierce:1.0,Crush:1.0},classCount:{Infantry:10},total:10};
 ok(Math.abs(pudim_EffectiveDPS(1,foe)-20*Math.pow(0.9,3))<1e-9,"resistencia 3 corta 10% por ponto = "+(20*Math.pow(0.9,3)).toFixed(2));
 
 // 100% cavalaria -> bonus 2.5 integral = 50
-foe={resist:{Hack:0,Pierce:0,Crush:0},classCount:{Cavalry:10},total:10};
+foe={mitig:{Hack:1.0,Pierce:1.0,Crush:1.0},classCount:{Cavalry:10},total:10};
 ok(Math.abs(pudim_EffectiveDPS(1,foe)-50)<1e-9,"100% cavalaria: bonus 2.5x integral = 50 dps");
 
 // 40% cavalaria -> bonus medio ponderado (0.4*2.5 + 0.6*1) = 1.6 -> 32
-foe={resist:{Hack:0,Pierce:0,Crush:0},classCount:{Cavalry:4,Infantry:6},total:10};
+foe={mitig:{Hack:1.0,Pierce:1.0,Crush:1.0},classCount:{Cavalry:4,Infantry:6},total:10};
 ok(Math.abs(pudim_EffectiveDPS(1,foe)-32)<1e-9,"40% cavalaria: bonus ponderado 1.6x = 32 dps");
 
 // RepeatTime 2000 deve METADE o dps
 DB[2]={A:{GetAttackTypes:()=>["Melee"],GetAttackEffectsData:()=>({Damage:{Hack:20}}),GetRepeatTime:()=>2000}};
-foe={resist:{Hack:0,Pierce:0,Crush:0},classCount:{Infantry:10},total:10};
+foe={mitig:{Hack:1.0,Pierce:1.0,Crush:1.0},classCount:{Infantry:10},total:10};
 ok(Math.abs(pudim_EffectiveDPS(2,foe)-10)<1e-9,"mesmo dano com RepeatTime 2x = metade do dps (bug antigo!)");
 
 // Capture/Slaughter ignorados

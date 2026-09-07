@@ -4331,7 +4331,7 @@ const PUDIM_QUARTEL_FALHAS_MAX = 5;
 /** Chamado pelo dropdown de tipo. */
 function pudim_QuartelSetTipo()
 {
-	const dd = Engine.GetGUIObjectByName("pudim_quartelTipo");
+	const dd = Engine.TryGetGUIObjectByName("pudim_quartelTipo");
 	if (!dd) return;
 	// Le da lista VISIVEL, nao da completa: elas divergem enquanto forja e torre estao
 	// bloqueadas, e ler da completa selecionaria o edificio errado.
@@ -4342,7 +4342,7 @@ function pudim_QuartelSetTipo()
 /** Chamado pelo dropdown de quantidade. */
 function pudim_QuartelSetQtd()
 {
-	const dd = Engine.GetGUIObjectByName("pudim_quartelQtd");
+	const dd = Engine.TryGetGUIObjectByName("pudim_quartelQtd");
 	if (!dd) return;
 	const stQtd = pudim_SerieEstado(g_PudimQuartelTipo);
 	if (!stQtd.ativo) stQtd.alvo = dd.selected + 1;
@@ -4368,7 +4368,7 @@ function pudim_QuartelToggle()
 		pudim_QuartelLiberarEquipe(tipo);
 		pudim_Log("INFO", "QUARTEL", pudim_QuartelNome(tipo) + ": série cancelada pelo jogador");
 	} else {
-		const dd = Engine.GetGUIObjectByName("pudim_quartelQtd");
+		const dd = Engine.TryGetGUIObjectByName("pudim_quartelQtd");
 		st.alvo = dd ? dd.selected + 1 : 1;
 		st.ativo = true;
 		st.base = null;
@@ -4402,10 +4402,20 @@ function pudim_QuartelLiberarEquipe(tipo)
 	st.equipe = [];
 }
 
+// SEMPRE TryGet, NUNCA GetGUIObjectByName.
+//
+// Em 06/09 uma vaga nova da lista de series foi parar FORA do objeto raiz do XML. O painel
+// inteiro deixou de carregar, e estas seis chamadas — as unicas que nao usavam a forma
+// Try — imprimiram "Failed to get GUI object by name" na tela do jogo a cada tique, uma
+// cortina de erro vermelho por cima da partida.
+//
+// A guarda seguinte (`if (!x) return;`) ja supunha a semantica de Try: quem escreveu
+// esperava null, nao um erro. O XML quebrado foi consertado; isto garante que uma proxima
+// falha de layout apareca no log do mod, e nao como spam ilegivel na cara do jogador.
 function pudim_QuartelAtualizarLabel()
 {
 	try { pudim_SerieDesenharLista(); } catch (e) {}
-	const lbl = Engine.GetGUIObjectByName("pudim_quartelBtnLabel");
+	const lbl = Engine.TryGetGUIObjectByName("pudim_quartelBtnLabel");
 	if (!lbl) return;
 	const nome = pudim_QuartelNome(g_PudimQuartelTipo);
 	// O botao fala SO do tipo que esta no dropdown. Quem mostra o conjunto e a lista de
@@ -4486,13 +4496,13 @@ function pudim_QuartelAtualizarLista(disponiveis)
 
 function pudim_QuartelInit()
 {
-	const tipo = Engine.GetGUIObjectByName("pudim_quartelTipo");
+	const tipo = Engine.TryGetGUIObjectByName("pudim_quartelTipo");
 	if (tipo) {
 		tipo.list = PUDIM_QUARTEL_TIPOS.map(t => pudim_QuartelNome(t));
 		tipo.list_data = PUDIM_QUARTEL_TIPOS.slice();
 		tipo.selected = 0;
 	}
-	const qtd = Engine.GetGUIObjectByName("pudim_quartelQtd");
+	const qtd = Engine.TryGetGUIObjectByName("pudim_quartelQtd");
 	if (qtd) {
 		const nums = [];
 		for (let i = 1; i <= 10; i++) nums.push(String(i));

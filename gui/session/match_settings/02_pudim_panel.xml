@@ -102,6 +102,8 @@
   <object name="pudim_serieX4" type="button" size="57% 708 64% 728" style="StoneButton" hidden="true"><action on="Press">pudim_SerieCancelar(4);</action><translatableAttribute id="caption">X</translatableAttribute></object>
   <object name="pudim_serieRot5" type="text" size="68% 708 90% 728" font="sans-11" textcolor="200 160 255 255" ghost="true" hidden="true"><translatableAttribute id="caption"> </translatableAttribute></object>
   <object name="pudim_serieX5" type="button" size="90% 708 97% 728" style="StoneButton" hidden="true"><action on="Press">pudim_SerieCancelar(5);</action><translatableAttribute id="caption">X</translatableAttribute></object>
+  <object name="pudim_serieRot6" type="text" size="2% 730 24% 750" font="sans-11" textcolor="200 160 255 255" ghost="true" hidden="true"><translatableAttribute id="caption"> </translatableAttribute></object>
+  <object name="pudim_serieX6" type="button" size="24% 730 31% 750" style="StoneButton" hidden="true"><action on="Press">pudim_SerieCancelar(6);</action><translatableAttribute id="caption">X</translatableAttribute></object>
   <object name="pudim_unitLabel0" type="text" size="8 868 48%-4 886" font="sans-13" textcolor="220 220 220 255" ghost="true" hidden="true"><translatableAttribute id="caption"> </translatableAttribute></object>
   <object name="pudim_unitMinus0" type="button" size="48% 868 60% 886" style="StoneButton" hidden="true"><action on="Press">pudim_UnitWeightDelta(0, -1);</action><translatableAttribute id="caption">-</translatableAttribute></object>
   <object name="pudim_unitVal0" type="text" size="61% 868 73% 886" font="sans-bold-13" text_align="center" textcolor="255 255 255 255" ghost="true" hidden="true"><translatableAttribute id="caption">0</translatableAttribute></object>
@@ -125,6 +127,3 @@
   <object name="pudim_unitVazio" type="text" size="8 868 100%-8 908" font="sans-11" text_align="center" textcolor="170 170 170 255" ghost="true"><translatableAttribute id="caption">Nada para treinar ainda.</translatableAttribute></object>
 
 </object>
-
-  <object name="pudim_serieRot6" type="text" size="2% 730 24% 750" font="sans-11" textcolor="200 160 255 255" ghost="true" hidden="true"><translatableAttribute id="caption"> </translatableAttribute></object>
-  <object name="pudim_serieX6" type="button" size="24% 730 31% 750" style="StoneButton" hidden="true"><action on="Press">pudim_SerieCancelar(6);</action><translatableAttribute id="caption">X</translatableAttribute></object>

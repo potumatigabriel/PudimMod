@@ -78,6 +78,25 @@ check("o painel chama a simulação",
 	/Engine\.GuiInterfaceCall\("pudim_GetObrasEmAndamento", \{\}\)/.test(execP));
 check("e é chamado no tique, protegido, para não derrubar o resto",
 	/try \{ pudim_AtualizarObras\(\); \} catch \(e\) \{\}/.test(execP));
+
+// ── ASSISTINDO TAMBÉM ──────────────────────────────────────────────────────────────────
+//
+// Relato de 06/09, acompanhando um jogador: "n deveria aparecer as unidades sendo construido
+// nesse cantinho?". Devia. O indicador estava DEPOIS do `return` que impede o mod de postar
+// comando de rede assistindo — e essa trava não tem nada a dizer sobre quem só lê e desenha.
+//
+// A regra: leitura em cima do return, comando embaixo. A barra de aliados sempre esteve do
+// lado certo; o indicador novo caiu do lado errado.
+const iObras = execP.indexOf("pudim_AtualizarObras();");
+const iTrava = execP.indexOf("g_IsObserver !== \"undefined\" && g_IsObserver) return;");
+check("o indicador é atualizado ANTES da trava de espectador",
+	iObras > 0 && iTrava > 0 && iObras < iTrava,
+	"obras em " + iObras + ", trava em " + iTrava);
+const iBarra = execP.indexOf("pudim_UpdateAllyBar();");
+check("a barra de aliados também, como sempre esteve",
+	iBarra > 0 && iBarra < iTrava);
+check("e a razão está escrita, para ninguém 'arrumar' movendo de volta",
+	/leitura em cima, comando embaixo/.test(panel));
 check("some quando não há obra, como o indicador de pesquisa do jogo",
 	/painel\.hidden = obras\.length === 0;/.test(execP));
 check("o retrato usa o caminho conferido no disco",

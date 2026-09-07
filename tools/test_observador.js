@@ -85,8 +85,37 @@ check("há um respiro entre blocos de equipe",
 check("e o respiro acumula, para o bloco inteiro descer junto",
 	/sz\.top = i \* 26 \+ desloc;/.test(execB) &&
 	/sz\.bottom = \(i \+ 1\) \* 26 \+ desloc;/.test(execB));
-check("a equipe entra no rótulo, com +1 e '-' para quem não tem",
-	/"\[" \+ \(ordemEquipe\(d\.team\) === 9999 \? "-" : \(d\.team \+ 1\)\) \+ "\] "/.test(execB));
+// ── COLCHETE NAO E ROTULO, E TAG ────────────────────────────────────────────────────────
+//
+// A primeira versao escrevia "[2] Nome" e o jogo despejou na tela, uma linha por jogador
+// por atualizacao:
+//
+//   Invalid tag "[2" at 2 in '[2] Atrik  [color="80 150 240"]III[/color]'
+//
+// Colchete ABRE TAG no texto da interface — e assim que [color=...] funciona. "T2" diz a
+// mesma coisa e nao disputa com a marcacao.
+check("a equipe entra no rótulo como T1/T2, sem colchete",
+	/"T" \+ \(ordemEquipe\(d\.team\) === 9999 \? "-" : \(d\.team \+ 1\)\) \+ " "/.test(execB));
+check("e o prefixo NAO tem colchete",
+	!/const prefix = observando[\s\S]{0,40}\? "\["/.test(execB));
+
+// O nick vem do JOGADOR, e clã entre colchetes é comum no lobby: um "[FUN]Bob" derrubaria a
+// barra em erro para todo mundo que usa o mod. escapeText é o helper do proprio jogo, e o
+// comentario dele diz o porque — "avoid players breaking the game for everybody".
+check("o nome do jogador passa por escapeText",
+	/if \(typeof escapeText === "function"\) \{ try \{ nick = escapeText\(nick\); \} catch \(e\) \{\} \}/.test(execB));
+check("com guarda de existência, porque nem todo contexto o carrega",
+	/typeof escapeText === "function"/.test(execB));
+
+// Nenhuma legenda pode abrir colchete que nao seja tag conhecida.
+const TAGS_OK = ["color", "/color", "font", "/font", "icon", "imgleft", "imgright"];
+const legendas = execB.match(/caption = [^;]+;/g) || [];
+const suspeitas = [];
+for (const l of legendas)
+	for (const m of (l.match(/\[[^\]"]*/g) || []))
+		if (!TAGS_OK.some(t => m.slice(1).indexOf(t) === 0)) suspeitas.push(m + "  em  " + l.slice(0, 60));
+check("nenhuma legenda abre colchete fora das tags conhecidas",
+	suspeitas.length === 0, suspeitas.join(" ; "));
 
 // ── A regra, espelhada ─────────────────────────────────────────────────────────────────
 const ordemEquipe = t => (t === undefined || t === null || t < 0) ? 9999 : t;

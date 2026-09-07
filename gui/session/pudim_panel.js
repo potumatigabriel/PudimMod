@@ -1966,6 +1966,24 @@ function pudim_Tick(dt)
 {
 	if (typeof pudim_UpdateAllyBar === "function") { try { pudim_UpdateAllyBar(); } catch(e) { error("AllyBar Error: " + e); } }
 
+	// ── O QUE SÓ LÊ VEM ANTES DA TRAVA DE ESPECTADOR ────────────────────────────────────
+	//
+	// A trava logo abaixo existe para não POSTAR COMANDO DE REDE assistindo — isso causaria
+	// OOS. Ela não tem nada a dizer sobre indicadores, que só leem e desenham.
+	//
+	// Relato de 06/09, assistindo um jogador: "n deveria aparecer as unidades sendo
+	// construido nesse cantinho?". Devia, e não aparecia porque o indicador de obras estava
+	// DEPOIS do return — nunca era chamado para quem assiste. A barra de aliados já estava
+	// do lado certo desde sempre; o indicador novo caiu do lado errado.
+	//
+	// Regra para quem mexer aqui: leitura em cima, comando embaixo.
+	g_PudimObrasAccum += dt;
+	if (g_PudimObrasAccum >= PUDIM_OBRAS_INTERVAL)
+	{
+		g_PudimObrasAccum = 0;
+		try { pudim_AtualizarObras(); } catch (e) {}
+	}
+
 	// Não enviar comandos de rede se for espectador (causaria OOS)
 	if (typeof g_IsObserver !== "undefined" && g_IsObserver) return;
 
@@ -2012,15 +2030,6 @@ function pudim_Tick(dt)
 	{
 		g_PudimSnapshotAccum = 0;
 		pudim_LogSnapshot();
-	}
-
-	// Indicador de obras: fora do try de qualquer outro sistema, para uma falha dele não
-	// derrubar o resto do tique — e vice-versa.
-	g_PudimObrasAccum += dt;
-	if (g_PudimObrasAccum >= PUDIM_OBRAS_INTERVAL)
-	{
-		g_PudimObrasAccum = 0;
-		try { pudim_AtualizarObras(); } catch (e) {}
 	}
 
 	// Auto-Trabalho: bloqueado durante pânico (não redirecionar trabalhadores em batalha)

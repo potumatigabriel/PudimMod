@@ -224,10 +224,27 @@ function pudim_UpdateAllyBar() {
         // Observando, a equipe entra no rótulo. O respiro separa os blocos, mas quem chega
         // no meio da partida precisa saber QUAL bloco é qual sem contar linhas.
         // "-" para quem está sem equipe, que é o -1 do motor.
+        //
+        // SEM COLCHETE. A primeira versão escrevia "[2] Nome" e o jogo despejou
+        //
+        //   Invalid tag "[2" at 2 in '[2] Atrik  [color="80 150 240"]III[/color]'
+        //
+        // na tela, uma linha por jogador por atualização. Colchete abre TAG no texto da
+        // interface (é assim que [color=...] funciona), então "[2]" é uma tag inválida, não
+        // um rótulo. "T2" diz a mesma coisa e não disputa com a marcação.
         const prefix = observando
-            ? "[" + (ordemEquipe(d.team) === 9999 ? "-" : (d.team + 1)) + "] "
+            ? "T" + (ordemEquipe(d.team) === 9999 ? "-" : (d.team + 1)) + " "
             : (d.isSelf ? "★" : " ");
         let nick = (g_Players && g_Players[pid] && g_Players[pid].name) ? g_Players[pid].name : ("P" + pid);
+        // O NOME É TEXTO DO JOGADOR, E ELE PODE TER COLCHETE.
+        //
+        // O erro de hoje ("Invalid tag") veio de um colchete meu, mas o mesmo vale para o
+        // nick: clã entre colchetes é comum no lobby, e um "[FUN]Bob" derrubaria a barra em
+        // erro para TODO MUNDO que usa o mod. escapeText é o helper do próprio jogo para
+        // isto — o comentário dele diz "apply escapeText on player provided input to avoid
+        // players breaking the game for everybody". Com a guarda de existência, porque nem
+        // todo contexto de interface o carrega.
+        if (typeof escapeText === "function") { try { nick = escapeText(nick); } catch (e) {} }
         nick = nick.replace(/\s*\(\d+\)\s*$/, "").trim();
         if (nick.length > 16) nick = nick.slice(0, 15) + "~";
         const phaseLabel = PUDIM_PHASE_LABELS[d.phase] || "";

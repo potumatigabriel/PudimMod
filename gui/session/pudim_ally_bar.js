@@ -3,6 +3,7 @@
  */
 
 var g_PudimAllyBarLastUpdate = 0;
+var g_PudimAllySelfLogAt = 0;
 // Flash state keyed by player ID (not row index) — order can change between frames
 var g_PudimAllyLastPhase = {};
 var g_PudimAllyFlashEndTime = {};
@@ -164,11 +165,34 @@ function pudim_UpdateAllyBar() {
         if (observando) {
             const ta = ordemEquipe(a && a.team), tb = ordemEquipe(b && b.team);
             if (ta !== tb) return ta - tb;
+        } else {
+            // A SUA LINHA FICA NO TOPO, SEMPRE.
+            //
+            // Relato de 08/09: "so mostra dos outros, mas n a minha". A sua linha e a
+            // referencia contra a qual as outras sao lidas — se ela troca de lugar conforme
+            // a populacao sobe e desce, achar a propria linha vira uma busca a cada olhada,
+            // e no meio de uma briga isso e o mesmo que ela nao estar la.
+            //
+            // Assistindo nao se aplica: nao ha "sua" linha, e o agrupamento por equipe manda.
+            if (a && a.isSelf) return -1;
+            if (b && b.isSelf) return 1;
         }
         const pa = (a && a.popCount) || 0, pb = (b && b.popCount) || 0;
         if (pb !== pa) return pb - pa;
         return ((a && a.id) || 0) - ((b && b.id) || 0); // empate: ordem estável por ID
     });
+
+    // DIAGNOSTICO, porque "so mostra dos outros" nao distingue duas causas muito diferentes:
+    // a sua linha nao VEIO da simulacao, ou veio e nao foi desenhada. Uma linha a cada 30s,
+    // e so quando ela realmente falta.
+    if (!observando && !allies.some(a => a && a.isSelf) &&
+        now - g_PudimAllySelfLogAt > 30000) {
+        g_PudimAllySelfLogAt = now;
+        try {
+            pudim_Log("WARN", "ALIADOS", "a propria linha nao veio da simulacao: " +
+                allies.length + " jogador(es), ids=" + allies.map(a => a && a.id).join(","));
+        } catch (e) {}
+    }
 
     pudim_AutoFlareCombat(now, allies);
 

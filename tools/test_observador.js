@@ -147,8 +147,47 @@ check("e dentro da equipe a maior população vem primeiro",
 	obs[0] === "3/T0" && obs[2] === "2/T1");
 
 const jogando = ordenar(PARTIDA, false);
-check("jogando, nada muda: a ordem continua sendo só por população",
+check("jogando, a ordem entre os OUTROS continua sendo por população",
 	jogando.join() === "2/T1,3/T0,4/T1,1/T0", jogando.join());
+
+// ── A SUA LINHA FICA NO TOPO, JOGANDO ──────────────────────────────────────────────────
+// "só mostra dos outros, mas n a minha". A sua linha é a referência contra a qual as outras
+// são lidas: se ela troca de lugar conforme a população sobe e desce, achar a própria linha
+// vira uma busca a cada olhada — e no meio de uma briga isso é o mesmo que ela não estar lá.
+function ordenarComEu(lista, obs) {
+	return lista.slice().sort(function(a, b) {
+		if (obs) {
+			const ta = ordemEquipe(a.team), tb = ordemEquipe(b.team);
+			if (ta !== tb) return ta - tb;
+		} else {
+			if (a.isSelf) return -1;
+			if (b.isSelf) return 1;
+		}
+		const pa = a.popCount || 0, pb = b.popCount || 0;
+		if (pb !== pa) return pb - pa;
+		return a.id - b.id;
+	}).map(p => (p.isSelf ? "*" : "") + p.id);
+}
+// População baixa de propósito: pela ordem antiga, eu seria o ÚLTIMO.
+const COM_EU = [
+	{ id: 1, team: 0, popCount: 12, isSelf: true },
+	{ id: 2, team: 0, popCount: 90 },
+	{ id: 3, team: 0, popCount: 70 }
+];
+check("jogando, a minha linha é a primeira mesmo com a menor população",
+	ordenarComEu(COM_EU, false)[0] === "*1", ordenarComEu(COM_EU, false).join(","));
+check("e os outros continuam ordenados por população abaixo dela",
+	ordenarComEu(COM_EU, false).join(",") === "*1,2,3");
+// Assistindo não há "minha" linha, e o agrupamento por equipe manda.
+check("assistindo, a regra de equipe continua mandando",
+	ordenarComEu(COM_EU, true).join(",") === "2,3,*1");
+
+check("a fixação está no código, e só no ramo de quem joga",
+	/\} else \{[\s\S]{0,700}?if \(a && a\.isSelf\) return -1;\s*\n\s*if \(b && b\.isSelf\) return 1;/.test(execB));
+// "só mostra dos outros" não distingue duas causas: a linha não veio, ou veio e não foi
+// desenhada. Sem isso eu voltaria a adivinhar.
+check("e falta da própria linha vira aviso no log, com os ids que vieram",
+	/pudim_Log\("WARN", "ALIADOS", "a propria linha nao veio da simulacao: "/.test(execB));
 
 // Sem equipe (-1) vai para o fim, senão quebra a leitura dos blocos.
 const COM_AVULSO = PARTIDA.concat([{ id: 5, team: -1, popCount: 200 }]);

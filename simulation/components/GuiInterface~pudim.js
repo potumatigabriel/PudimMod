@@ -5791,17 +5791,31 @@ GuiInterface.prototype.pudim_GetProductionBuildings = function(player, data) {
 // fundações, e GetCurrentTemplateName na contagem de unidades. Nada foi inventado.
 GuiInterface.prototype.pudim_GetObrasEmAndamento = function(player, data)
 {
-	const result = { "obras": [] };
+	const result = { "obras": [], "_dbg": { "jogador": 0, "fund": 0, "filas": 0 } };
 	const cmpRangeManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_RangeManager);
 	const cmpTM = Engine.QueryInterface(SYSTEM_ENTITY, IID_TemplateManager);
 	if (!cmpRangeManager || !cmpTM) return result;
 
+	// ── DE QUEM SÃO AS OBRAS: O PAINEL DIZ, NÃO SE ADIVINHA ─────────────────────────────
+	//
+	// "ainda n mostra", assistindo. Eu vinha supondo qual `player` a simulação recebe quando
+	// quem chama é um observador — e supor foi errado nas duas pontas anteriores (a barra de
+	// aliados precisou do mesmo tratamento).
+	//
+	// g_ViewedPlayer é a global do jogo para "quem estou vendo", usada por autociv, moderngui
+	// e localratings, e JÁ USADA por este mod numa chamada de GuiInterface
+	// (`{ "player": g_ViewedPlayer }` em pudim_panel.js). Quem sabe disso é o cliente; a
+	// simulação só obedece. Jogando, g_ViewedPlayer é o próprio jogador, então nada muda.
+	const alvo = (data && data.jogador > 0) ? data.jogador : player;
+	result._dbg.jogador = alvo;
+
 	// tpl da unidade -> quantas dela estão construindo agora (ver o bloco no laço abaixo)
 	const porConstrutor = {};
 
-	for (const ent of cmpRangeManager.GetEntitiesByPlayer(player)) {
+	for (const ent of cmpRangeManager.GetEntitiesByPlayer(alvo)) {
 		const cmpFnd = Engine.QueryInterface(ent, IID_Foundation);
 		if (!cmpFnd) continue;
+		result._dbg.fund++;
 
 		const construtores = cmpFnd.GetNumBuilders ? cmpFnd.GetNumBuilders() : 0;
 		if (construtores <= 0) continue;
@@ -5910,11 +5924,12 @@ GuiInterface.prototype.pudim_GetObrasEmAndamento = function(player, data)
 	// fila desde sempre, então repetia o pedido da mesma unidade enquanto a primeira ainda
 	// nem tinha saído.
 	const porUnidade = {};
-	for (const ent of cmpRangeManager.GetEntitiesByPlayer(player)) {
+	for (const ent of cmpRangeManager.GetEntitiesByPlayer(alvo)) {
 		const cmpPQ = Engine.QueryInterface(ent, IID_ProductionQueue);
 		if (!cmpPQ || !cmpPQ.GetQueue) continue;
 		let fila = [];
 		try { fila = cmpPQ.GetQueue() || []; } catch (e) { continue; }
+		if (fila.length) result._dbg.filas += fila.length;
 		for (const item of fila) {
 			if (!item.unitTemplate) continue;
 			const t = item.unitTemplate;

@@ -5194,15 +5194,38 @@ const PUDIM_OBRAS_ALTURA = 40;
 const PUDIM_OBRAS_BAR_X1 = 44;
 const PUDIM_OBRAS_BAR_X2 = 178;
 var g_PudimObrasAccum = 0;
+var g_PudimObrasLogAt = 0;
 
 function pudim_AtualizarObras()
 {
 	const painel = Engine.TryGetGUIObjectByName("pudimObras");
 	if (!painel) return;
 
+	// De quem são as obras: g_ViewedPlayer é a global do jogo para "quem estou vendo", e
+	// este mod já a usa em outra chamada de GuiInterface. Assistindo, é o jogador seguido;
+	// jogando, é você mesmo. Ver o bloco "DE QUEM SÃO AS OBRAS" na simulação.
+	const verJogador = (typeof g_ViewedPlayer !== "undefined") ? g_ViewedPlayer : -1;
+
 	let d = null;
-	try { d = Engine.GuiInterfaceCall("pudim_GetObrasEmAndamento", {}); } catch (e) { return; }
+	try { d = Engine.GuiInterfaceCall("pudim_GetObrasEmAndamento", { "jogador": verJogador }); }
+	catch (e) { return; }
 	const obras = (d && d.obras) || [];
+
+	// DIAGNÓSTICO, porque já errei três vezes o motivo de não aparecer.
+	//
+	// "ainda n mostra". Sem esta linha eu só sei que a lista veio vazia — não se a simulação
+	// olhou o jogador errado, se não achou fundação, ou se achou fila e o filtro comeu. Uma
+	// linha a cada 20s, e só quando NÃO há nada para mostrar: com o indicador na tela ele já
+	// é o próprio diagnóstico.
+	if (!obras.length && d && d._dbg) {
+		const agoraDbg = Date.now();
+		if (agoraDbg - g_PudimObrasLogAt > 20000) {
+			g_PudimObrasLogAt = agoraDbg;
+			pudim_Log("DEBUG", "OBRAS", "nada a mostrar: jogador=" + d._dbg.jogador +
+				" fundacoes=" + d._dbg.fund + " itens_em_fila=" + d._dbg.filas +
+				" (visto=" + verJogador + ")");
+		}
+	}
 
 	// Some junto com a última obra, como o indicador de pesquisa do jogo.
 	painel.hidden = obras.length === 0;

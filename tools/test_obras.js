@@ -165,8 +165,31 @@ check("são três grupos, e a ordem entre eles é fixa",
 	/const ordemTipo = \{ "obra": 0, "construtor": 1, "treino": 2 \};/.test(execS));
 
 // ── O painel ───────────────────────────────────────────────────────────────────────────
-check("o painel chama a simulação",
-	/Engine\.GuiInterfaceCall\("pudim_GetObrasEmAndamento", \{\}\)/.test(execP));
+// ── DE QUEM SÃO AS OBRAS ───────────────────────────────────────────────────────────────
+// "ainda n mostra", assistindo. Eu vinha SUPONDO qual `player` a simulação recebe quando
+// quem chama é observador — e supor deu errado nas duas pontas anteriores (a barra de
+// aliados precisou do mesmo tratamento). g_ViewedPlayer é a global do jogo para "quem estou
+// vendo", usada por autociv/moderngui/localratings e JÁ usada por este mod em outra chamada
+// de GuiInterface. Quem sabe disso é o cliente; a simulação obedece.
+check("o painel diz QUAL jogador olhar, em vez de deixar a simulação supor",
+	/Engine\.GuiInterfaceCall\("pudim_GetObrasEmAndamento", \{ "jogador": verJogador \}\)/.test(execP));
+check("e esse jogador vem da global do jogo, com guarda de existência",
+	/const verJogador = \(typeof g_ViewedPlayer !== "undefined"\) \? g_ViewedPlayer : -1;/.test(execP));
+check("a simulação usa o jogador pedido, e cai no próprio quando não vier",
+	/const alvo = \(data && data\.jogador > 0\) \? data\.jogador : player;/.test(execS));
+check("e as duas varreduras olham esse jogador, não o da chamada",
+	(execS.match(/GetEntitiesByPlayer\(alvo\)/g) || []).length === 2,
+	(execS.match(/GetEntitiesByPlayer\(alvo\)/g) || []).length + " de 2");
+
+// Já errei três vezes o motivo de "não aparece". Sem diagnóstico, a lista vazia não
+// distingue jogador errado, ausência de fundação e filtro comendo a fila.
+check("lista vazia agora diz POR QUE está vazia",
+	/pudim_Log\("DEBUG", "OBRAS", "nada a mostrar: jogador=" \+ d\._dbg\.jogador/.test(execP));
+check("com os três números que separam as causas",
+	/fundacoes=" \+ d\._dbg\.fund \+ " itens_em_fila=" \+ d\._dbg\.filas/.test(execP));
+// Com o indicador na tela ele já é o próprio diagnóstico: logar aí seria ruído.
+check("e só quando não há nada na tela",
+	/if \(!obras\.length && d && d\._dbg\) \{/.test(execP));
 check("e é chamado no tique, protegido, para não derrubar o resto",
 	/try \{ pudim_AtualizarObras\(\); \} catch \(e\) \{\}/.test(execP));
 

@@ -61,15 +61,47 @@ const PX_BOLD13 = 8;
 const PX_12 = 7;
 const cabe = (texto, larg, px) => texto.length * px <= larg;
 
-// ── O caso que o jogador viu ───────────────────────────────────────────────────────────
+// ── O CAMPO DE POPULAÇÃO ───────────────────────────────────────────────────────────────
+//
+// ERRO MEU, DE 08/09, e vale registrar porque é a mesma armadilha de sempre: dimensionei
+// este campo pela string do RELATO ("200/200", 7 caracteres) em vez da legenda que o código
+// realmente escreve. Este teste conferia a mesma string errada, então passava.
+//
+// A legenda de verdade era `contagem/limite +livres (máximo)` — até 16 caracteres. Era ela
+// que estourava: "18/30" aparecia sem o "+12" porque o resto não cabia.
+//
+// O máximo da partida saiu da legenda: é o MESMO número para todos os jogadores, e nove
+// linhas repetindo "(200)" gastavam seis caracteres cada para não distinguir ninguém.
+//
+// RÉGUA DESTE CAMPO: 7 px/caractere, não os 9 dos nomes. A legenda é só dígito e sinal, que
+// são estreitos, e há medida de FOLGA observada: "18/25 +7" (8 caracteres) cabia nos 45px
+// antigos, ou seja ≤5,6 px/caractere. 7 mantém margem sobre isso.
+const PX_DIGITOS = 7;
 const pop = campos.pudimAllyPop;
 check("o campo de população existe", !!pop);
-check('"200/200" cabe — era o "200/20" do relato',
-	cabe("200/200", pop.larg, PX_BOLD14),
-	pop.larg + "px para " + (7 * PX_BOLD14) + "px");
+
+// A legenda vem da FÓRMULA DO CÓDIGO, não de uma string escrita à mão aqui.
+const mPop = /popObj\.caption = d\.popCount \+ "\/" \+ d\.popLimit \+[\s\S]{0,200}?;/.exec(js);
+check("a legenda da população foi encontrada no código", !!mPop);
+const legendaPop = mPop ? mPop[0] : "";
+check("e o máximo da partida NÃO está mais nela",
+	legendaPop.indexOf("popMax") < 0,
+	"ainda repete o máximo em todas as linhas");
+
+// Pior caso real: todos os campos no maior valor possível.
+const piorPop = "200/200 +0";
+console.log("   pior população: \"" + piorPop + "\" (" + piorPop.length + " chars) em " +
+	pop.larg + "px");
+check("a legenda inteira cabe — era o \"200/20\" e o \"18/30\" do relato",
+	cabe(piorPop, pop.larg, PX_DIGITOS),
+	pop.larg + "px para " + (piorPop.length * PX_DIGITOS) + "px");
 // Era 45px: o teste tem de reprovar o valor antigo, senão não está medindo nada.
 check("e a largura ANTIGA (45px) seria reprovada por este mesmo teste",
-	!cabe("200/200", 45, PX_BOLD14));
+	!cabe(piorPop, 45, PX_DIGITOS));
+// E a legenda ANTIGA, com o máximo, não caberia nem no campo novo — foi ela o problema.
+check("a legenda ANTIGA (com o máximo) não caberia nem hoje",
+	!cabe("200/200 +0 (200)", pop.larg, PX_DIGITOS),
+	(16 * PX_DIGITOS) + "px contra " + pop.larg + "px");
 
 const nome = campos.pudimAllyName;
 check("o campo de nome existe", !!nome);

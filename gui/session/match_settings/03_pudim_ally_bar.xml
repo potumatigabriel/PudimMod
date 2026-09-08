@@ -27,36 +27,38 @@
             
                    nome  175px = 19 caracteres; o pior caso e "T1 " + 14 do nick + "  III" = 22.
                          Por isso o corte do nick caiu de 16 para 14 em pudim_ally_bar.js.
-                   pop    68px = 7 caracteres, exatamente "200/200".
+                   pop    74px; a legenda inteira e "200/200 +0" (10 caracteres, digitos
+            estreitos: regua de 7 px/caractere). O maximo da partida saiu dela — era
+            o mesmo "(200)" em todas as linhas, e era ele que cortava o resto.
             
                  O espaco saiu de Exercito e K/D, que sobravam, e a barra continua terminando em 940 —
                  nao ficou mais larga. tools/test_ally_bar_layout.js confere que nenhum campo invade o
                  vizinho e que tudo cabe. -->
             <!-- Nome e Pop -->
             <object name="pudimAllyName[n]" type="text" size="10 2 185 24" font="sans-bold-14" textcolor="white" ghost="true"/>
-            <object name="pudimAllyPop[n]" type="text" size="190 2 258 24" font="sans-bold-14" textcolor="white" ghost="true"/>
+            <object name="pudimAllyPop[n]" type="text" size="190 2 264 24" font="sans-bold-14" textcolor="white" ghost="true"/>
             
             <!-- Comida -->
-            <object type="image" size="264 4 280 20" sprite="stretched:session/icons/resources/food.png" ghost="true"/>
-            <object name="pudimAllyFood[n]" type="text" size="284 2 356 24" font="sans-bold-13" textcolor="255 210 70 255" ghost="true"/>
+            <object type="image" size="270 4 286 20" sprite="stretched:session/icons/resources/food.png" ghost="true"/>
+            <object name="pudimAllyFood[n]" type="text" size="290 2 362 24" font="sans-bold-13" textcolor="255 210 70 255" ghost="true"/>
             
             <!-- Madeira -->
-            <object type="image" size="362 4 378 20" sprite="stretched:session/icons/resources/wood.png" ghost="true"/>
-            <object name="pudimAllyWood[n]" type="text" size="382 2 454 24" font="sans-bold-13" textcolor="110 215 70 255" ghost="true"/>
+            <object type="image" size="368 4 384 20" sprite="stretched:session/icons/resources/wood.png" ghost="true"/>
+            <object name="pudimAllyWood[n]" type="text" size="388 2 460 24" font="sans-bold-13" textcolor="110 215 70 255" ghost="true"/>
             
             <!-- Pedra -->
-            <object type="image" size="460 4 476 20" sprite="stretched:session/icons/resources/stone.png" ghost="true"/>
-            <object name="pudimAllyStone[n]" type="text" size="480 2 552 24" font="sans-bold-13" textcolor="175 175 175 255" ghost="true"/>
+            <object type="image" size="466 4 482 20" sprite="stretched:session/icons/resources/stone.png" ghost="true"/>
+            <object name="pudimAllyStone[n]" type="text" size="486 2 558 24" font="sans-bold-13" textcolor="175 175 175 255" ghost="true"/>
             
             <!-- Metal -->
-            <object type="image" size="558 4 574 20" sprite="stretched:session/icons/resources/metal.png" ghost="true"/>
-            <object name="pudimAllyMetal[n]" type="text" size="578 2 650 24" font="sans-bold-13" textcolor="140 195 220 255" ghost="true"/>
+            <object type="image" size="564 4 580 20" sprite="stretched:session/icons/resources/metal.png" ghost="true"/>
+            <object name="pudimAllyMetal[n]" type="text" size="584 2 656 24" font="sans-bold-13" textcolor="140 195 220 255" ghost="true"/>
 
             <!-- Exercito -->
-            <object name="pudimAllyArmy[n]" type="text" size="656 2 820 24" font="sans-12" textcolor="200 200 200 255" ghost="true"/>
+            <object name="pudimAllyArmy[n]" type="text" size="662 2 826 24" font="sans-12" textcolor="200 200 200 255" ghost="true"/>
 
             <!-- KD -->
-            <object name="pudimAllyKD[n]" type="text" size="824 2 940 24" font="sans-bold-13" textcolor="white" ghost="true"/>
+            <object name="pudimAllyKD[n]" type="text" size="830 2 940 24" font="sans-bold-13" textcolor="white" ghost="true"/>
 
             <!-- Overlay para Flash -->
             <object name="pudimAllyBgOverlay[n]" type="image" size="0 0 100% 100%" sprite="color: 0 0 0 0" ghost="true"/>

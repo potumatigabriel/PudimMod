@@ -278,11 +278,19 @@ function pudim_UpdateAllyBar() {
             // Mesmo formato da barra superior do jogo: usados/teto-atual (maximo).
             // O teto atual (GetPopulationLimit) e o espaco disponivel para crescer, dado
             // pelas casas ja construidas; o valor entre parenteses e o maximo da partida.
+            // O "+N" e quantas vagas de populacao ainda sobram — "o que e esse + 7?".
+            // Pergunta legitima: e o numero que diz se ja precisa de casa, e a cor responde
+            // sozinha (vermelho <=2, amarelo <=6, verde acima).
             const free = Math.max(0, (d.popLimit || 0) - (d.popCount || 0));
             const freeColor = free <= 2 ? "255 120 120" : (free <= 6 ? "255 220 120" : "150 220 150");
+            // O MAXIMO DA PARTIDA SAIU DAQUI.
+            //
+            // Ele era o "(200)" no fim, e e o MESMO numero para todos os jogadores da
+            // partida: nove linhas repetindo 200 gastavam seis caracteres cada para nao
+            // distinguir ninguem. Era ele que estourava o campo e cortava o resto — "18/30"
+            // aparecia sem o "+12" porque a legenda inteira tinha 15 caracteres.
             popObj.caption = d.popCount + "/" + d.popLimit +
-                " [color=\"" + freeColor + "\"]+" + free + "[/color]" +
-                " [color=\"150 150 150\"](" + (d.popMax || d.popLimit) + ")[/color]";
+                " [color=\"" + freeColor + "\"]+" + free + "[/color]";
         }
 
         const g = d.gatherers || {};

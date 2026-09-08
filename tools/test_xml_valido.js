@@ -41,6 +41,25 @@ console.log("todo XML do mod e XML valido");
 function analisar(txt) {
 	const pilha = [];
 	let raizFechada = false;
+	// COMENTÁRIO NÃO PODE CONTER "--".
+	//
+	// É regra do XML (a especificação proíbe "--" dentro de um comentário), e o motor a
+	// aplica: em 07/09 um travessão que eu escrevi como "--" derrubou o arquivo inteiro —
+	//
+	//   Parse error: 06_pudim_obras.xml:21: Comment must not contain '--' (double-hyphen)
+	//   Failed to parse XML file ... GUI: Error reading included XML
+	//
+	// e o indicador simplesmente não existia na tela. Passei três rodadas procurando o
+	// motivo no JS, com o defeito no comentário.
+	//
+	// Este teste existia e não pegou, porque PULAVA os comentários em vez de validá-los —
+	// verificou o que era fácil de checar, não o que o motor exige. Mesma classe de erro dos
+	// testes que liam o próprio comentário e do regex que mediu posição sem ver estrutura.
+	for (const c of (txt.match(/<!--[\s\S]*?-->/g) || []))
+		if (c.slice(4, -3).indexOf("--") >= 0)
+			return 'comentário com "--" (proibido em XML): ' +
+			       c.slice(0, 60).replace(/\s+/g, " ") + "...";
+
 	const re = /<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\/?([A-Za-z_][\w.:-]*)((?:[^>"']|"[^"]*"|'[^']*')*?)(\/?)>/g;
 	let m;
 	while ((m = re.exec(txt))) {
@@ -81,6 +100,14 @@ check("pega tag que ficou aberta",
 	analisar("<a><b></b>") !== null);
 check("e não se engana com comentário nem declaração",
 	analisar('<?xml version="1.0"?>\n<!-- <object name="isto e comentario"> -->\n<a/>') === null);
+// O erro exato de 07/09, que derrubou o arquivo inteiro e me custou três rodadas.
+check('pega "--" dentro de comentário — a regra que o motor aplica',
+	analisar('<?xml version="1.0"?>\n<!-- abriu -- fechou -->\n<a/>') !== null,
+	analisar('<?xml version="1.0"?>\n<!-- abriu -- fechou -->\n<a/>'));
+check("e não confunde com o fechamento normal do comentário",
+	analisar('<?xml version="1.0"?>\n<!-- comentario normal -->\n<a/>') === null);
+check("nem com hífen simples, que é permitido",
+	analisar('<?xml version="1.0"?>\n<!-- meia-noite, bem-vindo -->\n<a/>') === null);
 
 // ── Os arquivos de verdade ─────────────────────────────────────────────────────────────
 function xmls(dir, achados) {

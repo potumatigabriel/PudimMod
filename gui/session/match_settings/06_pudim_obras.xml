@@ -18,7 +18,7 @@
   z=50: ABAIXO DO PAINEL DO MOD, que e z=60 (02_pudim_panel.xml).
 
   Com z=200 este indicador era desenhado POR CIMA do painel, tapando a Probabilidade de
-  Vitoria e o Auto-Trabalho quando os dois estavam abertos -- "o pudim mod tem que ficar
+  Vitoria e o Auto-Trabalho quando os dois estavam abertos — "o pudim mod tem que ficar
   sobre a lista de construcoes". Os dois ocupam a mesma faixa da direita por construcao, e
   entre um painel que o jogador ABRIU e um indicador que aparece sozinho, quem manda e o
   que ele abriu.

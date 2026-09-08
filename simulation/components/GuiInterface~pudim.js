@@ -4940,11 +4940,37 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 		}
 		return n;
 	};
+	// ── A CASA TAMBÉM RESPEITA O CINTURÃO DA FAZENDA ────────────────────────────────────
+	//
+	// "vc ta fazendo mto perto do cc... as casas".
+	//
+	// PUDIM_CINTURAO_FAZENDA (60) existe desde o pedido das fazendas coladas no centro
+	// cívico — "as fazendas tem que ficar retas com o cc... assim cabem mais". O comentário
+	// dele diz "reservado para fazenda; nenhuma série constrói aqui", e quartel, estábulo,
+	// forja e torre obedecem. A CASA nunca obedeceu: este filtro só olhava território, borda
+	// do mapa, vizinhas e rota de coleta.
+	//
+	// O custo não é estético. O anel colado no CC é onde a fazenda rende — cada casa ali
+	// ocupa exatamente a vaga que a comida precisa, e a comida já era o gargalo medido no
+	// replay contra o pand-_- (17.475 contra 35.485).
+	//
+	// MAS NÃO PODE SER PROIBIÇÃO SECA. No começo da partida não existe casa nenhuma e o
+	// construtor está junto do CC: barrar tudo dentro de 60 deixaria o jogador sem casa
+	// alguma, que é pior que casa mal colocada. Então o cinturão é PREFERÊNCIA, com a mesma
+	// degradação em camadas que esta função já usa para as rotas de coleta: candidato dentro
+	// do cinturão vai para o fim da fila e só é usado se nada fora dele couber.
+	const foraDoCinturao = (cx, cz) => {
+		if (!ccPos) return true;
+		const dx = cx - ccPos.x, dz = cz - ccPos.y;
+		return dx * dx + dz * dz >= PUDIM_CINTURAO_FAZENDA * PUDIM_CINTURAO_FAZENDA;
+	};
+	const noCinturao = [];
 	const pushCandidate = (cx, cz) => {
 		if (cmpTerritoryManager && cmpTerritoryManager.GetOwner(cx, cz) !== player) return;
 		if (cx < 10 || cz < 10 || cx > mapSize - 10 || cz > mapSize - 10) return;
 		if (casaPerto(cx, cz) > PUDIM_CASA_MAX_VIZINHAS) return;
 		if (naRota(cx, cz)) bloqueados.push({ x: cx, z: cz });
+		else if (!foraDoCinturao(cx, cz)) noCinturao.push({ x: cx, z: cz });
 		else candidates.push({ x: cx, z: cz });
 	};
 
@@ -4996,8 +5022,16 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 		}
 	}
 
-	// Os que ficariam em cima de uma rota vão para o fim: só entram se nada limpo couber.
+	// AS CAMADAS, da melhor para a pior. Cada uma só é usada quando a anterior não tem nada:
+	//
+	//   1. limpo, fora do cinturão   — o que se quer
+	//   2. dentro do cinturão        — ocupa vaga de fazenda, mas é casa de pé
+	//   3. em cima de rota de coleta — atravessa o caminho de quem carrega recurso
+	//
+	// A ordem entre 2 e 3 é deliberada: tomar a vaga de uma fazenda custa comida; cortar a
+	// rota custa tempo de caminhada de TODOS os coletores daquela rota, o tempo todo.
 	const limpos = candidates.length;
+	for (const c of noCinturao) candidates.push(c);
 	for (const b of bloqueados) candidates.push(b);
 
 	return {
@@ -5007,6 +5041,10 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 		"candidatePositions": candidates,
 		"rotasEvitadas": rotasColeta.length,
 		"candidatosLimpos": limpos,
+		// Quantos candidatos caíram dentro do cinturão da fazenda. No log, `cint>0` com
+		// `limpos=0` é o caso em que a casa REALMENTE não tinha para onde ir — e distingue
+		// isso de o cinturão nunca ter sido aplicado, que era o defeito.
+		"noCinturao": noCinturao.length,
 		"stuckGhosts": stuckGhosts,
 		"workersToRedirect": [],
 		"productionBuildingCount": productionBuildingCount,

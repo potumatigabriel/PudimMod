@@ -3167,6 +3167,7 @@ function pudim_ProcessAdvancedAI()
 					// por falta de alternativa — é o sinal de que a base ficou apertada.
 					pudim_Log("SUCCESS", "CASAS", "rotas=" + (houseData.rotasEvitadas||0) +
 						" limpos=" + (houseData.candidatosLimpos||0) +
+			" cint=" + (houseData.noCinturao||0) +
 						" build em (" + foundPos.x.toFixed(0) + "," + foundPos.z.toFixed(0) +
 						") builders=" + houseBuilderIds.length + walkTxt +
 						" de=" + (houseData.fromRes || "-"));

@@ -14,6 +14,21 @@ const PUDIM_MAX_ROWS = 9;
 // Respiro entre blocos de equipe, no modo observador. 8 px chega para o olho separar sem
 // empurrar a barra para fora da tela: 8 jogadores em 4 equipes gastam 3 respiros = 24 px.
 const PUDIM_GAP_EQUIPE = 8;
+// Quantos caracteres do nick cabem no campo do nome.
+//
+// O campo tem 175px (ver as larguras em 03_pudim_ally_bar.xml) e a regua conservadora e de
+// 9 px por caractere em sans-bold-14 — o piso observado e ~7,1, e a folga e deliberada
+// porque medir fonte por captura de tela seria chute. Da 19 caracteres no rotulo inteiro.
+//
+// O rotulo nao e so o nick: leva prefixo e a fase.
+//
+//   assistindo   "T1 " + nick + "  III"  = 8 + nick  <= 19  ->  nick <= 11
+//   jogando      "*"   + nick + "  III"  = 6 + nick  <= 19  ->  nick <= 13
+//
+// Dois valores em vez de um porque a estrela ocupa menos que o prefixo de equipe, e nao ha
+// razao para encurtar o nome de quem esta jogando por causa do modo observador.
+const PUDIM_NICK_MAX_OBS = 11;
+const PUDIM_NICK_MAX = 13;
 
 /**
  * Cor do jogador (componentes 0..1) clareada para leitura sobre fundo escuro.
@@ -246,7 +261,12 @@ function pudim_UpdateAllyBar() {
         // todo contexto de interface o carrega.
         if (typeof escapeText === "function") { try { nick = escapeText(nick); } catch (e) {} }
         nick = nick.replace(/\s*\(\d+\)\s*$/, "").trim();
-        if (nick.length > 16) nick = nick.slice(0, 15) + "~";
+        // 14, e nao 16: o prefixo de equipe ("T1 ") entrou em 06/09 para o modo observador e
+        // comeu o espaco que o corte antigo supunha. O pior caso agora e
+        // "T1 " + 14 do nick + "  III" = 22 caracteres, dentro dos 175px do campo.
+        // Ver o comentario de larguras em 03_pudim_ally_bar.xml.
+        const nickMax = observando ? PUDIM_NICK_MAX_OBS : PUDIM_NICK_MAX;
+        if (nick.length > nickMax) nick = nick.slice(0, nickMax - 1) + "~";
         const phaseLabel = PUDIM_PHASE_LABELS[d.phase] || "";
         const phaseColor = PUDIM_PHASE_COLORS[d.phase] || "160 160 160";
 

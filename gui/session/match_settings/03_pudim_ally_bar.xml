@@ -9,31 +9,54 @@
             <object type="image" size="0 25 100% 26" sprite="color: 255 255 255 20" ghost="true"/>
 
             <!-- LINHA UNICA (Y: 2 a 24) -->
+            <!-- LARGURAS, e por que estas.
+            
+                 Relato de 08/09: "quando o nick e grande, cai de linha, tb a parte de
+                 populacao/capacidade quanto tem mais de 3 caracteres de cada, corta o ultimo, ex
+                 200/200 aparece 200/20".
+            
+                 Os dois campos estavam apertados desde sempre, e o prefixo de equipe ("T1 "), que
+                 entrou em 06/09 para o modo observador, consumiu o que restava do nome.
+            
+                 Medida do que nao cabia, que e o unico numero confiavel aqui:
+                   "200/200"           7 caracteres nao cabiam em  45px  em sans-bold-14
+                   "T1 tesla2402  III" 17 caracteres nao cabiam em 120px em sans-bold-14
+            
+                 Isso da um piso de ~6,4 e ~7,1 px por caractere. Trabalhando com 9 px/caractere em
+                 sans-bold-14 (folga deliberada, porque medir fonte por captura de tela e chute):
+            
+                   nome  175px = 19 caracteres; o pior caso e "T1 " + 14 do nick + "  III" = 22.
+                         Por isso o corte do nick caiu de 16 para 14 em pudim_ally_bar.js.
+                   pop    68px = 7 caracteres, exatamente "200/200".
+            
+                 O espaco saiu de Exercito e K/D, que sobravam, e a barra continua terminando em 940 —
+                 nao ficou mais larga. tools/test_ally_bar_layout.js confere que nenhum campo invade o
+                 vizinho e que tudo cabe. -->
             <!-- Nome e Pop -->
-            <object name="pudimAllyName[n]" type="text" size="10 2 130 24" font="sans-bold-14" textcolor="white" ghost="true"/>
-            <object name="pudimAllyPop[n]" type="text" size="135 2 180 24" font="sans-bold-14" textcolor="white" ghost="true"/>
+            <object name="pudimAllyName[n]" type="text" size="10 2 185 24" font="sans-bold-14" textcolor="white" ghost="true"/>
+            <object name="pudimAllyPop[n]" type="text" size="190 2 258 24" font="sans-bold-14" textcolor="white" ghost="true"/>
             
             <!-- Comida -->
-            <object type="image" size="190 4 206 20" sprite="stretched:session/icons/resources/food.png" ghost="true"/>
-            <object name="pudimAllyFood[n]" type="text" size="210 2 290 24" font="sans-bold-13" textcolor="255 210 70 255" ghost="true"/>
+            <object type="image" size="264 4 280 20" sprite="stretched:session/icons/resources/food.png" ghost="true"/>
+            <object name="pudimAllyFood[n]" type="text" size="284 2 356 24" font="sans-bold-13" textcolor="255 210 70 255" ghost="true"/>
             
             <!-- Madeira -->
-            <object type="image" size="300 4 316 20" sprite="stretched:session/icons/resources/wood.png" ghost="true"/>
-            <object name="pudimAllyWood[n]" type="text" size="320 2 400 24" font="sans-bold-13" textcolor="110 215 70 255" ghost="true"/>
+            <object type="image" size="362 4 378 20" sprite="stretched:session/icons/resources/wood.png" ghost="true"/>
+            <object name="pudimAllyWood[n]" type="text" size="382 2 454 24" font="sans-bold-13" textcolor="110 215 70 255" ghost="true"/>
             
             <!-- Pedra -->
-            <object type="image" size="410 4 426 20" sprite="stretched:session/icons/resources/stone.png" ghost="true"/>
-            <object name="pudimAllyStone[n]" type="text" size="430 2 510 24" font="sans-bold-13" textcolor="175 175 175 255" ghost="true"/>
+            <object type="image" size="460 4 476 20" sprite="stretched:session/icons/resources/stone.png" ghost="true"/>
+            <object name="pudimAllyStone[n]" type="text" size="480 2 552 24" font="sans-bold-13" textcolor="175 175 175 255" ghost="true"/>
             
             <!-- Metal -->
-            <object type="image" size="520 4 536 20" sprite="stretched:session/icons/resources/metal.png" ghost="true"/>
-            <object name="pudimAllyMetal[n]" type="text" size="540 2 620 24" font="sans-bold-13" textcolor="140 195 220 255" ghost="true"/>
+            <object type="image" size="558 4 574 20" sprite="stretched:session/icons/resources/metal.png" ghost="true"/>
+            <object name="pudimAllyMetal[n]" type="text" size="578 2 650 24" font="sans-bold-13" textcolor="140 195 220 255" ghost="true"/>
 
             <!-- Exercito -->
-            <object name="pudimAllyArmy[n]" type="text" size="630 2 800 24" font="sans-12" textcolor="200 200 200 255" ghost="true"/>
+            <object name="pudimAllyArmy[n]" type="text" size="656 2 820 24" font="sans-12" textcolor="200 200 200 255" ghost="true"/>
 
             <!-- KD -->
-            <object name="pudimAllyKD[n]" type="text" size="802 2 940 24" font="sans-bold-13" textcolor="white" ghost="true"/>
+            <object name="pudimAllyKD[n]" type="text" size="824 2 940 24" font="sans-bold-13" textcolor="white" ghost="true"/>
 
             <!-- Overlay para Flash -->
             <object name="pudimAllyBgOverlay[n]" type="image" size="0 0 100% 100%" sprite="color: 0 0 0 0" ghost="true"/>

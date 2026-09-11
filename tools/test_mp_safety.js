@@ -173,7 +173,90 @@ const naoAuditadas = [...chamadas].filter(c => !SEGUROS.has(c));
 check("nenhuma chamada nova ao GuiInterface do jogo base sem auditoria",
 	naoAuditadas.length === 0, naoAuditadas.join(", "));
 
-// ── 9. mod.json coerente com tudo acima ────────────────────────────────────────────────
+// ── 9. ESPECTADOR NÃO EMITE COMANDO ────────────────────────────────────────────────────
+//
+// Pergunta de 11/09, depois de um Out-Of-Sync ao entrar para assistir: "pode ser por causa
+// do mod?".
+//
+// O tique do mod tem uma trava — `if (g_IsObserver) return;` — justamente porque comando de
+// rede vindo de quem assiste é caminho direto para OOS. Em 06/09 eu MOVI coisas para cima
+// dessa trava (a barra de aliados, o indicador de obras, o estimador e a lista de unidades),
+// porque elas só leem e desenham e não apareciam para quem assiste.
+//
+// "Só leem e desenham" era verdade quando eu movi. Nada garante que continue sendo: basta
+// alguém acrescentar uma linha dentro de uma dessas funções. Este teste segue as funções
+// chamadas ANTES da trava e reprova qualquer emissão de rede nelas.
+{
+	const painel = semComentarios(fs.readFileSync(
+		path.join(RAIZ, "gui", "session", "pudim_panel.js"), "utf8"));
+	const barra = semComentarios(fs.readFileSync(
+		path.join(RAIZ, "gui", "session", "pudim_ally_bar.js"), "utf8"));
+
+	const iTick = painel.indexOf("function pudim_Tick(dt)");
+	const iTrava = painel.indexOf('g_IsObserver !== "undefined" && g_IsObserver) return;');
+	check("o tique tem a trava de espectador", iTick >= 0 && iTrava > iTick,
+		"tick=" + iTick + " trava=" + iTrava);
+
+	// Quem é chamado antes da trava.
+	const antes = painel.slice(iTick, iTrava);
+	const chamadasAntes = [...new Set([...antes.matchAll(/(pudim_[A-Za-z]+)\(/g)]
+		.map(m => m[1]))].filter(n => n !== "pudim_Tick");
+	check("há funções rodando antes da trava (senão este teste não mede nada)",
+		chamadasAntes.length >= 3, chamadasAntes.join(", "));
+
+	// O corpo de cada uma, e das que elas chamam por sua vez.
+	//
+	// POR CONTAGEM DE CHAVES, e não por `indexOf("\n}\n")`. A primeira versão usava o
+	// indexOf, e semComentarios() remove os blocos /* */ inteiros — inclusive as quebras de
+	// linha deles. Sem o "\n}\n" no lugar esperado, a extração devolvia o RESTO DO ARQUIVO, e
+	// aí toda função parecia emitir comando de rede: o teste acusou 100 funções de uma vez,
+	// o que é sinal de teste quebrado, não de mod quebrado.
+	const corpo = nome => {
+		for (const src of [painel, barra]) {
+			const i = src.indexOf("function " + nome + "(");
+			if (i < 0) continue;
+			const abre = src.indexOf("{", i);
+			if (abre < 0) continue;
+			let d = 0;
+			for (let k = abre; k < src.length; k++) {
+				if (src[k] === "{") d++;
+				else if (src[k] === "}" && --d === 0) return src.slice(i, k + 1);
+			}
+			return src.slice(i);
+		}
+		return "";
+	};
+	// O extrator tem de devolver UMA função, não o arquivo. Sem esta âncora o teste volta a
+	// acusar tudo e ninguém saberia que é ele que está errado.
+	check("o extrator devolve o corpo de uma função só",
+		corpo("pudim_AtualizarObras").length > 100 &&
+		corpo("pudim_AtualizarObras").length < painel.length / 10,
+		corpo("pudim_AtualizarObras").length + " caracteres");
+	const vistos = new Set();
+	const fila = chamadasAntes.slice();
+	const emissores = [];
+	while (fila.length) {
+		const nome = fila.shift();
+		if (vistos.has(nome)) continue;
+		vistos.add(nome);
+		const c = corpo(nome);
+		if (!c) continue;
+		if (/PostNetworkCommand|SendNetworkFlare/.test(c)) emissores.push(nome);
+		for (const m of c.matchAll(/(pudim_[A-Za-z]+)\(/g))
+			if (!vistos.has(m[1])) fila.push(m[1]);
+	}
+	check("nenhuma função do caminho do espectador emite comando de rede",
+		emissores.length === 0, emissores.join(", "));
+	check("e o rastreio realmente percorreu as funções", vistos.size >= 5,
+		vistos.size + " função(ões) auditada(s)");
+
+	// O flare automático marca o minimapa e, mesmo sendo local, não tem o que fazer para
+	// quem assiste — a guarda própria dele é a segunda linha de defesa.
+	check("o flare automático tem guarda própria de espectador",
+		/function pudim_AutoFlareCombat[\s\S]{0,300}?g_IsObserver/.test(barra));
+}
+
+// ── 10. mod.json coerente com tudo acima ───────────────────────────────────────────────
 const modJson = JSON.parse(fs.readFileSync(path.join(RAIZ, "mod.json"), "utf8"));
 check("mod.json declara ignoreInCompatibilityChecks", modJson.ignoreInCompatibilityChecks === true);
 check("essa declaracao so vale se as verificacoes acima passarem", fails === 0,

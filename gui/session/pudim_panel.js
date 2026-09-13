@@ -332,6 +332,10 @@ function pudim_ApplyCompactMode()
 	if (panel)
 		// Painel ancorado à direita da tela (ver 02_pudim_panel.xml)
 		panel.size = hidden ? "100%-340 50%-494 100%-20 50%-254" : "100%-340 50%-494 100%-20 50%+496";
+	// Sair do compacto reescreve o rodapé com o valor de origem, apagando o encolhimento do
+	// estimador colapsado e as linhas extras de unidade. Recalcular, e não deixar a moldura
+	// vazia sobrando até a próxima passada.
+	if (!hidden) pudim_AjustarAlturaPainel();
 	// Atualiza ícone do botão
 	const lbl = Engine.TryGetGUIObjectByName("pudim_compactLabel");
 	if (lbl) lbl.caption = hidden ? "▶" : "▼";
@@ -5067,7 +5071,14 @@ const PUDIM_ABAIXO_DO_COMBATE = [
 	"pudim_unitLabel3", "pudim_unitMinus3", "pudim_unitPlus3", "pudim_unitVal3",
 	"pudim_unitLabel4", "pudim_unitMinus4", "pudim_unitPlus4", "pudim_unitVal4",
 	"pudim_unitLabel5", "pudim_unitMinus5", "pudim_unitPlus5", "pudim_unitVal5",
-	"pudim_unitLabel6", "pudim_unitMinus6", "pudim_unitPlus6", "pudim_unitVal6"
+	"pudim_unitLabel6", "pudim_unitMinus6", "pudim_unitPlus6", "pudim_unitVal6",
+	"pudim_unitLabel7", "pudim_unitMinus7", "pudim_unitPlus7", "pudim_unitVal7",
+	"pudim_unitLabel8", "pudim_unitMinus8", "pudim_unitPlus8", "pudim_unitVal8",
+	"pudim_unitLabel9", "pudim_unitMinus9", "pudim_unitPlus9", "pudim_unitVal9",
+	"pudim_unitLabel10", "pudim_unitMinus10", "pudim_unitPlus10", "pudim_unitVal10",
+	"pudim_unitLabel11", "pudim_unitMinus11", "pudim_unitPlus11", "pudim_unitVal11",
+	"pudim_unitLabel12", "pudim_unitMinus12", "pudim_unitPlus12", "pudim_unitVal12",
+	"pudim_unitLabel13", "pudim_unitMinus13", "pudim_unitPlus13", "pudim_unitVal13"
 ];
 
 var g_PudimCombatAberto = false;
@@ -5123,19 +5134,76 @@ function pudim_AplicarCombatBox()
 		lbl.caption = (g_PudimCombatAberto ? "▼ " : "▶ ") + pudim_T("cap.combatHeader");
 	} catch (e) {}
 
-	// O painel encolhe junto: moldura vazia sobre o mapa atrapalha a visão.
 	// O painel encolhe junto: moldura vazia sobre o mapa atrapalha a visao. Guardado na
 	// primeira passada pelo mesmo motivo do resto — o objeto de size e vivo.
 	if (g_PudimPainelBaseBottom === null) {
 		const p0 = Engine.TryGetGUIObjectByName("pudim_mainPanel");
 		if (p0) try { g_PudimPainelBaseBottom = p0.size.bottom; } catch (e) {}
 	}
+	pudim_AjustarAlturaPainel();
+}
+
+/** De quanto o miolo do estimador desloca tudo que vem abaixo dele, agora. */
+function pudim_DeslocaCombate()
+{
+	return g_PudimCombatAberto ? 0 : -PUDIM_COMBAT_ALTURA;
+}
+
+/**
+ * Altura do painel: base, menos o estimador colapsado, mais as linhas de unidade extras.
+ *
+ * Um lugar só. Antes o rodapé era escrito apenas no toggle do estimador; agora a lista de
+ * unidades também o empurra, e duas escritas independentes na mesma propriedade é receita
+ * de uma apagar a outra.
+ */
+function pudim_AjustarAlturaPainel()
+{
 	const painel = Engine.TryGetGUIObjectByName("pudim_mainPanel");
-	if (painel && g_PudimPainelBaseBottom !== null) try {
+	if (!painel || g_PudimPainelBaseBottom === null) return;
+	// No modo compacto o painel tem altura própria (só o estimador); não mexer.
+	if (g_PudimCompactMode) return;
+	const extra = Math.max(0, g_PudimUnitVisiveis - PUDIM_UNIT_BASE) * PUDIM_UNIT_PASSO;
+	try {
 		const sz = painel.size;
-		sz.bottom = g_PudimPainelBaseBottom + desloca;
+		sz.bottom = g_PudimPainelBaseBottom + pudim_DeslocaCombate() + extra;
 		painel.size = sz;
 	} catch (e) {}
+}
+
+/**
+ * Quantas linhas de unidade cabem na tela AGORA.
+ *
+ * A seção é a última do painel, então o limite é o rodapé bater na borda de baixo. O painel
+ * está ancorado em 50% (ver 02_pudim_panel.xml: `50%-494 .. 50%+496`), e `size.bottom` é só
+ * o deslocamento — a porcentagem fica à parte, como descobri no indicador de obras, onde
+ * `size.right` de `100%-46` devolve -46 e não a largura.
+ *
+ * Logo, em pixels de tela: fundo = altura/2 + 496 + desloca + extra. Isolando `extra`:
+ *
+ *     extra <= altura/2 - 496 - desloca - margem
+ *
+ * O tamanho da tela vem de `Engine.TryGetGUIObjectByName("session").getComputedSize()`, que é
+ * como o autociv lê a janela em gui/session/autociv_minimapExpand.js — não inventado.
+ */
+function pudim_UnitLinhasCabem()
+{
+	let altura = 0;
+	try { const s = Engine.TryGetGUIObjectByName("session").getComputedSize();
+	      altura = s.bottom - s.top; } catch (e) {}
+	if (!(altura > 0)) return PUDIM_UNIT_BASE;   // sem medida, o tamanho antigo e seguro
+	const folga = altura / 2 - pudim_PainelBaseBottom0() - pudim_DeslocaCombate() - PUDIM_UNIT_MARGEM;
+	const extra = Math.floor(folga / PUDIM_UNIT_PASSO);
+	return Math.max(PUDIM_UNIT_BASE, Math.min(PUDIM_UNIT_LINHAS, PUDIM_UNIT_BASE + extra));
+}
+
+/** O rodapé de origem do painel, lido do próprio objeto na primeira vez. */
+function pudim_PainelBaseBottom0()
+{
+	if (g_PudimPainelBaseBottom === null) {
+		const p0 = Engine.TryGetGUIObjectByName("pudim_mainPanel");
+		if (p0) try { g_PudimPainelBaseBottom = p0.size.bottom; } catch (e) {}
+	}
+	return g_PudimPainelBaseBottom === null ? 496 : g_PudimPainelBaseBottom;
 }
 
 
@@ -5152,12 +5220,25 @@ function pudim_AplicarCombatBox()
 //
 // Peso zero significa "não treine isto", igual em coleta. Todos começam em zero: o mod não
 // deve escolher exército pelo jogador — ele mantém a proporção QUE O JOGADOR pediu.
-// 5 vagas: as duas ultimas pagaram as fileiras da lista de series (02/09). A ordenacao
-// poe os tipos COM PESO na frente, entao o que o jogador configurou nunca some.
-const PUDIM_UNIT_LINHAS = 5;
+// QUANTAS LINHAS. Relato de 13/09: "parece que fica limitado a 4 ou 5 tipos de unidade...
+// tem que ter todas... as vezes some trabalhador ou n aparece todos os tipos de cavalo".
+//
+// Ele tem razão, e o número fixo de 5 era pequeno de menos. MEDIDO nos replays, contando
+// templates DISTINTOS que cada jogador chegou a treinar numa partida (comandos `train` de
+// 10 partidas, 75 jogadores): mediana 5, máximo 13. E isso é o que foi TREINADO — o que
+// estava DISPONÍVEL para treinar, que é o que esta lista mostra, é sempre maior.
+//
+// Então 14 linhas no XML, e quantas aparecem é decidido em tempo de execução: a seção de
+// unidades é a última do painel, então crescer para baixo só depende de caber na tela.
+// Com o estimador colapsado — que é como ele nasce — sobram os 182px dele mais a folga.
+const PUDIM_UNIT_LINHAS = 14;   // linhas que existem no XML
+const PUDIM_UNIT_BASE = 5;      // as que cabem sem empurrar o rodapé do painel
+const PUDIM_UNIT_PASSO = 22;    // px entre uma linha e a seguinte (ver o XML)
+const PUDIM_UNIT_MARGEM = 12;   // respiro entre a última linha e a borda de baixo
 var g_PudimUnitPesos = {};      // tpl -> peso 0..10, escolha do jogador
 var g_PudimUnitLista = [];      // o que a simulação devolveu na última leitura
 var g_PudimUnitAccum = 0;
+var g_PudimUnitVisiveis = PUDIM_UNIT_BASE;  // quantas linhas a tela comporta agora
 var g_PudimUnitVazioLogAt = 0;  // ver o diagnostico de lista vazia em pudim_AtualizarUnidades
 
 function pudim_UnitWeightDelta(linha, delta)
@@ -5429,7 +5510,10 @@ function pudim_AtualizarUnidades()
 	// cliques seguidos caíam em unidades diferentes.
 	// Escolhe por peso, exibe por nome. Como o conjunto das 5 linhas só muda quando um tipo
 	// entra ou sai da seleção, ajustar o peso de quem já está na tela não mexe mais na ordem.
-	g_PudimUnitLista = lista.slice(0, PUDIM_UNIT_LINHAS).sort(function(a, b) {
+	// Quantas linhas cabem é recalculado a cada passada: o jogador colapsa e expande o
+	// estimador no meio da partida, e cada estado libera ou toma 182px.
+	const cabem = pudim_UnitLinhasCabem();
+	g_PudimUnitLista = lista.slice(0, cabem).sort(function(a, b) {
 		const na = a.nome || a.tpl, nb = b.nome || b.tpl;
 		if (na !== nb) return na < nb ? -1 : 1;
 		return a.tpl < b.tpl ? -1 : (a.tpl > b.tpl ? 1 : 0); // desempate estável
@@ -5459,6 +5543,11 @@ function pudim_DesenharUnidades()
 	}
 	const vazio = Engine.TryGetGUIObjectByName("pudim_unitVazio");
 	if (vazio) try { vazio.hidden = g_PudimUnitLista.length > 0; } catch (e) {}
+
+	// O rodapé acompanha o que está DESENHADO, não o que caberia: com três tipos na tela o
+	// painel não pode ficar com 11 linhas de moldura vazia sobre o mapa.
+	g_PudimUnitVisiveis = g_PudimUnitLista.length;
+	pudim_AjustarAlturaPainel();
 }
 
 /**

@@ -42,7 +42,12 @@ function check(name, cond, extra) {
 
 console.log("a aldea nao some da lista");
 
-const LINHAS = +/const PUDIM_UNIT_LINHAS = (\d+);/.exec(panel)[1];
+const MAXLINHAS = +/const PUDIM_UNIT_LINHAS = (\d+);/.exec(panel)[1];
+// A tela que produziu a regressao tinha CINCO linhas — o piso que a lista nunca perde
+// (PUDIM_UNIT_BASE). Desde 13/09 o painel mostra mais quando a tela comporta, mas a ordem
+// de ESCOLHA so importa quando aperta, e e apertado que este teste tem de medir. Usar o
+// maximo aqui faria o cenario caber inteiro e o teste passaria sem testar nada.
+const LINHAS = +/const PUDIM_UNIT_BASE = (\d+);/.exec(panel)[1];
 
 // ── A regra, espelhada ─────────────────────────────────────────────────────────────────
 const pesos = {};
@@ -125,9 +130,26 @@ check("e o alfabético continua como último critério, para a ordem não dança
 	/if \(ua !== ub\) return ub - ua;\s*\n\s*return a\.tpl < b\.tpl \? -1 :/.test(exec));
 // A exibição continua por NOME: reordenar ao clicar em + fazia o botão fugir do cursor.
 check("a exibição segue ordenada por nome, não por esta ordem de escolha",
-	/g_PudimUnitLista = lista\.slice\(0, PUDIM_UNIT_LINHAS\)\.sort\(/.test(exec));
+	/g_PudimUnitLista = lista\.slice\(0, cabem\)\.sort\(/.test(exec));
 check("a procedência fica no código, com o que a tela mostrava",
 	/Trompetista e Vercingetórix/.test(panel));
+
+// ── E com espaço na tela, ninguém é cortado ────────────────────────────────────────────
+// Relato de 13/09: "parece que fica limitado a 4 ou 5 tipos de unidade... tem que ter
+// todas... as vezes some trabalhador ou n aparece todos os tipos de cavalo". O corte por
+// uso resolve QUEM fica quando não cabe todo mundo; o que faltava era caber.
+//
+// MEDIDO nos replays: contando templates distintos que cada jogador chegou a treinar em 10
+// partidas (75 jogadores), a mediana é 5 e o MÁXIMO é 13. O teto de linhas tem de cobrir o
+// máximo medido, senão o relato volta na partida seguinte.
+check("o teto de linhas cobre o máximo medido nos replays (13 tipos)",
+	MAXLINHAS >= 13, MAXLINHAS);
+const telaLarga = ordenar(faseIII).slice(0, MAXLINHAS).map(u => u.tpl.split("/").pop());
+check("com espaço na tela, os sete tipos da captura aparecem todos",
+	telaLarga.length === faseIII.length, telaLarga.join(", "));
+check("inclusive a aldeã e os dois tipos de cavalo, que eram os que sumiam",
+	["support_female_citizen", "cavalry_swordsman_b", "cavalry_javelineer_b"]
+		.every(t => telaLarga.indexOf(t) >= 0));
 
 console.log(fails === 0 ? "\nTODOS OS TESTES PASSARAM" : "\n" + fails + " TESTE(S) FALHARAM");
 process.exit(fails === 0 ? 0 : 1);

@@ -138,7 +138,14 @@ const reUso = /(?:Try)?GetGUIObjectByName\("([^"]+)"\)/g;
 let u;
 while ((u = reUso.exec(panel))) usados.add(u[1]);
 // Nomes montados por concatenação ("pudim_unitLabel" + i) não dá para conferir assim.
-const faltando = [...usados].filter(n => xmlTxt.indexOf('name="' + n + '"') < 0).sort();
+// Objetos do JOGO BASE, que por definição não estão nos XML do mod. `session` é a raiz da
+// tela de partida, e é de onde sai o tamanho da janela — mesmo caminho que o autociv usa em
+// gui/session/autociv_minimapExpand.js ("sessionPanel.getComputedSize()"). Só entram aqui
+// nomes conferidos em código instalado, nunca supostos.
+const DO_JOGO_BASE = ["session"];
+const faltando = [...usados]
+	.filter(n => DO_JOGO_BASE.indexOf(n) < 0)
+	.filter(n => xmlTxt.indexOf('name="' + n + '"') < 0).sort();
 // Estes quatro já não existiam quando este teste nasceu (06/09): são referências mortas a
 // objetos removidos em limpezas antigas. Não quebram nada — todas usam TryGet e têm guarda —
 // mas significam caminho de código morto, e o do conselheiro merece uma olhada.

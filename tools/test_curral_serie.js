@@ -112,7 +112,15 @@ const naFaixa = objs.filter(o =>
 check("nada colide com a fileira nova (730-750)",
 	naFaixa.length === 0, naFaixa.map(o => o.nome + " " + o.y1 + "-" + o.y2).join(", "));
 
-const fim = Math.max(...objs.filter(o => Number.isFinite(o.y2)).map(o => o.y2));
+// As linhas de unidade da sexta em diante (13/09) ficam no XML esperando serem exibidas: a
+// lista cresce em tempo de execução, e só aparece o que cabe na tela. Elas não contam como
+// "fim do painel" — quem mede isso é tools/test_painel_cabe.js, com a régua certa.
+const extraUnidade = n => {
+	const mm = /^pudim_unit(?:Label|Minus|Val|Plus)(\d+)$/.exec(n);
+	return !!mm && +mm[1] >= 5;
+};
+const fim = Math.max(...objs
+	.filter(o => Number.isFinite(o.y2) && !extraUnidade(o.nome)).map(o => o.y2));
 check("e o painel continua terminando onde terminava", fim === 974, "fim=" + fim);
 
 console.log(fails === 0 ? "\nTODOS OS TESTES PASSARAM" : "\n" + fails + " TESTE(S) FALHARAM");

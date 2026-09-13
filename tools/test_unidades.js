@@ -108,7 +108,7 @@ for (let i = 0; i < LINHAS; i++)
 		["Label", "Minus", "Val", "Plus"].every(parte =>
 			xml.indexOf('name="pudim_unit' + parte + i + '"') > 0));
 check("as linhas nascem escondidas — a lista é dinâmica",
-	(xml.match(/name="pudim_unit(Label|Minus|Val|Plus)\d"[^>]*hidden="true"/g) || []).length >= LINHAS * 4);
+	(xml.match(/name="pudim_unit(Label|Minus|Val|Plus)\d+"[^>]*hidden="true"/g) || []).length >= LINHAS * 4);
 check("e o JS as mostra conforme o que existe",
 	/function pudim_DesenharUnidades\(\)/.test(panel) &&
 	/o\.hidden = !mostra/.test(panel));
@@ -329,7 +329,8 @@ check("e tudo abaixo sobe junto",
 	/const PUDIM_ABAIXO_DO_COMBATE = \[/.test(panel) &&
 	/sz\.top = b\.top \+ desloca/.test(panel));
 check("o painel encolhe junto, sem moldura vazia sobre o mapa",
-	/sz\.bottom = g_PudimPainelBaseBottom \+ desloca/.test(panel));
+	/sz\.bottom = g_PudimPainelBaseBottom \+ pudim_DeslocaCombate\(\) \+ extra/.test(panel) &&
+	/pudim_AjustarAlturaPainel\(\);/.test(panel));
 check("o título mostra a seta do estado", /"▼ " : "▶ "/.test(panel));
 
 // O size do motor é um objeto VIVO (gui/hotkeys/HotkeyPicker.js lê .size e escreve .top sem

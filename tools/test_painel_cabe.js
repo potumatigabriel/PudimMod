@@ -69,20 +69,89 @@ while ((m = re.exec(xml)) !== null) {
 }
 check("o XML tem objetos posicionados para medir", itens.length > 20, itens.length);
 
-const foraDaTela = itens.filter(i => i.y2 > CORTE);
-check("nenhum objeto do painel cai fora da tela",
+// ── As linhas de unidade além da quinta não valem por onde estão no XML ────────────────
+//
+// Relato de 13/09: "parece que fica limitado a 4 ou 5 tipos de unidade... tem que ter
+// todas". A seção de unidades é a ÚLTIMA do painel, então ela cresce para baixo — e a
+// posição escrita no XML (até y=1154) é só o lugar da linha SE ela for exibida. Quem decide
+// quantas aparecem é pudim_UnitLinhasCabem(), em tempo de execução, contando com os 182px
+// que o estimador colapsado devolve.
+//
+// Medir estas linhas com a régua das outras acusaria um estouro que não acontece na tela.
+// Elas ganham a régua certa logo abaixo.
+const BASE = +/const PUDIM_UNIT_BASE = (\d+);/.exec(panel)[1];
+const PASSO = +/const PUDIM_UNIT_PASSO = (\d+);/.exec(panel)[1];
+const MARGEM = +/const PUDIM_UNIT_MARGEM = (\d+);/.exec(panel)[1];
+const MAXLINHAS = +/const PUDIM_UNIT_LINHAS = (\d+);/.exec(panel)[1];
+const COMBAT_ALTURA = +/const PUDIM_COMBAT_ALTURA = (\d+);/.exec(panel)[1];
+const reExtra = /^pudim_unit(?:Label|Minus|Val|Plus)(\d+)$/;
+const ehExtra = nome => {
+	const mm = reExtra.exec(nome);
+	return !!mm && +mm[1] >= BASE;
+};
+const fixos = itens.filter(i => !ehExtra(i.nome));
+const extras = itens.filter(i => ehExtra(i.nome));
+check("as linhas extras de unidade existem no XML para a JS poder mostrá-las",
+	extras.length === (MAXLINHAS - BASE) * 4, extras.length);
+
+const foraDaTela = fixos.filter(i => i.y2 > CORTE);
+check("nenhum objeto fixo do painel cai fora da tela",
 	foraDaTela.length === 0, foraDaTela.map(i => i.nome + " (até " + i.y2 + ")").join(", "));
 
-const fim = Math.max(...itens.map(i => i.y2));
+const fim = Math.max(...fixos.map(i => i.y2));
 check("e sobra folga real, não passa raspando", CORTE - fim >= 40,
 	"fim=" + fim + ", corte=" + CORTE + ", folga=" + (CORTE - fim));
 
-// A altura declarada do painel tem de acompanhar o conteúdo: painel curto demais corta, e
-// painel longo demais desenha moldura sobre o jogo sem nada dentro.
+// A altura declarada do painel tem de acompanhar o conteúdo FIXO: painel curto demais
+// corta, e painel longo demais desenha moldura sobre o jogo sem nada dentro. As linhas
+// extras empurram o rodapé em tempo de execução (pudim_AjustarAlturaPainel).
 check("a altura declarada cobre o conteúdo", alturaDeclarada >= fim,
 	"declarada=" + alturaDeclarada + " conteudo=" + fim);
 check("sem sobra exagerada de moldura vazia", alturaDeclarada - fim <= 60,
 	alturaDeclarada - fim);
+
+// ── A régua das linhas extras: a mesma conta da JS, refeita aqui ───────────────────────
+// O painel é ancorado em 50%, e `size.bottom` guarda só o deslocamento (a porcentagem fica
+// à parte — foi o que o indicador de obras ensinou, onde `size.right` de `100%-46` devolve
+// -46). Então, em pixels de tela, o rodapé fica em altura/2 + base + desloca + extra.
+const ancoraBaixo = alturaDeclarada - ANCORA_TOPO;   // o "+496" do XML
+function cabem(altura, estimadorAberto) {
+	const desloca = estimadorAberto ? 0 : -COMBAT_ALTURA;
+	const folga = altura / 2 - ancoraBaixo - desloca - MARGEM;
+	return Math.max(BASE, Math.min(MAXLINHAS, BASE + Math.floor(folga / PASSO)));
+}
+function rodape(altura, n, estimadorAberto) {
+	const desloca = estimadorAberto ? 0 : -COMBAT_ALTURA;
+	return altura / 2 + ancoraBaixo + desloca + Math.max(0, n - BASE) * PASSO;
+}
+// O monitor do jogador, com o estimador como ele nasce: colapsado.
+const nReal = cabem(TELA, false);
+check("na tela do jogador, com o estimador colapsado, cabem todos os tipos medidos",
+	nReal >= 13, nReal + " linha(s)");
+check("e o rodapé continua dentro da tela", rodape(TELA, nReal, false) <= TELA,
+	rodape(TELA, nReal, false) + " > " + TELA);
+// Com o estimador ABERTO sobram 182px a menos: a lista encolhe, mas nunca abaixo das 5
+// linhas que sempre existiram, e mesmo assim não estoura.
+const nAberto = cabem(TELA, true);
+check("com o estimador aberto a lista encolhe em vez de estourar", nAberto < nReal,
+	nAberto + " vs " + nReal);
+check("mas nunca abaixo das 5 linhas de sempre", nAberto >= BASE, nAberto);
+// Telas menores. O piso de BASE linhas é intencional: é o tamanho que sempre funcionou, e
+// perder linha por causa de uma conta seria pior que a moldura passar um pouco.
+for (const h of [768, 900, 1024, 1080, 1440]) {
+	const n = cabem(h, false);
+	check("em " + h + "px de altura a conta não pede mais do que existe",
+		n >= BASE && n <= MAXLINHAS, n);
+	if (n > BASE)
+		check("e o rodapé em " + h + "px fica dentro da tela",
+			rodape(h, n, false) <= h, rodape(h, n, false));
+}
+// A JS tem de usar exatamente estas peças — se ela parar de chamar a conta, o teste acima
+// vira ficção: mediria uma fórmula que ninguém executa.
+check("a JS corta a lista pelo que cabe, e não por um número fixo",
+	/lista\.slice\(0, cabem\)/.test(panel));
+check("e o rodapé é ajustado depois de desenhar",
+	/g_PudimUnitVisiveis = g_PudimUnitLista\.length;[\s\S]{0,80}pudim_AjustarAlturaPainel\(\);/.test(panel));
 check("e o JS usa a MESMA altura do XML (ele reescreve o size ao expandir)",
 	panel.indexOf("50%+" + (alturaDeclarada - ANCORA_TOPO)) > 0,
 	"50%+" + (alturaDeclarada - ANCORA_TOPO));

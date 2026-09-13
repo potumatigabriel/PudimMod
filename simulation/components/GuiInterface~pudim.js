@@ -4511,7 +4511,26 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 	const cmpRangeManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_RangeManager);
 	const allEnts = cmpRangeManager.GetEntitiesByPlayer(player);
 
-	// Contar unidades em treino (pop projetada): build antes de atingir o cap
+	// ── SÓ CONTA A POPULAÇÃO QUE ESTÁ MESMO VINDO ───────────────────────────────────────
+	//
+	// Relato de 13/09: "no começo faz muitas casas, mesmo tendo colocado limite diferente.
+	// n pode no começo, pq cada recurso importa pra upgrades".
+	//
+	// MEDIDO NOS REPLAYS, casas iniciadas nos 3 primeiros minutos:
+	//
+	//   Pudim (com o mod)   mediana 10   (5 a 15, em 7 partidas)
+	//   todos os outros     mediana  2   (1 a 10, em 48 jogadores)
+	//
+	// Cinco vezes mais. A causa está aqui: a projeção somava TODO lote na fila como se a
+	// população já existisse. E o próprio mod enfileira lotes grandes (pudim_LoteIdeal vai
+	// até 10), então bastava um lote para a projeção afundar e a casa sair — uma casa erguida
+	// para gente que ainda não nasceu, e que um cancelamento faz desaparecer.
+	//
+	// A linha agora é o PROGRESSO: lote que já começou vai nascer, e vale contar. Lote
+	// parado na fila é intenção, não população — e é justamente o que o jogador cancela
+	// quando a proporção muda. `progress` é o mesmo campo que a auto-fila usa para decidir
+	// troca de lote ("lote degradado x3 trocado por x10" no log), então está conferido por
+	// comportamento, não suposto.
 	let trainingCount = 0;
 	for (const ent of allEnts) {
 		const cmpPQ = Engine.QueryInterface(ent, IID_ProductionQueue);
@@ -4519,7 +4538,9 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 		const q = cmpPQ.GetQueue();
 		for (const item of q) {
 			// item.productiontype NAO EXISTE — ver "A FILA NAO TEM productiontype" abaixo.
-			if (item.unitTemplate) trainingCount += (item.count || 1);
+			if (!item.unitTemplate) continue;
+			if ((item.progress || 0) <= 0) continue;
+			trainingCount += (item.count || 1);
 		}
 	}
 	const projectedHeadroom = rawHeadroom - trainingCount;
@@ -4653,7 +4674,14 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 	// Cap de casas em paralelo escala com CC+Quartéis: quanto mais edifícios de produção,
 	// mais rápido a população cresce, então precisa de mais casas em construção ao mesmo
 	// tempo pra não bater no teto (antes era sempre 2, fixo, virava gargalo com 2+ CCs/quartéis).
-	const maxParallelHouses = Math.max(2, productionBuildingCount);
+	// UMA DE CADA VEZ ENQUANTO SÓ HÁ O CENTRO CÍVICO.
+	//
+	// O piso era 2, fixo. No primeiro minuto isso significa duas casas ao mesmo tempo — duas
+	// vezes a madeira, de uma vez, exatamente quando ela vale mais (ver a medição acima: os
+	// outros jogadores fazem 2 casas em TRÊS minutos). O teto continua crescendo com os
+	// edifícios de produção, que é o motivo pelo qual ele existe: com 2 CCs e quartéis a
+	// população sobe rápido e uma casa por vez vira gargalo.
+	const maxParallelHouses = Math.max(1, productionBuildingCount);
 	if (houseFoundationCount >= maxParallelHouses)
 		return { _skip: "max_parallel:" + maxParallelHouses + " fnd=" + houseFoundationCount, stuckGhosts: stuckGhosts };
 	// Se uma casa está sendo construída e o headroom projetado ainda está OK, aguarda

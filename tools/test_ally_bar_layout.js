@@ -47,13 +47,15 @@ const re = /name="(pudimAlly\w+)\[n\]"[^>]*size="(\d+) \d+ (\d+) \d+"/g;
 let m;
 while ((m = re.exec(xml))) campos[m[1]] = { x1: +m[2], x2: +m[3], larg: +m[3] - +m[2] };
 
+// Os ícones de recurso GANHARAM NOME em 14/09. Sem nome não dava para movê-los, e o modo
+// compacto de duas colunas move todo mundo. Eles entram em `campos` como os demais, então
+// a checagem de colisão passou a cobri-los de graça.
 const icones = [];
-const reIc = /<object type="image" size="(\d+) \d+ (\d+) \d+" sprite="stretched:session\/icons\/resources/g;
-while ((m = reIc.exec(xml))) icones.push({ nome: "icone", x1: +m[1], x2: +m[2], larg: +m[2] - +m[1] });
-
 check("achou os campos de texto no XML", Object.keys(campos).length >= 8,
 	Object.keys(campos).join(", "));
-check("e os ícones de recurso", icones.length === 4, icones.length);
+check("e os quatro ícones de recurso têm nome, para poderem ser movidos",
+	Object.keys(campos).filter(k => /^pudimAllyIco/.test(k)).length === 4,
+	Object.keys(campos).filter(k => /^pudimAllyIco/.test(k)).join(", "));
 
 // ── Régua conservadora ─────────────────────────────────────────────────────────────────
 const PX_BOLD14 = 9;   // piso observado ~7,1 — 9 é folga deliberada
@@ -159,9 +161,93 @@ const largBarra = mBarra ? (+mBarra[1] + +mBarra[2]) : 0;
 const fim = Math.max(...todos.map(o => o.x2));
 check("o último campo termina dentro da barra", fim <= largBarra,
 	"fim=" + fim + " barra=" + largBarra);
-// A correção veio de redistribuir, não de esticar: a barra não pode ter crescido.
-check("e a barra NÃO ficou mais larga — o espaço saiu de quem sobrava",
-	largBarra === 940, largBarra);
+// Em 08/09 a correção do nome e da população veio de REDISTRIBUIR, e a barra continuou com
+// 940. Em 14/09 ela cresceu — mas por um motivo declarado: entrou a coluna de melhorias
+// ("colocar a quantidade de upgrade, separados em economico e militar"). Crescimento com
+// causa nomeada, e travado no tamanho exato, para um alargamento distraído reprovar.
+const LARGA = +/const PUDIM_LARGURA_LARGA = (\d+);/.exec(js)[1];
+check("a barra tem exatamente a largura declarada na JS", largBarra === LARGA,
+	largBarra + " no XML contra " + LARGA + " na JS");
+check("e o crescimento sobre os 940 de 08/09 é só a coluna de melhorias",
+	largBarra - 940 === campos.pudimAllyUpg.larg + 6,
+	(largBarra - 940) + "px a mais para um campo de " + campos.pudimAllyUpg.larg + "px");
+check("as melhorias cabem em \"E29 M41\"",
+	cabe("E29 M41", campos.pudimAllyUpg.larg, PX_BOLD13),
+	campos.pudimAllyUpg.larg + "px");
+
+// ── O MODO COMPACTO, DE DUAS COLUNAS ───────────────────────────────────────────────────
+//
+// Pedido de 14/09: "deixa cada time lado a lado, usando metade da tela, pra ter menos
+// altura". O layout largo vive no XML; o compacto vive na JS, e é aplicado movendo cada
+// campo. Os dois precisam da MESMA régua — foi por medir um e usar o outro que o campo de
+// população cortou o "+12" em 08/09.
+function lerLayout(nome) {
+	const m = new RegExp("const " + nome + " = \\{([\\s\\S]*?)\\n\\};").exec(js);
+	if (!m) return null;
+	const out = {};
+	const re2 = /"(\w+)":\s*\[(\d+),\s*(\d+)(?:,\s*"([\w-]+)")?\]/g;
+	let mm;
+	while ((mm = re2.exec(m[1])))
+		out[mm[1]] = { x1: +mm[2], x2: +mm[3], larg: +mm[3] - +mm[2], font: mm[4] || null };
+	return out;
+}
+const largo = lerLayout("PUDIM_LAYOUT_LARGO");
+const compacto = lerLayout("PUDIM_LAYOUT_COMPACTO");
+check("a JS declara os dois layouts", !!largo && !!compacto);
+check("e eles têm os mesmos campos",
+	Object.keys(largo).sort().join(",") === Object.keys(compacto).sort().join(","),
+	Object.keys(largo).length + " contra " + Object.keys(compacto).length);
+
+// O layout largo da JS TEM de bater com o XML, senão a primeira volta ao modo largo
+// desmonta a barra em silêncio.
+const divergem = Object.keys(largo).filter(k => {
+	const c = campos["pudimAlly" + k];
+	return !c || c.x1 !== largo[k].x1 || c.x2 !== largo[k].x2;
+});
+check("o layout largo da JS é o mesmo do XML", divergem.length === 0, divergem.join(", "));
+
+// Nada invade o vizinho no compacto.
+const ordemC = Object.keys(compacto).map(k => ({ nome: k, x1: compacto[k].x1, x2: compacto[k].x2 }))
+	.sort((a, b) => a.x1 - b.x1);
+const colC = [];
+for (let i = 1; i < ordemC.length; i++)
+	if (ordemC[i].x1 < ordemC[i - 1].x2)
+		colC.push(ordemC[i - 1].nome + "(" + ordemC[i - 1].x2 + ") > " +
+		          ordemC[i].nome + "(" + ordemC[i].x1 + ")");
+check("no compacto nenhum campo invade o seguinte", colC.length === 0, colC.join("; "));
+
+// E cabe o conteúdo, com a régua da fonte de cada campo. sans-11 e sans-bold-12 saem da
+// mesma proporção do resto: 9 px/caractere em 14, escalado pelo tamanho.
+const PX_BOLD12 = 9 * 12 / 14;
+const PX_11 = 9 * 11 / 14;
+const NICK_C = +/const PUDIM_NICK_MAX_COMPACTO = (\d+);/.exec(js)[1];
+for (const [campo, texto, px] of [
+	["Name", "T1 " + "M".repeat(NICK_C) + "  III", PX_BOLD12],
+	["Pop", "200/200 +0", PX_BOLD12],
+	["Food", "4579·50", PX_11],
+	["Metal", "2275·24", PX_11],
+	["Upg", "E29 M41", PX_11],
+	["Army", "A:66 I:106 C:2 R:38", PX_11],
+	["KD", "214k/169d 1.3", PX_11]
+])
+	check("compacto: " + campo + ' cabe "' + texto + '"',
+		cabe(texto, compacto[campo].larg, px),
+		compacto[campo].larg + "px para " + Math.ceil(texto.length * px) + "px");
+
+// E a coluna compacta tem de caber em metade de uma tela real. 1707 é a largura do monitor
+// do jogador (a mesma que tools/test_painel_cabe.js usa para a altura).
+const COMPACTA = +/const PUDIM_LARGURA_COMPACTA = (\d+);/.exec(js)[1];
+const GAP = +/const PUDIM_COL_GAP = (\d+);/.exec(js)[1];
+const MARGEM = +/const PUDIM_MARGEM_TELA = (\d+);/.exec(js)[1];
+const fimC = Math.max(...ordemC.map(o => o.x2));
+check("a coluna compacta termina na largura declarada", fimC === COMPACTA,
+	fimC + " contra " + COMPACTA);
+check("e duas colunas cabem na tela de 1707px do jogador",
+	2 * COMPACTA + GAP + 2 * MARGEM <= 1707,
+	(2 * COMPACTA + GAP + 2 * MARGEM) + "px");
+// A barra LARGA não caberia duas vezes — é por isso que o compacto existe.
+check("com o layout largo elas NÃO caberiam — o compacto não é enfeite",
+	2 * LARGA + GAP + 2 * MARGEM > 1707);
 
 console.log(fails === 0 ? "\nTODOS OS TESTES PASSARAM" : "\n" + fails + " TESTE(S) FALHARAM");
 process.exit(fails === 0 ? 0 : 1);

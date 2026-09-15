@@ -3490,6 +3490,43 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 
 // ─── DUMMY STUBS PARA FUNÇÕES DELETADAS ──────────────────────────────────────────
 
+// ── A tecnologia é econômica, militar, ou nenhuma das duas ─────────────────────────────
+//
+// Pedido de 14/09: "colocar a quantidade de upgrade, separados em economico e militar".
+//
+// A lista NÃO foi inventada nem lida de memória: saiu dos comandos `research` de 40
+// replays — 92 nomes distintos de tecnologia realmente pesquisados em partida. Os nomes
+// abaixo cobrem os 92, e tools/test_upgrades.js guarda a lista inteira para que um nome
+// novo do jogo não caia no balde errado em silêncio.
+//
+// As FASES ficam de fora das duas contas de propósito: a fase já aparece na barra, ao lado
+// do nome ("II", "III"), e contá-la de novo como melhoria inflaria os dois números sem
+// dizer nada que a linha já não diga.
+//
+// O padrão é MILITAR, e não "desconhecido": as econômicas formam um conjunto fechado e
+// reconhecível (colheita, casa, comércio, assentamento), enquanto o lado militar é uma
+// cauda longa de nomes próprios de civilização — krypteia, silvershields, tyrtean_paeans,
+// reformed_army_sele. Cair no militar erra menos.
+const PUDIM_TECH_ECO = [
+	"gather_",                    // colheita, fazenda, lenha, mineração, capacidade
+	"trade_",                     // comércio
+	"pop_house",                  // capacidade das casas
+	"unlock_shared_dropsites",
+	"unlock_civilians_house",
+	"health_civilians",
+	"colonization",
+	"resettlement",
+	"roman_roads",
+	"wonder_population_cap"
+];
+function pudim_ClasseDaTecnologia(tech) {
+	if (typeof tech !== "string") return null;
+	if (tech.indexOf("phase_") === 0) return null;   // fase não é melhoria: já está na linha
+	for (const p of PUDIM_TECH_ECO)
+		if (tech.indexOf(p) === 0) return "eco";
+	return "mil";
+}
+
 GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
     let cmpPlayerManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_PlayerManager);
     let cmpPlayer = QueryPlayerIDInterface(player, IID_Player);
@@ -3593,8 +3630,28 @@ GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
                 "combatSize": 0,        // unidades no foco — filtro de escaramuça
                 "kills": 0,
                 "deaths": 0,
+                "upgEco": 0, "upgMil": 0,
                 "support": 0, "infantry": 0, "cavalry": 0, "ranged": 0, "siege": 0, "champion": 0
             };
+
+            // ── MELHORIAS PESQUISADAS, SEPARADAS EM ECONÔMICA E MILITAR ─────────────────
+            //
+            // Pedido de 14/09: "no allybar, colocar a quantidade de upgrade, separados em
+            // economico e militar".
+            //
+            // GetResearchedTechs() devolve um Set e está conferido no disco: o autociv usa
+            // `cmpTechnologyManager?.GetResearchedTechs().size` em
+            // simulation/components/GuiInterface~autociv.js. Não é API suposta.
+            const cmpTechAlly = QueryPlayerIDInterface(i, IID_TechnologyManager);
+            if (cmpTechAlly && cmpTechAlly.GetResearchedTechs) {
+                try {
+                    for (const tech of cmpTechAlly.GetResearchedTechs()) {
+                        const c = pudim_ClasseDaTecnologia(tech);
+                        if (c === "eco") stats.upgEco++;
+                        else if (c === "mil") stats.upgMil++;
+                    }
+                } catch (e) {}
+            }
             
             const cmpStatisticsTracker = QueryPlayerIDInterface(i, IID_StatisticsTracker);
             if (cmpStatisticsTracker) {

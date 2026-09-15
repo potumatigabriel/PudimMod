@@ -82,9 +82,11 @@ check("a ordenação por equipe só vale observando",
 check("há um respiro entre blocos de equipe",
 	/const PUDIM_GAP_EQUIPE = \d+;/.test(execB) &&
 	/desloc \+= PUDIM_GAP_EQUIPE;/.test(execB));
+// O respiro entre blocos vale no modo de COLUNA ÚNICA. Com duas colunas (14/09) cada bloco
+// tem a sua posição própria e o respiro vira uma linha vazia entre blocos da mesma coluna.
 check("e o respiro acumula, para o bloco inteiro descer junto",
-	/sz\.top = i \* 26 \+ desloc;/.test(execB) &&
-	/sz\.bottom = \(i \+ 1\) \* 26 \+ desloc;/.test(execB));
+	/desloc \+= PUDIM_GAP_EQUIPE;/.test(execB) &&
+	/const y1 = lin \* PUDIM_ROW_H \+ \(compacto \? 0 : desloc\);/.test(execB));
 // ── COLCHETE NAO E ROTULO, E TAG ────────────────────────────────────────────────────────
 //
 // A primeira versao escrevia "[2] Nome" e o jogo despejou na tela, uma linha por jogador
@@ -206,12 +208,52 @@ const ordenados = PARTIDA.slice().sort((a, b) => ordemEquipe(a.team) - ordemEqui
 check("2 equipes = 1 respiro", respiros(ordenados) === 1, respiros(ordenados));
 const GAP = +/const PUDIM_GAP_EQUIPE = (\d+);/.exec(barra)[1];
 const MAXR = +/const PUDIM_MAX_ROWS = (\d+);/.exec(barra)[1];
-// O pior caso real: 8 jogadores em 4 equipes.
-const alturaMax = MAXR * 26 + 3 * GAP;
-check("mesmo no pior caso a barra não cresce demais",
+// O pior caso real de COLUNA ÚNICA: 8 jogadores em 4 equipes, sem linha de total.
+const alturaMax = 8 * 26 + 3 * GAP;
+check("mesmo no pior caso de coluna única a barra não cresce demais",
 	alturaMax <= 300, alturaMax + "px");
-check("e há linha para todos os jogadores de uma partida cheia",
-	MAXR >= 8, MAXR + " linhas");
+check("e há linha para todos os jogadores de uma partida cheia, mais os totais",
+	MAXR >= 8 + 4, MAXR + " linhas");
+
+// ── DUAS COLUNAS E A LINHA DE TOTAL ────────────────────────────────────────────────────
+//
+// Pedido de 14/09: "colocar uma linha em baixo do ultimo de cada time com o total, se cober
+// deixar mais compacto, e deixa cada time lado a lado, usando metade da tela, pra ter menos
+// altura".
+check("o total de cada equipe é montado no cliente, e é marcado como total",
+	/function pudim_MontarLinhasEquipe\(/.test(execB) &&
+	/"isTotal": true/.test(execB));
+check("e ele soma o que a linha do jogador mostra",
+	/T\.popCount \+= d\.popCount \|\| 0;/.test(execB) &&
+	/T\.res\[r\] \+= Math\.floor\(\(d\.res \|\| \{\}\)\[r\] \|\| 0\);/.test(execB));
+check("equipe de um jogador só não ganha linha de total — seria a mesma linha duas vezes",
+	/if \(!bloco \|\| bloco\.n < 2\) \{ bloco = null; return; \}/.test(execB));
+check("as colunas são equilibradas pela mais curta, para terminarem juntas",
+	/const c = \(colunas < 2 \|\| altura\[0\] <= altura\[1\]\) \? 0 : 1;/.test(execB));
+check("duas colunas só quando cabem de verdade na tela medida",
+	/const cabemDuas = larguraTela >= 2 \* PUDIM_LARGURA_COMPACTA/.test(execB) &&
+	/const colunas = \(observando && cabemDuas\) \? 2 : 1;/.test(execB));
+check("e nunca jogando — lá são poucos aliados e a barra larga é melhor",
+	/\(observando && cabemDuas\)/.test(execB));
+
+// A regra das colunas, espelhada: a altura final é a da coluna mais alta.
+function distribui(blocos, colunas) {
+	const altura = [0, 0];
+	for (const n of blocos) {
+		const c = (colunas < 2 || altura[0] <= altura[1]) ? 0 : 1;
+		if (altura[c] > 0) altura[c] += 1;
+		altura[c] += n;
+	}
+	return Math.max(altura[0], altura[1]);
+}
+// A partida da captura: 4 + 4, cada bloco com a sua linha de total.
+check("8 jogadores em 2 equipes caem de 9 linhas para 5",
+	distribui([5, 5], 1) === 11 && distribui([5, 5], 2) === 5,
+	distribui([5, 5], 1) + " -> " + distribui([5, 5], 2));
+check("4 equipes de 2 ficam equilibradas nas duas colunas",
+	distribui([3, 3, 3, 3], 2) === 7, distribui([3, 3, 3, 3], 2));
+check("e com uma coluna só nada se perde, apenas empilha",
+	distribui([3, 3], 1) === 7, distribui([3, 3], 1));
 
 console.log(fails === 0 ? "\nTODOS OS TESTES PASSARAM" : "\n" + fails + " TESTE(S) FALHARAM");
 process.exit(fails === 0 ? 0 : 1);

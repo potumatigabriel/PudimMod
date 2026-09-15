@@ -102,14 +102,61 @@ check("o teto NÃO é 1 fixo — isso viraria gargalo no meio da partida", teto(
 // foi a CONTA que decide se o limite foi atingido.
 check("o limite configurado continua sendo o critério",
 	/if \(projectedHeadroom > threshold\)/.test(execS));
-check("e o log mostra os dois números para conferir depois",
-	/"pop\+" \+ rawHeadroom \+ "\|trn=" \+ trainingCount \+ ">" \+ threshold/.test(execS));
+check("e o log mostra os números para conferir depois, inclusive o teto aplicado",
+	/"pop\+" \+ rawHeadroom \+ "\|trn=" \+ trainingCount \+\s*\n?\s*"\(usa " \+ trainingUsado \+ "\)>" \+ threshold/.test(execS));
+
+// ── 4. A projeção não olha mais longe que a própria margem ─────────────────────────────
+//
+// Relato de 14/09: "ao iniciar ja tenta fazer uma casa, mesmo n estando dentro da
+// quantidade marcada". MEDIDO no log da partida 20260914-193640, com o limite em 5:
+//
+//   0,1s  BALANCE  fc=4 sol=4 cav=191 berry=200 tree=194 chicken=208
+//   2,1s  CASAS    skip=pop+11|trn=0>5      ← 11 de folga, nada em produção: recusa
+//  14,2s  CASAS    build em (265,843) builders=2 de=wood
+//
+// A folga real mal se mexeu entre 2s e 14s; o que mudou foi a fila encher. E a obra levou
+// DOIS dos oito trabalhadores iniciais, desmontando a abertura de 4 na fruta, 4 na madeira
+// e o cavalo na galinha.
+check("o teto existe e é a própria margem",
+	/const trainingUsado = Math\.min\(trainingCount, threshold\);/.test(execS));
+check("e é o valor com teto que entra na projeção",
+	/const projectedHeadroom = rawHeadroom - trainingUsado;/.test(execS));
+
+function projecaoComTeto(vagas, fila, limite) {
+	let vindo = 0;
+	for (const it of fila) if (it.unitTemplate && (it.progress || 0) > 0) vindo += (it.count || 1);
+	return vagas - Math.min(vindo, limite);
+}
+const LOTE6 = [{ unitTemplate: "u", count: 6, progress: 0.3 }];
+// O caso medido: folga 11, seis em produção, margem 5.
+check("o caso de 14/09 não constrói mais: folga 11 com seis em produção",
+	projecaoComTeto(11, LOTE6, 5) === 6 && projecaoComTeto(11, LOTE6, 5) > 5);
+check("e sem o teto ele construía — o cenário testa o que quebrou",
+	11 - 6 <= 5);
+// A casa continua saindo quando a folga REAL fica perto do fim.
+check("com a folga real já baixa, a casa sai",
+	projecaoComTeto(6, LOTE6, 3) <= 3);
+check("a antecipação máxima é a margem do jogador",
+	projecaoComTeto(100, [{ unitTemplate: "u", count: 90, progress: 0.9 }], 3) === 97);
 
 function decide(vagas, fila, limite) { return projecao(vagas, fila) <= limite; }
 check("limite baixo constrói menos, como o jogador espera",
 	decide(8, LOTE_ANDANDO, 3) === true && decide(8, [], 3) === false);
 check("limite alto constrói mais",
 	decide(8, [], 12) === true);
+
+// ── 5. E o padrão volta a 3 ────────────────────────────────────────────────────────────
+// Pedido de 14/09: "tambem deixar por padrão, ao inves de 5, pra 3, a quantidade de espaco
+// minimo disponivel pra criar casa". Era 5 porque "com 3 a casa saía tarde demais" — mas
+// quem atrasava a casa era a conta da fila, não o número, e ela foi corrigida acima.
+const painel = fs.readFileSync(
+	path.join(base, "gui", "session", "pudim_panel.js"), "utf8");
+check("o padrão do limite de casas é 3",
+	/var g_PudimAutoHouseThreshold = 3;/.test(painel));
+// Os degraus do botão continuam existindo: o número é escolha do jogador, não do mod.
+check("e o jogador continua podendo mudar pelos degraus do botão",
+	/g_PudimAutoHouseThreshold === 5\) g_PudimAutoHouseThreshold = 3;/.test(painel) &&
+	/g_PudimAutoHouseThreshold === 3\) g_PudimAutoHouseThreshold = 0;/.test(painel));
 
 // ── A procedência ──────────────────────────────────────────────────────────────────────
 check("a medição dos replays fica no código, com os dois números",

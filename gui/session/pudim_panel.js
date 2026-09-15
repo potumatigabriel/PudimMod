@@ -1494,10 +1494,14 @@ function pudim_CalmaExigida() {
 var PUDIM_PANIC_MAX_DURATION = 120000; // 2min: força retorno mesmo se detecção ficar "presa" (ex: inimigo parado perto do CC sem atacar)
 
 
-// Sempre inicia em 5 ("faltando 5") em toda partida — intencionalmente NÃO persiste no
-// ConfigDB: o toggle vale só para a sessão atual. Com 3 a casa saía tarde demais e a
-// população travava esperando a obra terminar.
-var g_PudimAutoHouseThreshold = 5;
+// Sempre inicia em 3 ("faltando 3") em toda partida — intencionalmente NÃO persiste no
+// ConfigDB: o toggle vale só para a sessão atual.
+//
+// Era 5, com a justificativa de que "com 3 a casa saía tarde demais e a população travava".
+// Essa justificativa não valia mais: quem fazia a casa sair tarde era a conta, não o número.
+// A projeção da fila descontava lotes inteiros, e o remendo foi subir o limite — pedido do
+// jogador em 14/09 para voltar a 3, junto com o teto da projeção logo abaixo.
+var g_PudimAutoHouseThreshold = 3;
 var g_LastAutoHouseAttempt = 0;      // última vez que uma casa foi CONSTRUÍDA
 var g_LastAutoHouseCheck = 0;        // última vez que a condição foi VERIFICADA
 var g_PudimLastHouseProdCount = 1;   // CC+barracas na última checagem (cooldown adaptativo)
@@ -3128,7 +3132,12 @@ function pudim_ProcessAdvancedAI()
 	const autoHouseCooldown = (g_PudimLastHouseProdCount > 1) ? 6000 : 12000;
 	if (nowTimer - g_LastAutoHouseAttempt > autoHouseCooldown) { // tempo para builder chegar à foundation
 		try {
-			const houseData = Engine.GuiInterfaceCall("pudim_GetAutoHouseData", { threshold: g_PudimAutoHouseThreshold });
+			// protectedIds: a abertura recém-despachada (4 na fruta, 4 na madeira, o cavalo
+			// na galinha) não pode virar construtor de casa — ver a nota na simulação.
+			const houseData = Engine.GuiInterfaceCall("pudim_GetAutoHouseData", {
+				threshold: g_PudimAutoHouseThreshold,
+				protectedIds: pudim_GetProtectedBuilderIds()
+			});
 			if (houseData && houseData.productionBuildingCount !== undefined)
 				g_PudimLastHouseProdCount = houseData.productionBuildingCount;
 			// Fundação "fantasma" (0 builders) durante pânico NÃO é abandono real: os builders

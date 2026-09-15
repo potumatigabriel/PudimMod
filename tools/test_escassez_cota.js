@@ -137,19 +137,37 @@ check("e o recurso abundante não fica sem ninguém",
 // ── A drenagem do excesso ──────────────────────────────────────────────────────────────
 // 1 por ciclo era o certo enquanto cada trabalhador pesava no total. Com 169 de população e
 // 28 de excesso no metal, levava mais de dois minutos.
-function pull(bigPop, surplus) {
-	return bigPop ? Math.max(1, Math.min(4, Math.floor(surplus / 8))) : 1;
-}
-check("com população baixa continua 1 por ciclo, como sempre foi",
-	pull(false, 30) === 1);
-check("com pop alta e o excesso de 28 do metal, drena mais rápido",
-	pull(true, 28) === 3, pull(true, 28) + " por ciclo");
+function pull(surplus) { return Math.max(1, Math.min(4, Math.floor(surplus / 8))); }
+check("com o excesso de 28 do metal, drena mais rápido que 1 por ciclo",
+	pull(28) === 3, pull(28) + " por ciclo");
 check("excesso pequeno ainda tira só 1 — não é para virar realocação em massa",
-	pull(true, 9) === 1);
+	pull(9) === 1);
 check("e há um teto, para não abrir buraco do outro lado",
-	pull(true, 200) === 4);
-check("a regra está no código, com a população como chave",
-	/const pullCount = bigPopRb\s*\n?\s*\? Math\.max\(1, Math\.min\(4, Math\.floor\(worstSurplus \/ 8\)\)\)\s*\n?\s*: 1;/.test(exec));
+	pull(200) === 4);
+check("a regra está no código",
+	/const pullCount = Math\.max\(1, Math\.min\(4, Math\.floor\(worstSurplus \/ 8\)\)\);/.test(exec));
+
+// ── E abaixo de 140 de população ninguém troca de recurso ──────────────────────────────
+//
+// Regra do jogador, 14/09: "quando a população for menor que 140, não pode tirar os
+// trabalhadores do recurso que ele já está, só pode realocar pra lugares melhores pra
+// colher, do mesmo tipo de recurso. o balanceamento será conforme as unidades forem
+// nascendo."
+//
+// O piso era 100, e mesmo abaixo dele havia uma exceção: recurso com ZERO coletores podia
+// puxar gente de outro. As duas coisas saíram.
+const PISO = +/const PUDIM_POP_REBALANCE = (\d+);/.exec(exec)[1];
+check("o piso de população é 140", PISO === 140, PISO);
+check("e é ele que liga a troca de recurso",
+	/const bigPopRb = popCountRb >= PUDIM_POP_REBALANCE;/.test(exec));
+check("a troca só é considerada com bigPopRb — não há mais caminho por baixo",
+	/if \(bigPopRb && worstSurplusRes && worstDeficitType/.test(exec));
+check("a exceção do recurso zerado saiu de vez",
+	!/if \(!bigPopRb && activeGatherers\[t\]\.length !== 0\) return best;/.test(exec));
+// O que CONTINUA valendo abaixo de 140: trocar de lugar dentro do MESMO recurso.
+check("realocar para um lugar melhor do mesmo recurso continua existindo",
+	/rt2\.generic !== targetResType\.generic\) continue;/.test(exec) &&
+	/redirectTarget:/.test(exec));
 
 // ── Dá para conferir depois da partida ─────────────────────────────────────────────────
 check("o fator de escassez sai no log de balanceamento",

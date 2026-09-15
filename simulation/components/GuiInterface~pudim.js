@@ -1260,11 +1260,24 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 
 	// Puxar um coletor ATIVO de um recurso para outro custa a viagem inteira (ida, volta e
 	// o tempo parado no caminho). Com população pequena isso pesa muito no total coletado,
-	// então só vale com desequilíbrio extremo — o certo é esperar as unidades que estão
-	// nascendo e mandá-las direto para o recurso em falta.
-	// Acima de 100 de população, um coletor a menos é ruído: pode rebalancear normalmente.
+	// então o certo é esperar as unidades que estão nascendo e mandá-las direto para o
+	// recurso em falta.
+	//
+	// REGRA DO JOGADOR, 14/09: "quando a população for menor que 140, não pode tirar os
+	// trabalhadores do recurso que ele já está, só pode realocar pra lugares melhores pra
+	// colher, do mesmo tipo de recurso. o balanceamento será conforme as unidades forem
+	// nascendo."
+	//
+	// Antes o piso era 100, e mesmo abaixo dele havia uma exceção: um recurso com ZERO
+	// coletores podia puxar gente de outro. A exceção acabou — abaixo de 140 ninguém troca
+	// de recurso, ponto. Quem cobre o buraco é quem nasce, que já vai direto para lá.
+	//
+	// O que CONTINUA valendo abaixo de 140 é a realocação dentro do MESMO recurso: o
+	// `longWalkers` no fim desta função tira o coletor de uma árvore longe e o põe numa
+	// árvore perto do armazém. Mesmo recurso, lugar melhor — é o que ele pediu.
+	const PUDIM_POP_REBALANCE = 140;
 	const popCountRb = cmpPlayer ? cmpPlayer.GetPopulationCount() : 0;
-	const bigPopRb = popCountRb > 100;
+	const bigPopRb = popCountRb >= PUDIM_POP_REBALANCE;
 	const surplusThreshold = bigPopRb ? 8 : 20;
 
 	if (totalWeight > 0) {
@@ -1289,18 +1302,16 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 			}
 		}
 
-		// Tirar worker ativo SOMENTE se:
+		// Tirar worker ativo de um recurso e pôr em OUTRO, somente se:
+		//   0. População >= 140 — abaixo disso ninguém troca de recurso (regra de 14/09)
 		//   1. Sem workers ociosos disponíveis (novos nascidos têm prioridade absoluta)
 		//   2. Base não está sob ataque
-		//   3. Excesso acima do limiar (20 com pop baixa, 8 com pop > 100)
-		//   4. Existe recurso carente — com pop baixa, apenas se estiver com ZERO coletores
-		// Regra: sempre preferir esperar novos trabalhadores de produção; com pop pequena só
-		// redirecionar ativo quando o recurso está completamente sem cobertura.
-		const worstDeficitType = activeWeights.reduce((best, t) => {
-			if (!bigPopRb && activeGatherers[t].length !== 0) return best;
-			return deficits[t] > (best ? deficits[best] : 0) ? t : best;
-		}, null);
-		if (worstSurplusRes && worstDeficitType && activeGatherers[worstSurplusRes].length > 0 &&
+		//   3. Excesso acima do limiar (8 coletores acima da cota)
+		//   4. Existe recurso carente
+		const worstDeficitType = activeWeights.reduce((best, t) =>
+			deficits[t] > (best ? deficits[best] : 0) ? t : best, null);
+		if (bigPopRb && worstSurplusRes && worstDeficitType &&
+		    activeGatherers[worstSurplusRes].length > 0 &&
 		    idleWorkersList.length === 0 && !baseUnderAttack) {
 			const candidates = activeGatherers[worstSurplusRes];
 			candidates.sort((a, b) => {
@@ -1323,13 +1334,11 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 			// para uma cota de 21. A 1 por ciclo de 5s isso leva mais de dois minutos para
 			// corrigir, e enquanto isso a comida ficava em 91 com 43 coletores.
 			//
-			// Continua conservador: com pop baixa é 1, como sempre foi, porque ali a viagem
-			// perdida pesa de verdade. Acima de 100 de população o excesso é drenado a até 4
-			// por ciclo, e mesmo assim proporcional — excesso de 9 tira 1, de 32 tira 4.
-			// Nunca mais que um quarto do excesso, para não abrir buraco do outro lado.
-			const pullCount = bigPopRb
-				? Math.max(1, Math.min(4, Math.floor(worstSurplus / 8)))
-				: 1;
+			// Daqui para baixo só se chega com 140 ou mais de população — abaixo disso a
+			// troca de recurso nem é considerada. O dreno é proporcional: excesso de 9 tira
+			// 1, de 32 tira 4. Nunca mais que um quarto do excesso, para não abrir buraco do
+			// outro lado.
+			const pullCount = Math.max(1, Math.min(4, Math.floor(worstSurplus / 8)));
 			let count = 0;
 			for (const ent of candidates) {
 				if (count >= pullCount) break;
@@ -4543,8 +4552,31 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 			trainingCount += (item.count || 1);
 		}
 	}
-	const projectedHeadroom = rawHeadroom - trainingCount;
-	if (projectedHeadroom > threshold) return { _skip: "pop+" + rawHeadroom + "|trn=" + trainingCount + ">" + threshold, stuckGhosts: [] };
+	// ── E A PROJEÇÃO NÃO PODE OLHAR MAIS LONGE QUE A PRÓPRIA MARGEM ─────────────────────
+	//
+	// Relato de 14/09: "ao iniciar ja tenta fazer uma casa, mesmo n estando dentro da
+	// quantidade marcada".
+	//
+	// MEDIDO no log da partida 20260914-193640, com o limite em 5:
+	//
+	//   0,1s  BALANCE  fc=4 sol=4 cav=191 berry=200 tree=194 chicken=208
+	//   2,1s  CASAS    skip=pop+11|trn=0>5      ← 11 de folga, nada em produção: recusa
+	//  14,2s  CASAS    build em (265,843) builders=2 de=wood
+	//
+	// Entre 2s e 14s a folga real mal se mexeu — o que mudou foi a fila encher. A projeção
+	// descontava o treino inteiro, então bastava o CC engatar seis de população para uma
+	// folga de 11 virar 5 e a casa sair aos 14 segundos, com madeira que naquele minuto vale
+	// armazém e celeiro. Pior: levou DOIS dos oito trabalhadores iniciais para a obra,
+	// desmontando a abertura de 4 na fruta, 4 na madeira e o cavalo na galinha.
+	//
+	// O teto: olhar adiante no MÁXIMO o tanto da margem que o jogador pediu. A margem já é a
+	// folga de segurança dele; descontar a fila inteira por cima disso é contar a mesma
+	// reserva duas vezes. Com o teto, a casa só pode sair quando a folga REAL já caiu a
+	// 2x a margem — com 3, folga 6 — e a de 11 do início nunca chega lá.
+	const trainingUsado = Math.min(trainingCount, threshold);
+	const projectedHeadroom = rawHeadroom - trainingUsado;
+	if (projectedHeadroom > threshold) return { _skip: "pop+" + rawHeadroom + "|trn=" + trainingCount +
+		"(usa " + trainingUsado + ")>" + threshold, stuckGhosts: [] };
 
 	let civ = "gaul";
 	let ccPosList = [];
@@ -4696,7 +4728,10 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 	let builders = [];
 	let workerPosList = [];
 	let idleBuilders = [];
-	
+	// Quem o painel marcou como intocável agora (abertura recém-despachada, construtor a
+	// caminho de outra obra). Mesmo campo que o auto-trabalho já recebia.
+	const protectedHouseIds = new Set(((data && data.protectedIds) || []).map(Number));
+
 	for (const ent of allEnts) {
 		const cmpBuilder = Engine.QueryInterface(ent, IID_Builder);
 		if (!cmpBuilder) continue;
@@ -4710,6 +4745,17 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 		}
 		if (!canBuildHouse) continue;
 		
+		// A ABERTURA NÃO É MATÉRIA-PRIMA DE CASA.
+		//
+		// Pedido de 14/09: "o inicio tm que ser 4 trabalhadores nas frutas e 4 guerreiras na
+		// madeira e o cavalo nas galinhas". O log da partida 20260914-193640 mostra a casa
+		// das 14,2s saindo com `builders=2` — dois dos oito iniciais, que tinham acabado de
+		// receber ordem de coleta e estavam protegidos por 15 e 20 segundos.
+		//
+		// A proteção existia e era respeitada pelo auto-trabalho e pelo armazém; a casa era
+		// a única obra que não recebia a lista. Agora recebe.
+		if (protectedHouseIds.has(ent)) continue;
+
 		const cmpUnitAI = Engine.QueryInterface(ent, IID_UnitAI);
 		const _ord0ah = cmpUnitAI && cmpUnitAI.orderQueue && cmpUnitAI.orderQueue.length > 0 ? cmpUnitAI.orderQueue[0] : null;
 		if (_ord0ah && _ord0ah.type === "Repair") continue; // PROTEGE QUEM ESTÁ CONSTRUINDO

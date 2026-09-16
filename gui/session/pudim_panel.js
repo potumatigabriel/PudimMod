@@ -1771,6 +1771,29 @@ var g_PudimPanicAccum = 0;
 
 /** Acumulador de tempo para re-ativar auto-fila */
 var g_PudimAutoQueueAccum = 0;
+const PUDIM_AUTOQUEUE_INTERVAL = 3000;
+// Estava sem vaga de população na última verificação? A transição de sem-vaga para
+// com-vaga é o gatilho de retomada imediata; ver o bloco da auto-fila no tique.
+var g_PudimSemVagaPop = false;
+
+/**
+ * Quantas unidades ainda cabem na população agora — 0 quando está no teto.
+ *
+ * `popLimit - popCount` é a conta do próprio jogo para cinzar o botão de treino, e o
+ * moderngui a repete em gui/session/PanelScripts.js. Vem de `g_SimState`, que o cliente já
+ * atualiza a cada quadro: ler daqui não custa chamada nenhuma à simulação.
+ *
+ * Devolve 1 quando não há estado — "não sei" não pode virar "pare de treinar".
+ */
+function pudim_VagasPopulacao()
+{
+	try {
+		const ps = g_SimState && g_SimState.players &&
+		           g_SimState.players[Engine.GetPlayerID()];
+		if (!ps || ps.popLimit === undefined || ps.popCount === undefined) return 1;
+		return Math.max(0, ps.popLimit - ps.popCount);
+	} catch (e) { return 1; }
+}
 
 /** Cache de templates por edifício — usado para reiniciar fila vazia */
 var g_PudimAutoQueueTemplates = {};
@@ -2163,8 +2186,26 @@ function pudim_Tick(dt)
 
 	// Auto-Fila: re-ativa autoqueue em todos os edifícios a cada 3 segundos (se habilitado)
 	if (g_PudimAdvancedAIEnabled["autoqueue"]) {
+		// ── "LOGO QUE MORRER UNIDADES, COLOCAR PRA TREINAR IMEDIATAMENTE" ────────────────
+		//
+		// A auto-fila roda a cada 3s, e no teto de população ela não enfileira nada (ver a
+		// nota em `vagasPop`). Esperar o ciclo devolveria até 3 segundos de produção parada
+		// logo depois de uma batalha — que é justamente quando repor tropa mais importa.
+		//
+		// A vaga é lida do estado de simulação que o cliente já tem em mãos, sem chamada
+		// nova: `g_SimState.players[<id>]` é o caminho que o moderngui usa
+		// (input~constructionGlobalQueue.js, PanelScripts.js). Quando ela SOBE de zero, o
+		// acumulador vai ao limite e o próximo quadro processa.
+		const vagasAgora = pudim_VagasPopulacao();
+		if (g_PudimSemVagaPop && vagasAgora > 0) {
+			g_PudimAutoQueueAccum = PUDIM_AUTOQUEUE_INTERVAL;
+			pudim_Log("INFO", "QUEUE", "abriu vaga de população (" + vagasAgora +
+				"): retomando o treino sem esperar o ciclo");
+		}
+		g_PudimSemVagaPop = vagasAgora === 0;
+
 		g_PudimAutoQueueAccum += dt;
-		if (g_PudimAutoQueueAccum >= 3000)
+		if (g_PudimAutoQueueAccum >= PUDIM_AUTOQUEUE_INTERVAL)
 		{
 			g_PudimAutoQueueAccum = 0;
 			pudim_ProcessAutoQueue();
@@ -2260,10 +2301,30 @@ function pudim_ProcessAutoQueue()
 				pudim_Log("DEBUG", "QUEUE", "treino em espera: " + g_PudimMadeiraReservada +
 					" de madeira reservados para campos de comida");
 		}
-		// No teto de população o motor recusa ligar a auto-fila e imprime
-		// "Não foi possível definir auto-fila para a unidade, desativando" em cima da tela.
-		// Insistir a cada 3s só produz spam: a fila volta sozinha quando abrir vaga.
-		const popCheio = (aqData.popMax || 0) > 0 && (aqData.popCount || 0) >= aqData.popMax;
+		// ── NÃO ENFILEIRAR O QUE NÃO PODE NASCER ────────────────────────────────────────
+		//
+		// Pedido de 15/09: "depois que a população atinge a população maxima, parar de
+		// treinar, Não ficar colocando unidades na fila (economizar recursos)... mas logo
+		// que morrer unidades, colocar pra treinar imediatamente".
+		//
+		// MEDIDO no replay 2026-09-14_0004, amostra de população a cada 30s contra os
+		// comandos `train` da mesma janela. A partir dos 800s a população ficou cravada em
+		// 200 por dez amostras seguidas, e mesmo assim saíram treinos:
+		//
+		//   t=800s  pop 200   train  2        t=1037s  pop 200   train  0
+		//   t=859s  pop 200   train  1        t=1067s  pop 200   train 26
+		//   t=948s  pop 200   train  3        t=1096s  pop 200   train  5
+		//
+		// Vinte e seis unidades enfileiradas numa janela em que a população não subiu um
+		// ponto. O recurso sai do banco quando o lote começa, e fica preso num lote que não
+		// nasce — exatamente o desperdício do relato.
+		//
+		// A regra é a mesma nos dois tetos, e por isso é o teto ATUAL que manda: `vagas` é
+		// quantas unidades ainda cabem agora. Zero vagas, nenhum lote. E o lote nunca é
+		// maior que as vagas — enfileirar 10 com 3 de espaço prende o custo de 7 unidades
+		// que só nasceriam depois de uma casa ou de uma morte.
+		const vagasPop = Math.max(0, (aqData.popLimit || 0) - (aqData.popCount || 0));
+		const popCheio = vagasPop <= 0;
 
 		// Cachear template e aprender o tamanho de lote que o usuário configurou.
 		// IMPORTANTE: qItem.count é quanto FALTA treinar naquele lote — o motor decrementa
@@ -2568,9 +2629,10 @@ function pudim_ProcessAutoQueue()
 							tplDesejado = alvo.tpl;
 					}
 
-					if (isOurs && (cur.progress || 0) <= 0 && tplDesejado) {
+					if (isOurs && (cur.progress || 0) <= 0 && tplDesejado && !popCheio) {
 						const affordable = pudim_ComputeAffordableCount(tplDesejado, desiredCount, res);
-						const lote = Math.max(1, Math.min(desiredCount, affordable));
+						// O lote nunca passa das vagas de populacao: ver a nota em `vagasPop`.
+						const lote = Math.max(1, Math.min(desiredCount, affordable, vagasPop));
 						if (cur.id !== undefined && affordable >= 1) {
 							Engine.PostNetworkCommand({ "type": "stop-production", "entity": b.ent, "id": cur.id });
 							Engine.PostNetworkCommand({ "type": "train", "entities": [b.ent],
@@ -2583,7 +2645,8 @@ function pudim_ProcessAutoQueue()
 						continue;
 					}
 
-					if (isOurs && (cur.progress || 0) <= 0 && curCount < desiredCount) {
+					if (isOurs && (cur.progress || 0) <= 0 && curCount < desiredCount &&
+					    desiredCount <= vagasPop) {
 						const tpl = cur.unitTemplate;
 						// Exige poder pagar o lote CHEIO com o estoque atual, sem contar o
 						// reembolso do cancelamento: é conservador de propósito, para nunca
@@ -2684,7 +2747,8 @@ function pudim_ProcessAutoQueue()
 
 			// Custo real do template: enfileira o máximo que der; se não der pra nem 1,
 			// espera o próximo ciclo (evita comando inválido que pode disparar o bug nativo)
-			const affordable = pudim_ComputeAffordableCount(template, desiredCount, res);
+			const affordable = Math.min(
+				pudim_ComputeAffordableCount(template, desiredCount, res), vagasPop);
 			if (affordable <= 0) continue;
 			Engine.PostNetworkCommand({ "type": "train", "entities": [b.ent], "template": template, "count": affordable });
 			g_PudimQueueSeededAt[b.ent] = nowQueue;

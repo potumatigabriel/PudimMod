@@ -5943,8 +5943,14 @@ GuiInterface.prototype.pudim_GetProductionBuildings = function(player, data) {
 	}
 	// População: o painel precisa dela para não insistir em ligar a auto-fila no teto, onde
 	// o motor recusa e imprime "Não foi possível definir auto-fila para a unidade" na tela.
+	//
+	// popLimit entrou em 15/09. O teto que importa para NÃO ENFILEIRAR é o atual, não o
+	// máximo da partida: `GetPopulationLimit() - GetPopulationCount()` é quantas unidades
+	// ainda podem nascer agora, e é a conta que o próprio jogo usa para cinzar o botão de
+	// treino (moderngui a repete em PanelScripts.js: `popLimit - popCount`).
 	return { "buildings": buildings, "femaleCount": femaleCount, "resources": resources,
 	         "popCount": cmpPlayer ? cmpPlayer.GetPopulationCount() : 0,
+	         "popLimit": cmpPlayer ? cmpPlayer.GetPopulationLimit() : 0,
 	         "popMax":   cmpPlayer ? cmpPlayer.GetMaxPopulation()  : 0 };
 };
 // ─── Obras em andamento, para o indicador de canto ───────────────────────────────────

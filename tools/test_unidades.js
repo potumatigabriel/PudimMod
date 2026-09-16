@@ -207,7 +207,7 @@ check("e o comando é stop-production seguido de train",
 
 // A trava que já existia continua sendo a certa: lote do jogador não se toca.
 check("só troca lote RECONHECIDAMENTE do mod",
-	/if \(isOurs && \(cur\.progress \|\| 0\) <= 0 && tplDesejado\)/.test(panel));
+	/if \(isOurs && \(cur\.progress \|\| 0\) <= 0 && tplDesejado && !popCheio\)/.test(panel));
 check("e 'nosso' é o que bate com a última semeadura do próprio mod",
 	/const isOurs = !!\(cur\.unitTemplate && seededTpl && cur\.unitTemplate === seededTpl\);/.test(panel));
 check("nunca troca lote que já começou — cancelar jogaria fora o tempo investido",

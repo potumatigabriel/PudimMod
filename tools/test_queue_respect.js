@@ -81,7 +81,11 @@ check("o log diz de quem foi a escolha", /\(doJogador \? " \(escolha do jogador\
 // ── 3. A quantidade continua se adaptando ao estoque (pedido anterior do jogador) ───────
 // "se tiver menos recursos que a quantidade selecionada faz o que da, depois volta ao normal"
 check("a quantidade ainda passa por pudim_ComputeAffordableCount",
-	/const affordable = pudim_ComputeAffordableCount\(template, desiredCount, res\);/.test(PANEL));
+	/const affordable = Math\.min\([\s\S]{0,40}?pudim_ComputeAffordableCount\(template, desiredCount, res\), vagasPop\);/.test(PANEL));
+// E o estoque nao e o unico teto: desde 15/09 o lote tambem nao passa das vagas de
+// populacao. Enfileirar o que nao pode nascer prende recurso num lote parado.
+check("e tambem pelas vagas de populacao",
+	/const vagasPop = Math\.max\(0, \(aqData\.popLimit \|\| 0\) - \(aqData\.popCount \|\| 0\)\);/.test(PANEL));
 
 // Réplica: com 146 de comida e aldeã a 50, cabem 2 — foi o "2" que apareceu na tela.
 function cabem(estoque, custo, desejado) { return Math.min(desejado, Math.floor(estoque / custo)); }

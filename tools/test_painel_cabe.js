@@ -163,6 +163,31 @@ check("e está visível — foi ela que sumiu da tela",
 	serie.every(i => i.y2 <= CORTE),
 	serie.map(i => i.nome + ":" + i.y2).join(" "));
 
+// A faixa horizontal de um objeto, em px, quando ela é comparável. O painel tem 320px de
+// largura (ver a âncora no XML), então `56%` vale 179px e `100%-8` vale 312. Formas que não
+// se reduzem a um número (aritmética com percentagem no meio) devolvem null: melhor não
+// comparar do que comparar errado.
+const LARG_PAINEL = 320;
+function coordX(t) {
+	let m = /^(\d+)%([+-]\d+)?$/.exec(t);
+	if (m) return LARG_PAINEL * (+m[1]) / 100 + (m[2] ? +m[2] : 0);
+	m = /^-?\d+$/.exec(t);
+	return m ? +t : null;
+}
+function faixaX(nome) {
+	const re3 = new RegExp('name="' + nome + '"[^>]*size="(\\S+) \\S+ (\\S+) \\S+"');
+	const mm = re3.exec(xml);
+	if (!mm) return null;
+	const a = coordX(mm[1]), b = coordX(mm[2]);
+	return (a === null || b === null) ? null : [a, b];
+}
+
+/** O objeto recebe clique? Só botão recebe; texto e imagem, não. */
+function ehBotao(nome) {
+	const mm = new RegExp('name="' + nome + '"([^>]*)').exec(xml);
+	return !!mm && /type="button"/.test(mm[1]);
+}
+
 // Sem sobreposição: dois botões no mesmo y é clique roubado.
 const ordenados = itens.slice().sort((a, b) => a.y1 - b.y1);
 const sobrepostos = [];
@@ -173,7 +198,21 @@ for (let i = 0; i < ordenados.length; i++)
 		// Sobreposição deliberada: fundo que pisca, rótulo dentro de botão, e os pares
 		// lado a lado (mesma faixa de y, colunas diferentes).
 		if (a.nome.indexOf("Flash") >= 0 || b.nome.indexOf("Flash") >= 0) continue;
-		if (a.y1 === b.y1 && a.y2 === b.y2) continue;
+		// Mesma faixa de y = par lado a lado. A isenção era CEGA: aceitava qualquer par com
+		// o mesmo y sem olhar o x, e por isso nunca teria pego dois botões empilhados um
+		// sobre o outro. Agora ela só vale se as faixas horizontais forem mesmo disjuntas.
+		if (a.y1 === b.y1 && a.y2 === b.y2) {
+			const xa = faixaX(a.nome), xb = faixaX(b.nome);
+			if (!xa || !xb) continue;                 // x com porcentagem que não dá para comparar
+			if (xa[1] <= xb[0] || xb[1] <= xa[0]) continue;   // lado a lado de verdade
+			// Empilhados no mesmo retângulo. Isso é legítimo quando no máximo UM dos dois
+			// recebe clique — é como a barra de probabilidade é montada (fundo, preenchimento
+			// e a porcentagem por cima, os três no mesmo lugar). O que o teste existe para
+			// pegar é DOIS BOTÕES no mesmo ponto, que é clique roubado.
+			if (!(ehBotao(a.nome) && ehBotao(b.nome))) continue;
+			sobrepostos.push(a.nome + " x " + b.nome + " (dois botões no mesmo lugar)");
+			continue;
+		}
 		if (a.nome.indexOf("Bg") >= 0 || b.nome.indexOf("Bg") >= 0) continue;
 		// A barra de titulo: o titulo fica na moldura (y negativo) e os tres botoes nos
 		// cantos. Eles convivem de proposito e nao disputam clique.

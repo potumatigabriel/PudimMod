@@ -309,7 +309,7 @@ const PUDIM_CONFIG_ELEMENTS = [
 	"pudim_toggleBarterBtn", "pudim_toggleDropsitesBtn", "pudim_toggleRetreatBtn",
 	"pudim_toggleFocusBtn", "pudim_toggleGarrisonBtn", "pudim_toggleDebugBtn",
 	"pudim_togglePanicBtn", "pudim_panicStatus", "pudim_backToWorkBtn2",
-	"pudim_toggleAutoHouseBtn", "pudim_toggleCounterTrainBtn", "pudim_toggleAutoQueueBtn",
+	"pudim_pauseTrainBtn", "pudim_siegeGarrisonBtn", "pudim_toggleAutoHouseBtn", "pudim_toggleCounterTrainBtn", "pudim_toggleAutoQueueBtn",
 	"pudim_counselorHeader", "pudim_counselorTip", "pudim_counselorCameraBtn"
 ];
 
@@ -546,6 +546,8 @@ function pudim_Init()
 	// Inicializar cores corretas dos botões de IA avançada
 	pudim_UpdateAdvancedAILabels();
 	pudim_UpdateAutoHouseButton();
+	// A pausa NÃO persiste entre partidas: cada partida começa treinando.
+	pudim_AtualizarBotaoPausa();
 
 	// Ativar auto-fila em todos os edifícios de produção no início da partida
 	// O acumulador começa em 7000 para disparar logo no primeiro tick (após 1s)
@@ -1628,6 +1630,115 @@ var g_PudimLastDropsiteLogTime = 0;
 var g_PudimLastDropsiteDiagTime = 0; // Timer separado para log diagnóstico (evita conflito com GATE)
 var g_PudimFarmDebugLastLog = 0;
 
+// ─── Pausar o treino de unidades ───────────────────────────────────────────────────────
+//
+// Pedido de 17/09: "adicionar botão de pausar a criação de unidades, as vezes quero fazer
+// arma de cerco e n da, pq vai mais rapido as unidades".
+//
+// O problema é de corrida por recurso, não de proporção: a auto-fila repõe lote a cada 3s e
+// consome a madeira e o metal antes de o jogador juntar o suficiente para um aríete. Deixar
+// a proporção em zero não resolve — o mod continua semeando o que o edifício sabe treinar.
+//
+// A pausa é EXPLÍCITA e do jogador, então ela vale contra o mod inteiro: nem a auto-fila nem
+// o contra-treino enfileiram enquanto estiver ligada.
+//
+// O que ela NÃO faz: cancelar o que já está em produção. O recurso do lote em andamento já
+// saiu do banco, e cancelar jogaria fora o tempo investido — o jogador pediu para parar de
+// criar, não para perder o que já pagou.
+var g_PudimTreinoPausado = false;
+
+function pudim_TogglePauseTrain() {
+	g_PudimTreinoPausado = !g_PudimTreinoPausado;
+	pudim_AtualizarBotaoPausa();
+
+	if (g_PudimTreinoPausado) {
+		// A auto-fila NATIVA do motor também precisa parar: ela repõe o lote sozinha, sem
+		// passar por nenhuma decisão do mod, e deixá-la ligada faria o botão não pausar
+		// nada. `autoqueue-off` é o mesmo comando que a auto-fila do mod já usa.
+		//
+		// Desligar UMA VEZ, no clique, e não a cada ciclo: se o jogador religar a auto-fila
+		// de um edifício com a pausa ativa, a ordem é dele e o mod não a desfaz.
+		try {
+			const d = Engine.GuiInterfaceCall("pudim_GetProductionBuildings");
+			const off = ((d && d.buildings) || []).filter(b => b.autoqueue).map(b => b.ent);
+			if (off.length)
+				Engine.PostNetworkCommand({ "type": "autoqueue-off", "entities": off });
+			pudim_Log("INFO", "QUEUE", "treino PAUSADO pelo jogador; auto-fila desligada em " +
+				off.length + " edifício(s)");
+		} catch (e) {
+			pudim_Log("WARN", "QUEUE", "treino pausado, mas a auto-fila do motor não pôde ser desligada");
+		}
+	} else {
+		pudim_Log("INFO", "QUEUE", "treino retomado pelo jogador");
+	}
+}
+
+function pudim_AtualizarBotaoPausa() {
+	const lbl = Engine.TryGetGUIObjectByName("pudim_pauseTrainLabel");
+	if (lbl) try {
+		lbl.caption = g_PudimTreinoPausado ? "▶ Retomar treino" : "❚❚ Pausar treino";
+		lbl.textcolor = g_PudimTreinoPausado ? "255 190 120 255" : "255 255 255 255";
+	} catch (e) {}
+}
+
+/**
+ * Chama infantaria para dentro das armas de cerco.
+ *
+ * Pedido de 17/09: "nas armas de cerco, colocar opção de chamar unidades... vai colocar
+ * unidades variadas entre de perto e a distancia, nas armas de cerco de destruir construção;
+ * nas armas de cerco de torre, colocar preferencialmente as unidades que atiram a distancia.
+ * Cavalos não conseguem entrar nelas".
+ *
+ * Quem decide QUEM entra em QUE máquina é a simulação (pudim_GetSiegeGarrisonPlan), que só
+ * olha; o comando de guarnecer sai daqui, que é a regra do mod inteiro.
+ *
+ * Age sobre o que estiver SELECIONADO. Sem seleção, sobre todas as máquinas com vaga —
+ * clicar num botão e não acontecer nada é pior do que fazer o óbvio.
+ */
+function pudim_GuarnecerCerco()
+{
+	let alvos = [];
+	try {
+		if (typeof g_Selection !== "undefined" && g_Selection && g_Selection.toList)
+			alvos = g_Selection.toList().map(Number);
+	} catch (e) {}
+
+	let plano;
+	try { plano = Engine.GuiInterfaceCall("pudim_GetSiegeGarrisonPlan", { "alvos": alvos }); }
+	catch (e) {
+		pudim_Log("ERROR", "CERCO", "pudim_GetSiegeGarrisonPlan falhou: " + e);
+		return;
+	}
+	if (!plano || !plano.ordens || !plano.ordens.length) {
+		// O diagnóstico separa as três causas que dão a mesma tela de "não aconteceu nada":
+		// não há máquina que carregue gente, todas estão cheias, ou não há infantaria livre.
+		const d = (plano && plano._dbg) || {};
+		pudim_Log("WARN", "CERCO", "nada a guarnecer: maquinas=" + (d.maquinas || 0) +
+			" vagas=" + (d.livres || 0) + " infantaria=" + (d.candidatos || 0) +
+			(alvos.length ? " (selecao de " + alvos.length + ")" : " (sem selecao)"));
+		return;
+	}
+
+	let total = 0;
+	for (const o of plano.ordens) {
+		Engine.PostNetworkCommand({
+			"type": "garrison",
+			"entities": o.unidades,
+			"target": o.siege,
+			"queued": false
+		});
+		total += o.unidades.length;
+		// Protege quem foi mandado: sem isto o auto-trabalho e o armazém proativo podiam
+		// sequestrar o soldado no caminho, antes de ele chegar na máquina. É a mesma
+		// proteção que a abertura da partida usa.
+		const validade = Date.now() + 20000;
+		for (const u of o.unidades) pudim_ProtectBuilder(u, validade);
+	}
+	pudim_Log("INFO", "CERCO", total + " unidade(s) chamadas para " + plano.ordens.length +
+		" arma(s) de cerco" +
+		(plano.ordens.some(o => o.torre) ? " (inclui torre: preferência para distância)" : ""));
+}
+
 function pudim_ToggleAutoHouse() {
 	if (g_PudimAutoHouseThreshold === 12) g_PudimAutoHouseThreshold = 8;
 	else if (g_PudimAutoHouseThreshold === 8) g_PudimAutoHouseThreshold = 5;
@@ -2282,6 +2393,10 @@ function pudim_ComputeAffordableCount(template, desiredCount, res)
  */
 function pudim_ProcessAutoQueue()
 {
+	// PAUSA DO JOGADOR: nada de fila enquanto ela estiver ligada. Sai antes de qualquer
+	// leitura — com a pausa ativa não há decisão a tomar, e continuar aprendendo template e
+	// tamanho de lote só gastaria chamada à simulação.
+	if (g_PudimTreinoPausado) return;
 	try {
 		const aqData = Engine.GuiInterfaceCall("pudim_GetProductionBuildings");
 		if (!aqData || !aqData.buildings || aqData.buildings.length === 0) return;
@@ -5131,13 +5246,13 @@ const PUDIM_ABAIXO_DO_COMBATE = [
 	"pudim_stoneVal", "pudim_metalLabel", "pudim_metalMinus", "pudim_metalPlus",
 	"pudim_metalVal", "pudim_sendIdleNowBtn", "pudim_repeatHeader", "pudim_repeatDesc",
 	"pudim_repeatStatus", "pudim_stopAllRepeatBtn", "pudim_quartelHeader", "pudim_quartelQtd",
-	"pudim_quartelTipo", "pudim_quartelBtn", "pudim_toggleAutoHouseBtn", "pudim_panicStatus",
+	"pudim_quartelTipo", "pudim_quartelBtn", "pudim_toggleAutoHouseBtn", "pudim_panicStatus", "pudim_siegeGarrisonBtn",
 	"pudim_serieRot0", "pudim_serieX0", "pudim_serieRot1", "pudim_serieX1",
 	"pudim_serieRot2", "pudim_serieX2", "pudim_serieRot3", "pudim_serieX3",
 	"pudim_serieRot4", "pudim_serieX4", "pudim_serieRot5", "pudim_serieX5",
 	"pudim_serieRot6", "pudim_serieX6",
 	"pudim_backToWorkBtn2", "pudim_selectWarriorsBtn",
-	"pudim_optionsHint", "pudim_unitHeader", "pudim_unitLabel0",
+	"pudim_optionsHint", "pudim_unitHeader", "pudim_pauseTrainBtn", "pudim_unitLabel0",
 	"pudim_unitMinus0", "pudim_unitPlus0", "pudim_unitVal0", "pudim_unitVazio",
 	"pudim_unitLabel1", "pudim_unitMinus1", "pudim_unitPlus1", "pudim_unitVal1",
 	"pudim_unitLabel2", "pudim_unitMinus2", "pudim_unitPlus2", "pudim_unitVal2",
@@ -5943,6 +6058,11 @@ function pudim_RunCombatEstimator()
 let g_PudimLastCounterTrain = 0;
 function pudim_RunCounterTrain()
 {
+	// PAUSA DO JOGADOR: vale contra o mod inteiro, e este é o outro caminho que treina.
+	// Guardar só a auto-fila deixaria o contra-treino repondo unidade e o botão não pausaria
+	// nada de fato — que é o mesmo buraco pelo qual o teto de população escapava.
+	if (g_PudimTreinoPausado) return;
+
 	// A PROPORCAO DE UNIDADES TEM PRECEDENCIA ABSOLUTA.
 	//
 	// Regra do jogador: proporcao toda zerada -> vale o auto-fila e este contra-treino;

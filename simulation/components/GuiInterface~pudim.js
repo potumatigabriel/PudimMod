@@ -5890,6 +5890,120 @@ GuiInterface.prototype.pudim_GetFocusFireCorrections = function(player, data)
 	}
 	return corrections;
 };
+// ─── Chamar unidades para dentro das armas de cerco ────────────────────────────────────
+//
+// Pedido de 17/09: "nas armas de cerco, colocar opção de chamar unidades... vai colocar
+// unidades variadas entre de perto e a distancia, nas armas de cerco de destruir construção;
+// nas armas de cerco de torre, colocar preferencialmente as unidades que atiram a distancia.
+// Cavalos não conseguem entrar nelas".
+//
+// SÓ OLHA. Quem manda o comando de guarnecer é o painel, como em todo o resto do mod.
+//
+// QUAIS MÁQUINAS. As armas de cerco que aparecem de verdade em partida foram levantadas dos
+// comandos `train` de 60 replays: siege_ram, siege_ram_covered, siege_lithobolos_packed,
+// siege_oxybeles_packed, siege_ballista_packed, siege_onager_packed, siege_polybolos_packed.
+// Só as duas primeiras carregam gente — as outras são catapulta e balista, que não têm
+// IID_GarrisonHolder. Por isso o filtro é o COMPONENTE, e não uma lista de nomes: quem tem
+// onde botar gente entra, quem não tem fica de fora sozinho.
+//
+// RAM OU TORRE. Pelo nome do template, mesma convenção que o mod já usa para casa
+// (`tpl.indexOf("house")`). Torre de cerco não apareceu nos 60 replays, então o ramo dela
+// não está medido; se uma civilização chamar a sua de outra coisa, ela cai no ramo do aríete
+// e recebe mistura — que é o padrão seguro, não um erro.
+function pudim_SiegeEhTorre(tpl) {
+	return typeof tpl === "string" && tpl.indexOf("tower") !== -1;
+}
+
+GuiInterface.prototype.pudim_GetSiegeGarrisonPlan = function(player, data)
+{
+	const result = { "ordens": [], "_dbg": { "maquinas": 0, "livres": 0, "candidatos": 0 } };
+	const cmpRangeManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_RangeManager);
+	const cmpTM = Engine.QueryInterface(SYSTEM_ENTITY, IID_TemplateManager);
+	if (!cmpRangeManager) return result;
+
+	const meus = cmpRangeManager.GetEntitiesByPlayer(player);
+	// O painel manda o que está SELECIONADO. Sem seleção, valem todas as máquinas do
+	// jogador com vaga — clicar sem nada selecionado não pode simplesmente não fazer nada.
+	const pedidos = new Set(((data && data.alvos) || []).map(Number));
+
+	// ── As máquinas que podem receber gente ─────────────────────────────────────────────
+	const maquinas = [];
+	for (const ent of meus) {
+		if (pedidos.size && !pedidos.has(ent)) continue;
+		const cmpId = Engine.QueryInterface(ent, IID_Identity);
+		if (!cmpId || !cmpId.HasClass("Siege")) continue;
+		const cmpGar = Engine.QueryInterface(ent, IID_GarrisonHolder);
+		if (!cmpGar) continue;                       // catapulta e balista não carregam gente
+		result._dbg.maquinas++;
+		const vagas = cmpGar.GetCapacity() - cmpGar.GetEntities().length;
+		if (vagas <= 0) continue;
+		const cmpPos = Engine.QueryInterface(ent, IID_Position);
+		if (!cmpPos || !cmpPos.IsInWorld()) continue;
+		const p = cmpPos.GetPosition2D();
+		const tpl = cmpTM && cmpTM.GetCurrentTemplateName ? cmpTM.GetCurrentTemplateName(ent) : "";
+		maquinas.push({ "id": ent, "vagas": vagas, "x": p.x, "z": p.y,
+		                "torre": pudim_SiegeEhTorre(tpl) });
+		result._dbg.livres += vagas;
+	}
+	if (!maquinas.length) return result;
+
+	// ── Quem pode entrar ────────────────────────────────────────────────────────────────
+	//
+	// "Cavalos não conseguem entrar nelas" — e o mod não precisa descobrir isso tentando: o
+	// balde de unidade que ele já usa no estimador separa Cavalry de Infantry, e aqui só
+	// Infantry serve. Support fica de fora junto: aldeã dentro de aríete não ataca nada.
+	//
+	// Quem está FORA DO MUNDO já está guarnecido em algum lugar — mandá-lo de novo seria
+	// tirá-lo de onde está.
+	const perto = [], longe = [];
+	for (const ent of meus) {
+		const cmpId = Engine.QueryInterface(ent, IID_Identity);
+		if (pudim_UnitBucket(cmpId) !== "Infantry") continue;
+		if (!Engine.QueryInterface(ent, IID_UnitAI)) continue;
+		const cmpPos = Engine.QueryInterface(ent, IID_Position);
+		if (!cmpPos || !cmpPos.IsInWorld()) continue;
+		const p = cmpPos.GetPosition2D();
+		(cmpId.HasClass("Ranged") ? longe : perto).push({ "id": ent, "x": p.x, "y": p.y });
+	}
+	result._dbg.candidatos = perto.length + longe.length;
+	if (!perto.length && !longe.length) return result;
+
+	// ── A distribuição ──────────────────────────────────────────────────────────────────
+	//
+	// Torre: "preferencialmente as unidades que atiram a distancia" — a torre serve para
+	// despejar tiro em cima da muralha, e quem está dentro dela atira de lá.
+	// Aríete: "unidades variadas entre de perto e a distancia" — metade e metade, alternando,
+	// e o que faltar de um lado é completado pelo outro.
+	const usados = new Set();
+	const maisPerto = (lista, mx, mz) => {
+		let melhor = null, melhorD = Infinity;
+		for (const u of lista) {
+			if (usados.has(u.id)) continue;
+			const dx = u.x - mx, dz = u.y - mz;
+			const d = dx * dx + dz * dz;
+			if (d < melhorD) { melhorD = d; melhor = u; }
+		}
+		return melhor;
+	};
+	for (const m of maquinas) {
+		const unidades = [];
+		for (let i = 0; i < m.vagas; i++) {
+			// Torre: sempre tenta distância primeiro. Aríete: alterna, começando pelo corpo
+			// a corpo — é ele que segura o dano enquanto a máquina bate no muro.
+			const preferLonge = m.torre || (i % 2 === 1);
+			const primeira = preferLonge ? longe : perto;
+			const segunda  = preferLonge ? perto : longe;
+			const u = maisPerto(primeira, m.x, m.z) || maisPerto(segunda, m.x, m.z);
+			if (!u) break;
+			usados.add(u.id);
+			unidades.push(u.id);
+		}
+		if (unidades.length)
+			result.ordens.push({ "siege": m.id, "torre": m.torre, "unidades": unidades });
+	}
+	return result;
+};
+
 GuiInterface.prototype.pudim_GetProductionBuildings = function(player, data) {
 	const cmpRangeManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_RangeManager);
 	if (!cmpRangeManager) return { "buildings": [], "femaleCount": 0, "resources": {} };
@@ -7775,6 +7889,7 @@ var pudim_exposedFunctions = {
   	"pudim_GetPanicData": 1,
   	"pudim_GetGuerreiros": 1,
   	"pudim_GetProductionBuildings": 1,
+  	"pudim_GetSiegeGarrisonPlan": 1,
   	"pudim_GetScoutBorderTarget": 1,
   	"pudim_GetFarmBuildData": 1,
   	"pudim_GetPlayerKD": 1,

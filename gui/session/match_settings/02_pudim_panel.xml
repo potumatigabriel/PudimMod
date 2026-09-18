@@ -63,8 +63,11 @@
   <object name="pudim_repeatStatus" type="text" size="8 544 100%-8 564" font="sans-13" text_align="center" textcolor="180 180 200 255" ghost="true"><translatableAttribute id="caption">Nenhum construtor em repeat</translatableAttribute></object>
   <object name="pudim_stopAllRepeatBtn" type="button" size="8 568 100%-8 592" style="StoneButton"><action on="Press">pudim_StopAllRepeat();</action><translatableAttribute id="caption">Parar Todos os Repeats</translatableAttribute></object>
 
-  <object name="pudim_panicStatus" type="text" size="8 784 100%-8 802" font="sans-13" text_align="center" textcolor="200 200 180 255" ghost="true"><translatableAttribute id="caption">Situacao: Calma</translatableAttribute></object>
-  <object name="pudim_backToWorkBtn2" type="button" size="8 806 49% 830" style="StoneButton"><action on="Press">pudim_ReturnToWork();</action><translatableAttribute id="caption">Voltar ao Trabalho</translatableAttribute></object>
+  <object name="pudim_panicStatus" type="text" size="8 784 50% 802" font="sans-13" text_align="center" textcolor="200 200 180 255" ghost="true"><translatableAttribute id="caption">Situacao: Calma</translatableAttribute></object>
+    <!-- CHAMAR UNIDADES PARA DENTRO DA ARMA DE CERCO. Pedido de 17/09. Divide a faixa
+       do status do panico, que e texto curto e centralizado: nao custa linha nova. -->
+  <object name="pudim_siegeGarrisonBtn" type="button" size="52% 784 100%-8 802" style="StoneButton" tooltip="Chama infantaria para dentro das armas de cerco selecionadas (todas, se nada estiver selecionado). Ariete recebe mistura de corpo a corpo e distancia; torre de cerco recebe de distancia. Cavalaria nao entra."><action on="Press">pudim_GuarnecerCerco();</action><object name="pudim_siegeGarrisonLabel" type="text" size="0 0 100% 100%" font="sans-bold-13" text_align="center" text_valign="center" textcolor="255 255 255 255" ghost="true"><translatableAttribute id="caption">Guarnecer cerco</translatableAttribute></object></object>
+<object name="pudim_backToWorkBtn2" type="button" size="8 806 49% 830" style="StoneButton"><action on="Press">pudim_ReturnToWork();</action><translatableAttribute id="caption">Voltar ao Trabalho</translatableAttribute></object>
   <object name="pudim_selectWarriorsBtn" type="button" size="51% 806 100%-8 830" style="StoneButton"><action on="Press">pudim_SelecionarGuerreiros();</action><translatableAttribute id="caption">Selecionar Guerreiros</translatableAttribute></object>
   <object name="pudim_toggleAutoHouseBtn" type="button" size="8 756 100%-8 780" style="StoneButton"><action on="Press">pudim_ToggleAutoHouse();</action><object name="pudim_toggleAutoHouseLabel" type="text" size="0 0 100% 100%" font="sans-bold-13" text_align="center" text_valign="center" textcolor="255 255 255 255" ghost="true"><translatableAttribute id="caption">(ON) Auto-Casas (Faltando 3)</translatableAttribute></object></object>
 
@@ -89,7 +92,12 @@
        estabulo libera cavalaria, mudar de fase libera campeao — entao as linhas nascem
        escondidas e o JS preenche com o que existe AGORA. Sete linhas cobrem o que costuma
        estar disponivel ao mesmo tempo; havendo mais, entram as de maior peso. -->
-  <object name="pudim_unitHeader" type="text" size="8 842 100%-8 864" font="sans-bold-14" textcolor="255 200 120 255" style="ModernLabelText" ghost="true"><translatableAttribute id="caption">Proporcao de Unidades</translatableAttribute></object>
+  <object name="pudim_unitHeader" type="text" size="8 842 56% 864" font="sans-bold-14" textcolor="255 200 120 255" style="ModernLabelText" ghost="true"><translatableAttribute id="caption">Proporcao de Unidades</translatableAttribute></object>
+  <!-- PAUSAR O TREINO. Pedido de 17/09: "as vezes quero fazer arma de cerco e n da, pq vai
+       mais rapido as unidades". O botao vive na MESMA faixa do titulo, sem linha nova: o
+       painel termina em 974 com o corte da tela em 1028, e tools/test_painel_cabe.js exige
+       40px de folga — uma linha de 22px nao caberia. -->
+  <object name="pudim_pauseTrainBtn" type="button" size="58% 842 100%-8 864" style="StoneButton" tooltip="Pausa o treino automatico de unidades, para juntar recurso (arma de cerco, upgrade). Nao cancela o que ja esta em producao."><action on="Press">pudim_TogglePauseTrain();</action><object name="pudim_pauseTrainLabel" type="text" size="0 0 100% 100%" font="sans-bold-13" text_align="center" text_valign="center" textcolor="255 255 255 255" ghost="true"><translatableAttribute id="caption">Pausar treino</translatableAttribute></object></object>
   <object name="pudim_serieRot0" type="text" size="2% 686 24% 706" font="sans-11" textcolor="200 160 255 255" ghost="true" hidden="true"><translatableAttribute id="caption"> </translatableAttribute></object>
   <object name="pudim_serieX0" type="button" size="24% 686 31% 706" style="StoneButton" hidden="true"><action on="Press">pudim_SerieCancelar(0);</action><translatableAttribute id="caption">X</translatableAttribute></object>
   <object name="pudim_serieRot1" type="text" size="35% 686 57% 706" font="sans-11" textcolor="200 160 255 255" ghost="true" hidden="true"><translatableAttribute id="caption"> </translatableAttribute></object>

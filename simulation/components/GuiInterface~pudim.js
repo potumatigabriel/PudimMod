@@ -7434,6 +7434,11 @@ GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 	}
 	result.confirmed = confirmedTechs;
 
+	// Saldo para escolher pesquisas: cada escolha desconta o custo dela (ver "PODE MESMO
+	// PESQUISAR? E TEM COMO PAGAR?" logo abaixo).
+	const saldoPesquisa = {};
+	for (const r in res) saldoPesquisa[r] = res[r];
+
 	for (const ent of allEnts) {
 		if (Engine.QueryInterface(ent, IID_Foundation)) continue;
 		// Apenas Armazém, Edifício Agrícola e Forja — CC, forte, quartel, etc. ficam de fora
@@ -7457,10 +7462,50 @@ GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 		try { techList = cmpResearcher.GetTechnologiesList() || []; } catch(e) { continue; }
 		if (!techList.length) continue;
 
-		let bestTech = null, bestScore = 4; // só pesquisa se score > 4
+		// ── PODE MESMO PESQUISAR? E TEM COMO PAGAR? ─────────────────────────────────────
+		//
+		// Log da partida 20260927-174017 e replay 2026-09-27_0004: o mod pediu
+		// gather_lumbering_strongeraxes aos 145s, 172s e 198s — logo depois de o jogador
+		// mandar gather_lumbering_ironaxes, aos 125,8s — e gather_capacity_carts cinco vezes
+		// no fim. O motor recusou todas em silêncio, e o mod só percebia 90s depois, pela
+		// quarentena.
+		//
+		// A causa está no Researcher.js do motor: com uma tecnologia EM ANDAMENTO, a lista
+		// já a troca pela sucessora ("Now make researched/in progress techs invisible"), mas
+		// a sucessora exige a anterior PESQUISADA. A lista diz "disponível" e o pedido cai.
+		// O motor tem a função que responde de verdade — TechnologyManager.CanResearch, que
+		// confere par em andamento, pré-requisito, já pesquisada e em andamento — e ela é
+		// usada agora.
+		//
+		// O custo: Technology.Queue desconta Math.floor(multiplicador × custo) e, sem
+		// recurso, falha também em silêncio. A conta aqui é a mesma, com o multiplicador do
+		// próprio edifício (Researcher.GetTechCostMultiplier), e o saldo é descontado a cada
+		// escolha — senão três edifícios escolhem com o mesmo dinheiro.
+		let mult = null;
+		try { mult = cmpResearcher.GetTechCostMultiplier ? cmpResearcher.GetTechCostMultiplier() : null; } catch (e) {}
+		const custoDe = function(tech) {
+			let tplC;
+			try { tplC = TechnologyTemplates.Get(tech); } catch (e) { return null; }
+			if (!tplC || !tplC.cost) return {};
+			const c = {};
+			for (const r in tplC.cost)
+				c[r] = Math.floor(((mult && mult[r] !== undefined) ? mult[r] : 1) * tplC.cost[r]);
+			return c;
+		};
+		const cabeNoSaldo = function(custo) {
+			for (const r in custo) if ((saldoPesquisa[r] || 0) < custo[r]) return false;
+			return true;
+		};
+
+		let bestTech = null, bestScore = 4, bestCusto = null; // só pesquisa se score > 4
 		for (const item of techList) {
-			// item pode ser string, null, ou array (par mutuamente exclusivo)
-			const candidates = Array.isArray(item) ? item : [item];
+			// O PAR MUTUAMENTE EXCLUSIVO VEM COMO OBJETO, não como array. Conferido no motor
+			// (Researcher.js): `ret[i] = { "pair": true, "top": ..., "bottom": ... }`. O
+			// código antigo supunha array, então todo par caía no filtro de string e nenhuma
+			// tecnologia em par era pesquisada.
+			const candidates = (item && typeof item === "object" && item.pair)
+				? [item.top, item.bottom]
+				: (Array.isArray(item) ? item : [item]);
 			for (const tech of candidates) {
 				if (!tech || typeof tech !== "string") continue;
 				if (alreadyQueued.has(tech)) continue;
@@ -7469,13 +7514,17 @@ GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 				// Verificar se está em andamento (checks separados: else if era bug)
 				if (typeof cmpTechMgr.IsInProgress === "function" && cmpTechMgr.IsInProgress(tech)) continue;
 				if (typeof cmpTechMgr.IsTechnologyQueued === "function" && cmpTechMgr.IsTechnologyQueued(tech)) continue;
+				if (typeof cmpTechMgr.CanResearch === "function" && !cmpTechMgr.CanResearch(tech)) continue;
+				const custo = custoDe(tech);
+				if (custo && !cabeNoSaldo(custo)) continue;
 				const score = scoreTech(tech);
-				if (score > bestScore) { bestScore = score; bestTech = tech; }
+				if (score > bestScore) { bestScore = score; bestTech = tech; bestCusto = custo; }
 			}
 		}
 
 		if (!bestTech) continue;
 		alreadyQueued.add(bestTech);
+		if (bestCusto) for (const r in bestCusto) saldoPesquisa[r] = (saldoPesquisa[r] || 0) - bestCusto[r];
 		result.research.push({ building: ent, tech: bestTech, score: bestScore });
 	}
 

@@ -167,9 +167,15 @@ function pudim_LogSnapshot() {
 			// Rotatividade do último minuto: reordens antes de a unidade alcançar o alvo
 			// anterior (viagem perdida) e redirects de long-walker barrados pela carência.
 			" | chrn" + (g_PudimChurnCount || 0) + " seg" + (g_PudimWalkHeld || 0) +
+			// O árbitro no minuto: ordens enviadas, e barradas por três motivos — ordem
+			// sua recente, sistema de prioridade maior dono da unidade, e a economia
+			// tentando se desfazer. É o número que diz se o vai-e-volta acabou.
+			" | arb ok" + g_PudimArbitro.enviadas + " jog" + g_PudimArbitro.jogador +
+			      " pri" + g_PudimArbitro.prioridade + " reo" + g_PudimArbitro.reordem +
 			(me.inCombat ? " | COMBATE x" + me.combatSize : ""));
 		g_PudimChurnCount = 0;
 		g_PudimWalkHeld = 0;
+		g_PudimArbitro = { enviadas: 0, jogador: 0, prioridade: 0, reordem: 0 };
 	} catch(e) {}
 }
 
@@ -939,9 +945,9 @@ function pudim_RunAutoWork()
 							}
 							try { Engine.GuiInterfaceCall("SetBuildingPlacementPreview", { "template": "" }); } catch(e2) {}
 							if (fx !== null) {
-								Engine.PostNetworkCommand({ "type": "construct", "entities": [pd.builderId],
+								pudim_Ordenar({ "type": "construct", "entities": [pd.builderId],
 									"template": pd.template, "x": fx, "z": fz,
-									"angle": 0, "actorSeed": 0, "autorepair": true, "autocontinue": true, "queued": false });
+									"angle": 0, "actorSeed": 0, "autorepair": true, "autocontinue": true, "queued": false }, "pudim_RunAutoWork");
 								pudim_MarkModBuilt(fx, fz);
 								g_PudimLastDropsiteTimeByRes[ck] = nowLW;
 								pudim_ProtectBuilder(pd.builderId, nowLW + 30000);
@@ -963,9 +969,9 @@ function pudim_RunAutoWork()
 			// limiar de obra e o de mover, a resposta certa é construir mais perto e deixar
 			// o coletor em paz. Mover custa duas caminhadas e a carga parcial que ele larga.
 			if (!builtDropsite && w.redirectTarget && w.podeMover) {
-				Engine.PostNetworkCommand({ "type": "gather", "entities": [w.id],
+				pudim_Ordenar({ "type": "gather", "entities": [w.id],
 					"target": w.redirectTarget, "autorepair": true, "autocontinue": true,
-					"queued": false, "pushFront": false });
+					"queued": false, "pushFront": false }, "pudim_RunAutoWork");
 				// 15s protegido contra re-redirecionamento por outros sistemas durante a caminhada
 				pudim_ProtectBuilder(w.id, nowLW + 15000);
 				redirectCount++;
@@ -1051,14 +1057,14 @@ function pudim_RunAutoWork()
 				}
 				try { Engine.GuiInterfaceCall("SetBuildingPlacementPreview", { "template": "" }); } catch(e2) {}
 				if (foundX !== null) {
-					Engine.PostNetworkCommand({
+					pudim_Ordenar({
 						"type": "construct",
 						"entities": [proactive.builderId],
 						"template": proactive.template,
 						"x": foundX, "z": foundZ,
 						"angle": 0, "actorSeed": 0,
 						"autorepair": true, "autocontinue": true, "queued": false
-					});
+					}, "pudim_RunAutoWork");
 					pudim_MarkModBuilt(foundX, foundZ);
 					g_PudimLastDropsiteTimeByRes[resKey] = Date.now();
 					// O builder acabou de receber "construct". Sem marcá-lo, o despacho logo
@@ -1144,7 +1150,7 @@ function pudim_RunAutoWork()
 	for (let key in targetGroups)
 	{
 		let grp = targetGroups[key];
-		Engine.PostNetworkCommand({
+		pudim_Ordenar({
 			"type": grp.cmdType,
 			"entities": grp.ids,
 			"target": +grp.target,
@@ -1152,7 +1158,7 @@ function pudim_RunAutoWork()
 			"autocontinue": true,
 			"queued": false,
 			"pushFront": false
-		});
+		}, "pudim_RunAutoWork");
 		pudim_MarkDispatched(grp.ids, distById);
 	}
 
@@ -1170,7 +1176,7 @@ function pudim_RunAutoWork()
 			"queued": false,
 			"force": false
 		};
-		Engine.PostNetworkCommand(cmd);
+		pudim_Ordenar(cmd, "pudim_RunAutoWork");
 		pudim_MarkDispatched(gp.ids, distById);
 	}
 
@@ -1574,6 +1580,144 @@ var g_PudimWalkHeld = 0;
  * desfazia no meio do trajeto a ordem que o auto-work tinha acabado de dar. Nos replays de
  * 13/08 isso respondia por ~25% de todas as reordenações (132 e 86 casos em menos de 30s).
  */
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// O ÁRBITRO: TODA ORDEM DO MOD A UMA UNIDADE PASSA POR AQUI
+// ═══════════════════════════════════════════════════════════════════════════════════════
+//
+// Relato de 27/09: "vejo muitos trabalhadores trocando de funcao e passeando pelo mapa
+// simultaneamente".
+//
+// MEDIDO em 167 partidas do Pudim (2.951 minutos), separando ordem sua de ordem do mod pela
+// assinatura do comando — conferida no código do motor (unit_actions.js, AutoFormation.js):
+// a interface manda `formation` na coleta/reparo/guarnição e `pushFront` na caminhada; o
+// mod nunca manda nem um nem outro.
+//
+//   • 15.623 vezes o mod deu DUAS ordens diferentes à mesma unidade em menos de 3s —
+//     9,1% de tudo que ele manda. 12.861 delas coleta→coleta.
+//   • 10.000 vezes ele passou por cima de uma ordem SUA em menos de 3s.
+//   • 7.578 vai-e-voltas: A → B → A em menos de 90s.
+//
+// Exemplo real, replay 2026-09-27_0003, unidade 218: você manda entregar e reparar; o mod
+// assume e em 23 segundos dá SEIS ordens, alternando entre construir a obra 8799 e colher
+// três recursos diferentes. A unidade 221 recebe `repair 8799` e `gather 2182` com 0,2s de
+// diferença, e você precisa repetir sua ordem de reparo duas vezes.
+//
+// DUAS CAUSAS, as duas resolvidas num lugar só:
+//
+// 1. LATÊNCIA. A sua ordem só é aplicada na simulação um ou dois turnos depois do clique.
+//    Nesse intervalo a unidade ainda aparece OCIOSA, e a regra "ordem do jogador protege
+//    enquanto ocupada" a entregava ao mod. O mod já se protegia disso nas PRÓPRIAS ordens
+//    (inFlightIds); nas suas, não.
+// 2. CADA SISTEMA DO MOD DECIDIA SOZINHO. Construtor, auto-trabalho, fazenda e pânico
+//    escolhiam a mesma unidade no mesmo segundo, e ganhava quem chegasse por último.
+//
+// A REGRA:
+//   • ordem sua nos últimos PUDIM_JANELA_JOGADOR ms → nenhum sistema do mod toca a unidade.
+//     Absoluta, pela diretriz "se um trabalhador receber uma ordem do jogador, não pode
+//     receber nenhuma ordem do mod". Passado o tempo, vale a checagem de ocupado da
+//     simulação, que já existia.
+//   • unidade que um sistema acabou de reservar só pode ser tomada por sistema de prioridade
+//     MAIOR (defesa > obra > economia). O pânico tira do perigo quem o auto-trabalho acabou
+//     de mandar; o auto-trabalho não desfaz a obra que o construtor acabou de mandar.
+//   • a economia também não se desfaz sozinha: o auto-trabalho não reordena, em menos de
+//     PUDIM_RESERVA_MS, uma unidade que ele mesmo acabou de mandar. Era aí que moravam as
+//     12.861 trocas coleta→coleta — despacho e redirecionamento moram na mesma função.
+//   • ordem EM FILA (queued) do mesmo sistema é continuação, não troca: passa. É assim que o
+//     kite manda recuar e, em fila, atacar.
+//
+// Os sistemas de navegação (kite, herói, batedores, fuga) reordenam a mesma unidade de
+// propósito e têm cooldown próprio — por isso a trava de auto-reordem vale só na economia.
+
+const PUDIM_TIPOS_DE_UNIDADE = new Set(["gather", "gather-near-position", "walk", "garrison",
+	"repair", "attack", "construct", "construct-wall", "stop"]);
+const PUDIM_JANELA_JOGADOR = 5000;   // sua ordem ainda não aplicada: ninguém do mod toca
+const PUDIM_RESERVA_MS = 3000;       // abaixo disto a troca é viagem perdida
+
+const PUDIM_PRIO_ECONOMIA = 1, PUDIM_PRIO_OBRA = 2, PUDIM_PRIO_DEFESA = 3;
+// Prioridade por sistema; "sistema:tipo" vence "sistema" quando a mesma função faz as duas
+// coisas (a IA avançada tem retirada e construção juntas).
+const PUDIM_PRIORIDADE = {
+	"pudim_ProcessPanic": PUDIM_PRIO_DEFESA,
+	"pudim_ProcessAutoKite": PUDIM_PRIO_DEFESA,
+	"pudim_ProcessHeroAura": PUDIM_PRIO_DEFESA,
+	"pudim_ProcessAdvancedAI:attack": PUDIM_PRIO_DEFESA,
+	"pudim_ProcessAdvancedAI:walk": PUDIM_PRIO_DEFESA,
+	"pudim_ProcessAdvancedAI:garrison": PUDIM_PRIO_DEFESA,
+	"pudim_ProcessAdvancedAI": PUDIM_PRIO_OBRA,
+	"pudim_ProcessDropsiteFoundations:repair": PUDIM_PRIO_OBRA,
+	"pudim_ProcessFarms:construct": PUDIM_PRIO_OBRA,
+	"pudim_ProcessFarms:repair": PUDIM_PRIO_OBRA,
+	"pudim_ProcessRepeatBuildings": PUDIM_PRIO_OBRA,
+	"pudim_ProcessPalicada": PUDIM_PRIO_OBRA,
+	"pudim_ProcessSerie": PUDIM_PRIO_OBRA,
+	"pudim_RunAutoWork:construct": PUDIM_PRIO_OBRA
+};
+// Quem não reordena a si mesmo dentro da reserva. Só a economia: é onde estava o vai-e-volta.
+const PUDIM_SEM_AUTO_REORDEM = new Set(["pudim_RunAutoWork", "pudim_ProcessFarms",
+	"pudim_ExecuteInitialBalance", "pudim_ApplyRally", "pudim_ReturnPanicUnitsToWork",
+	"pudim_ProcessDropsiteFoundations"]);
+// Botões que VOCÊ aperta: são ordem sua, e passam por cima da janela do jogador.
+const PUDIM_DONOS_DO_JOGADOR = new Set(["pudim_GuarnecerCerco", "pudim_ToggleScout"]);
+
+var g_PudimReserva = {};   // id -> { dono, prio, ate }
+var g_PudimReservaChamadas = 0;
+// Telemetria: o que o árbitro barrou, por quê e de quem. Vai para o SNAP do minuto.
+var g_PudimArbitro = { enviadas: 0, jogador: 0, prioridade: 0, reordem: 0 };
+
+function pudim_PrioridadeDe(dono, tipo) {
+	const p = PUDIM_PRIORIDADE[dono + ":" + tipo];
+	if (p !== undefined) return p;
+	return PUDIM_PRIORIDADE[dono] !== undefined ? PUDIM_PRIORIDADE[dono] : PUDIM_PRIO_ECONOMIA;
+}
+
+/**
+ * Manda uma ordem do mod, tirando dela as unidades que não podem recebê-la agora.
+ * @returns {boolean} se alguma unidade recebeu a ordem.
+ */
+function pudim_Ordenar(cmd, dono)
+{
+	// Ordem de EDIFÍCIO (treino, pesquisa, auto-fila) ou sem lista de unidades: passa direto.
+	if (!cmd || !PUDIM_TIPOS_DE_UNIDADE.has(cmd.type) || !Array.isArray(cmd.entities)) {
+		Engine.PostNetworkCommand(cmd);
+		return true;
+	}
+	const agora = Date.now();
+	const doJogador = PUDIM_DONOS_DO_JOGADOR.has(dono);
+	const prio = pudim_PrioridadeDe(dono, cmd.type);
+	const emFila = !!cmd.queued;
+	const livres = [];
+	for (const e of cmd.entities) {
+		const id = +e;
+		if (!doJogador) {
+			const tj = g_PudimPlayerOrders[id];
+			if (tj && agora - tj < PUDIM_JANELA_JOGADOR) { g_PudimArbitro.jogador++; continue; }
+			const r = g_PudimReserva[id];
+			if (r && r.ate > agora) {
+				if (r.dono === dono) {
+					if (!emFila && PUDIM_SEM_AUTO_REORDEM.has(dono)) { g_PudimArbitro.reordem++; continue; }
+				} else if (prio <= r.prio) {
+					g_PudimArbitro.prioridade++;
+					continue;
+				}
+			}
+		}
+		livres.push(e);
+	}
+	// Reservas vencidas saem de tempos em tempos: unidade morta não volta para limpar a sua,
+	// e sem isto o dicionário cresceria a partida inteira.
+	if (++g_PudimReservaChamadas % 200 === 0)
+		for (const k in g_PudimReserva)
+			if (g_PudimReserva[k].ate <= agora) delete g_PudimReserva[k];
+	if (!livres.length) return false;
+	// Continuação em fila não renova a reserva: ela pertence à ordem imediata que a abriu.
+	if (!emFila)
+		for (const e of livres) g_PudimReserva[+e] = { dono: dono, prio: prio, ate: agora + PUDIM_RESERVA_MS };
+	cmd.entities = livres;
+	g_PudimArbitro.enviadas++;
+	Engine.PostNetworkCommand(cmd);
+	return true;
+}
+
 function pudim_MarkDispatched(ids, distById) {
 	const now = Date.now();
 	for (const id of ids) {
@@ -1721,12 +1865,12 @@ function pudim_GuarnecerCerco()
 
 	let total = 0;
 	for (const o of plano.ordens) {
-		Engine.PostNetworkCommand({
+		pudim_Ordenar({
 			"type": "garrison",
 			"entities": o.unidades,
 			"target": o.siege,
 			"queued": false
-		});
+		}, "pudim_GuarnecerCerco");
 		total += o.unidades.length;
 		// Protege quem foi mandado: sem isto o auto-trabalho e o armazém proativo podiam
 		// sequestrar o soldado no caminho, antes de ele chegar na máquina. É a mesma
@@ -2120,14 +2264,14 @@ function pudim_ApplyRally(idleList) {
 	}
 	for (const k in groups) {
 		const g = groups[k];
-		Engine.PostNetworkCommand({
+		pudim_Ordenar({
 			"type": "gather-near-position",
 			"entities": g.ids,
 			"resourceType": { "generic": g.res, "specific": g.specific },
 			"resourceTemplate": "",
 			"x": g.x, "z": g.z,
 			"queued": false
-		});
+		}, "pudim_ApplyRally");
 		pudim_Log("INFO", "DROP", "rally " + g.ids.length + " worker(s) p/ " + g.res +
 			" em (" + g.x.toFixed(0) + "," + g.z.toFixed(0) + ") apos a obra");
 	}
@@ -2422,24 +2566,42 @@ function pudim_ProcessAutoQueue()
 		// treinar, Não ficar colocando unidades na fila (economizar recursos)... mas logo
 		// que morrer unidades, colocar pra treinar imediatamente".
 		//
-		// MEDIDO no replay 2026-09-14_0004, amostra de população a cada 30s contra os
-		// comandos `train` da mesma janela. A partir dos 800s a população ficou cravada em
-		// 200 por dez amostras seguidas, e mesmo assim saíram treinos:
+		// A PROVA, E UMA CORREÇÃO DELA. Em 15/09 esta nota citava o replay
+		// 2026-09-14_0004 com "26 unidades enfileiradas numa janela com população em 200".
+		// Aquela medição estava ERRADA: o script tomava o id do jogador como índice+1, mas o
+		// índice 0 do metadata é a Gaia — os treinos contados eram do jogador SEGUINTE
+		// (warlock2), e só a série de população era a sua. A cadência exata de 1,8s entre
+		// edifícios já denunciava que não era o mod.
 		//
-		//   t=800s  pop 200   train  2        t=1037s  pop 200   train  0
-		//   t=859s  pop 200   train  1        t=1067s  pop 200   train 26
-		//   t=948s  pop 200   train  3        t=1096s  pop 200   train  5
+		// A regra continua certa, e a prova boa veio do log DO MOD, partida
+		// 20260927-174017:
 		//
-		// Vinte e seis unidades enfileiradas numa janela em que a população não subiu um
-		// ponto. O recurso sai do banco quando o lote começa, e fica preso num lote que não
-		// nasce — exatamente o desperdício do relato.
+		//   53,2s  abriu vaga de população (1): retomando o treino
+		//   53,2s  fila semeada em 247   x1 ... fila semeada em 10702 x1   (5 edifícios)
+		//   95,2s  fila semeada em 7730 x1 ... 7 edifícios x1, com a população no teto
 		//
-		// A regra é a mesma nos dois tetos, e por isso é o teto ATUAL que manda: `vagas` é
-		// quantas unidades ainda cabem agora. Zero vagas, nenhum lote. E o lote nunca é
-		// maior que as vagas — enfileirar 10 com 3 de espaço prende o custo de 7 unidades
-		// que só nasceriam depois de uma casa ou de uma morte.
-		const vagasPop = Math.max(0, (aqData.popLimit || 0) - (aqData.popCount || 0));
+		// Cinco lotes para UMA vaga. O limite era aplicado por edifício e nunca descontado
+		// entre um e outro. Agora `vagasPop` é um SALDO: cada lote semeado desconta o que
+		// vai ocupar — pelo custo de população do template, porque herói e campeão pesam
+		// mais que 1.
+		//
+		// O motor reserva população quando o lote COMEÇA (Trainer.js,
+		// TryReservePopulationSlots), então popLimit - popCount já desconta o que está em
+		// produção; o que faltava era o que o próprio ciclo acabou de semear.
+		//
+		// A regra é a mesma nos dois tetos, e por isso é o teto ATUAL que manda. Zero vagas,
+		// nenhum lote. E o lote nunca é maior que as vagas — enfileirar 10 com 3 de espaço
+		// prende o custo de 7 unidades que só nasceriam depois de uma casa ou de uma morte.
+		let vagasPop = Math.max(0, (aqData.popLimit || 0) - (aqData.popCount || 0));
 		const popCheio = vagasPop <= 0;
+		const gastaVagas = function(tpl, n) {
+			let custo = 1;
+			try {
+				const td = GetTemplateData(tpl);
+				if (td && td.cost && td.cost.population > 0) custo = td.cost.population;
+			} catch (e) {}
+			vagasPop = Math.max(0, vagasPop - custo * n);
+		};
 
 		// Cachear template e aprender o tamanho de lote que o usuário configurou.
 		// IMPORTANTE: qItem.count é quanto FALTA treinar naquele lote — o motor decrementa
@@ -2744,7 +2906,7 @@ function pudim_ProcessAutoQueue()
 							tplDesejado = alvo.tpl;
 					}
 
-					if (isOurs && (cur.progress || 0) <= 0 && tplDesejado && !popCheio) {
+					if (isOurs && (cur.progress || 0) <= 0 && tplDesejado && vagasPop > 0) {
 						const affordable = pudim_ComputeAffordableCount(tplDesejado, desiredCount, res);
 						// O lote nunca passa das vagas de populacao: ver a nota em `vagasPop`.
 						const lote = Math.max(1, Math.min(desiredCount, affordable, vagasPop));
@@ -2752,6 +2914,7 @@ function pudim_ProcessAutoQueue()
 							Engine.PostNetworkCommand({ "type": "stop-production", "entity": b.ent, "id": cur.id });
 							Engine.PostNetworkCommand({ "type": "train", "entities": [b.ent],
 								"template": tplDesejado, "count": lote });
+							gastaVagas(tplDesejado, lote);
 							g_PudimQueueSeededTpl[b.ent] = tplDesejado;
 							g_PudimQueueSeededAt[b.ent] = nowQueue;
 							pudim_Log("INFO", "QUEUE", "edifício " + b.ent + " trocado para " +
@@ -2770,6 +2933,7 @@ function pudim_ProcessAutoQueue()
 						if (affordable >= desiredCount && cur.id !== undefined) {
 							Engine.PostNetworkCommand({ "type": "stop-production", "entity": b.ent, "id": cur.id });
 							Engine.PostNetworkCommand({ "type": "train", "entities": [b.ent], "template": tpl, "count": desiredCount });
+							gastaVagas(tpl, desiredCount);
 							g_PudimQueueSeededAt[b.ent] = nowQueue;
 							pudim_Log("INFO", "QUEUE", "edifício " + b.ent + " lote degradado x" + curCount +
 								" trocado por x" + desiredCount + " " + tpl.split("/").pop());
@@ -2866,6 +3030,7 @@ function pudim_ProcessAutoQueue()
 				pudim_ComputeAffordableCount(template, desiredCount, res), vagasPop);
 			if (affordable <= 0) continue;
 			Engine.PostNetworkCommand({ "type": "train", "entities": [b.ent], "template": template, "count": affordable });
+			gastaVagas(template, affordable);
 			g_PudimQueueSeededAt[b.ent] = nowQueue;
 			// Guarda O QUE foi semeado: é a única forma de, depois, reconhecer um lote como
 			// do mod sem confundi-lo com uma ordem do jogador no mesmo edifício.
@@ -3047,12 +3212,12 @@ function pudim_ProcessDropsiteFoundations()
 
 		// Feature 1: Enviar workers ociosos/novos para ajudar na fundação
 		for (const assign of (data.assignments || [])) {
-			Engine.PostNetworkCommand({
+			pudim_Ordenar({
 				"type": "repair",
 				"entities": [assign.workerId],
 				"target": assign.foundationId,
 				"queued": false
-			});
+			}, "pudim_ProcessDropsiteFoundations");
 			pudim_Log("INFO", "BUILD", "worker→fundação dropsite " + assign.foundationId);
 		}
 
@@ -3065,12 +3230,12 @@ function pudim_ProcessDropsiteFoundations()
 			}
 			const redirExpiry = Date.now() + 15000;
 			for (const w of (completion.workersToRedirect || [])) {
-				Engine.PostNetworkCommand({
+				pudim_Ordenar({
 					"type": "gather",
 					"entities": [w.workerId],
 					"target": w.targetRes,
 					"queued": false
-				});
+				}, "pudim_ProcessDropsiteFoundations");
 				// 15s protegido: sem isso, long-walker/rebalance/farm podiam re-redirecionar o
 				// mesmo worker no meio da caminhada — ping-pong entre sistemas ("passeio")
 				pudim_ProtectBuilder(w.workerId, redirExpiry);
@@ -3127,8 +3292,8 @@ function pudim_ProcessFarms()
 		if (farmData.action === "assist" && farmData.assistTarget) {
 			const helpers = (farmData.workersToRedirect || []).filter(w => !g_PudimRepeatBuilding[w]);
 			if (helpers.length > 0) {
-				Engine.PostNetworkCommand({ "type": "repair", "entities": helpers,
-					"target": farmData.assistTarget, "autocontinue": true, "queued": false });
+				pudim_Ordenar({ "type": "repair", "entities": helpers,
+					"target": farmData.assistTarget, "autocontinue": true, "queued": false }, "pudim_ProcessFarms");
 				pudim_Log("INFO", "FARM", "fundacao " + farmData.assistTarget +
 					" recebeu " + helpers.length + " construtor(es) — nenhum campo novo neste ciclo");
 			}
@@ -3139,7 +3304,7 @@ function pudim_ProcessFarms()
 		// Isso acontece ANTES do action check para garantir a troca em qualquer estado
 		for (const ev of (farmData.soldierEvictions || [])) {
 			// Envia o soldado para coletar madeira perto de sua posição atual
-			Engine.PostNetworkCommand({
+			pudim_Ordenar({
 				"type": "gather-near-position",
 				"entities": [ev.soldierId],
 				"x": ev.soldierX,
@@ -3147,7 +3312,7 @@ function pudim_ProcessFarms()
 				"resourceType": { "generic": "wood", "specific": PUDIM_RES_SPECIFIC["wood"] },
 				"resourceTemplate": "",
 				"queued": false
-			});
+			}, "pudim_ProcessFarms");
 			pudim_Log("INFO", "FARM", "soldado " + ev.soldierId + " → madeira (vaga p/ aldeão na fazenda " + ev.farmId + ")");
 		}
 
@@ -3166,12 +3331,12 @@ function pudim_ProcessFarms()
 		// ── Fazenda existente tem espaço: enviar worker para colher lá ───────────────────
 		if (farmData.action === "assign") {
 			for (const a of farmData.farmAssignments) {
-				Engine.PostNetworkCommand({
+				pudim_Ordenar({
 					"type": "gather",
 					"entities": [a.workerId],
 					"target": a.farmId,
 					"queued": false
-				});
+				}, "pudim_ProcessFarms");
 			}
 			pudim_Log("INFO", "FARM", "alocou " + farmData.farmAssignments.length +
 				" worker(s) em fazenda(s) existente(s)");
@@ -3227,14 +3392,14 @@ function pudim_ProcessFarms()
 					" campo(s): madeira acabou — o resto sai assim que tiver");
 				break;
 			}
-			Engine.PostNetworkCommand({
+			pudim_Ordenar({
 				"type": "construct",
 				"entities": group,
 				"template": farmData.template,
 				"x": foundX, "z": foundZ,
 				"angle": 0, "actorSeed": 0,
 				"autorepair": true, "autocontinue": true, "queued": false
-			});
+			}, "pudim_ProcessFarms");
 			pudim_Log("SUCCESS", "FARM", "campo #" + (farmsBuilt + 1) +
 				" em (" + foundX.toFixed(0) + "," + foundZ.toFixed(0) + ")" +
 				" workers=" + group.length);
@@ -3264,12 +3429,12 @@ function pudim_ProcessAdvancedAI()
 			{
 				for (const group of focusData)
 				{
-					Engine.PostNetworkCommand({
+					pudim_Ordenar({
 						"type": "attack",
 						"entities": group.units,
 						"target": group.target,
 						"queued": false
-					});
+					}, "pudim_ProcessAdvancedAI");
 					for (const u of group.units)
 						g_PudimFocusFixed[u] = true;
 				}
@@ -3285,12 +3450,12 @@ function pudim_ProcessAdvancedAI()
 			{
 				for (const task of garrisonData.toGarrison)
 				{
-					Engine.PostNetworkCommand({
+					pudim_Ordenar({
 						"type": "garrison",
 						"entities": [task.unitId],
 						"target": task.towerId,
 						"queued": true
-					});
+					}, "pudim_ProcessAdvancedAI");
 					g_PudimGarrisoned[task.unitId] = true;
 				}
 			}
@@ -3363,14 +3528,14 @@ function pudim_ProcessAdvancedAI()
 						" build em (" + foundPos.x.toFixed(0) + "," + foundPos.z.toFixed(0) +
 						") builders=" + houseBuilderIds.length + walkTxt +
 						" de=" + (houseData.fromRes || "-"));
-					Engine.PostNetworkCommand({
+					pudim_Ordenar({
 						"type": "construct",
 						"entities": houseBuilderIds,
 						"template": houseData.template,
 						"x": foundPos.x, "z": foundPos.z,
 						"angle": 0, "actorSeed": 0,
 						"autorepair": true, "autocontinue": true, "queued": false
-					});
+					}, "pudim_ProcessAdvancedAI");
 					// Proteger builders de reassign por 5s: PostNetworkCommand é async,
 					// auto-work veria eles como idle e sobrescreveria o Repair order
 					const houseExpiry = nowTimer + 5000;
@@ -3463,14 +3628,14 @@ function pudim_ProcessAdvancedAI()
 							" builders=" + allBuilders.length +
 							" density=" + (dbg.density||0) +
 							" em (" + foundX.toFixed(0) + "," + foundZ.toFixed(0) + ")");
-						Engine.PostNetworkCommand({
+						pudim_Ordenar({
 							"type": "construct",
 							"entities": allBuilders,
 							"template": dropsiteData.template,
 							"x": foundX, "z": foundZ,
 							"angle": 0, "actorSeed": 0,
 							"autorepair": true, "autocontinue": true, "queued": false
-						});
+						}, "pudim_ProcessAdvancedAI");
 						pudim_MarkModBuilt(foundX, foundZ);
 						// Sem esta proteção o auto-work reassumia os construtores no ciclo
 						// seguinte e a fundação decaía sem ninguém — foi o armazém de
@@ -3501,7 +3666,7 @@ function pudim_ProcessAdvancedAI()
 					if (redirectEnts.length > 0) {
 						g_PudimLastRedirectTimeByRes[resKey] = _redirNow;
 						pudim_Log("INFO", "DROP", "redirect " + redirectEnts.length + " workers p/ " + resKey + " (cooldown 20s)");
-						Engine.PostNetworkCommand({
+						pudim_Ordenar({
 							"type": "gather-near-position",
 							"entities": redirectEnts,
 							"x": dropsiteData.redirectX,
@@ -3512,7 +3677,7 @@ function pudim_ProcessAdvancedAI()
 							"resourceType": { "generic": resKey, "specific": PUDIM_RES_SPECIFIC[resKey] || "" },
 							"resourceTemplate": "",
 							"queued": false
-						});
+						}, "pudim_ProcessAdvancedAI");
 					}
 				}
 			}
@@ -3539,14 +3704,14 @@ function pudim_ProcessAdvancedAI()
 			{
 				// Enviar grupos de 3 trabalhadores por vez para árvores diferentes (evitar sobrecarregar uma árvore)
 				const batch = redirect.workers.splice(0, 3);
-				Engine.PostNetworkCommand({
+				pudim_Ordenar({
 					"type": "gather-near-position",
 					"entities": batch,
 					"resourceType": { "generic": redirect.resource, "specific": PUDIM_RES_SPECIFIC[redirect.resource] || "" },
 					"resourceTemplate": "",
 					"x": redirect.x, "z": redirect.z,
 					"queued": false, "force": false
-				});
+				}, "pudim_ProcessAdvancedAI");
 			}
 		}
 	}
@@ -3565,20 +3730,20 @@ function pudim_ProcessAdvancedAI()
 				for (const action of retreatData)
 				{
 					if (action.garrison) {
-						Engine.PostNetworkCommand({
+						pudim_Ordenar({
 							"type": "garrison",
 							"entities": [action.unitId],
 							"target": action.target,
 							"queued": true
-						});
+						}, "pudim_ProcessAdvancedAI");
 					} else if (pudim_PodeAndar(action.unitId, PUDIM_ANDAR_RETIRAR, Date.now())) {
-						Engine.PostNetworkCommand({
+						pudim_Ordenar({
 							"type": "walk",
 							"entities": [action.unitId],
 							"x": action.targetX,
 							"z": action.targetZ,
 							"queued": true
-						});
+						}, "pudim_ProcessAdvancedAI");
 						pudim_RegistrarAndada(action.unitId, PUDIM_ANDAR_RETIRAR, Date.now());
 					}
 					g_PudimRetreating[action.unitId] = true;
@@ -3743,7 +3908,7 @@ function pudim_ProcessRepeatBuildings()
 
 		if (foundX !== null)
 		{
-			Engine.PostNetworkCommand({
+			pudim_Ordenar({
 				"type": "construct",
 				"template": templateName,
 				"x": foundX,
@@ -3754,7 +3919,7 @@ function pudim_ProcessRepeatBuildings()
 				"autorepair": true,
 				"autocontinue": true,
 				"queued": false
-			});
+			}, "pudim_ProcessRepeatBuildings");
 			// Protege o worker por 10s para o auto-work não sobrescrever com gather antes de chegar na fundação.
 			pudim_ProtectBuilder(ent, Date.now() + 10000);
 			// Clear lastBuilt — will be repopulated once building starts.
@@ -3870,13 +4035,13 @@ function pudim_ExecuteInitialBalance()
 			const newFemales = data.femaleCitizens.filter(id => !g_PudimInitialFemaleSeen.has(id));
 			if (newFemales.length > 0)
 			{
-				Engine.PostNetworkCommand({
+				pudim_Ordenar({
 					"type": "gather",
 					"entities": newFemales,
 					"target": data.berryBush,
 					"queued": false,
 					"pushFront": false
-				});
+				}, "pudim_ExecuteInitialBalance");
 				// Protege por 15s: sem isso, sistemas de armazém/celeiro proativo (que buscam
 				// "qualquer builder civil disponível", mesmo coletando) podiam sequestrar as
 				// aldeãs recém-despachadas segundos depois, antes delas sequer chegarem na fruta.
@@ -3906,13 +4071,13 @@ function pudim_ExecuteInitialBalance()
 			const newSoldiers = data.soldiers.filter(id => !g_PudimInitialSoldierSeen.has(id));
 			if (newSoldiers.length > 0)
 			{
-				Engine.PostNetworkCommand({
+				pudim_Ordenar({
 					"type": "gather",
 					"entities": newSoldiers,
 					"target": data.tree,
 					"queued": false,
 					"pushFront": false
-				});
+				}, "pudim_ExecuteInitialBalance");
 				// Protege soldados por 20s para auto-work não os mandar de volta para frutas
 				const soldierExpiry = Date.now() + 20000;
 				for (const s of newSoldiers) {
@@ -3933,13 +4098,13 @@ function pudim_ExecuteInitialBalance()
 	{
 		if (data.chicken)
 		{
-			Engine.PostNetworkCommand({
+			pudim_Ordenar({
 				"type": "gather",
 				"entities": [data.cavalry],
 				"target": data.chicken,
 				"queued": false,
 				"pushFront": false
-			});
+			}, "pudim_ExecuteInitialBalance");
 			// Protege cavalaria por 20s para auto-work não a redirecionar para frutas
 			pudim_ProtectBuilder(data.cavalry, Date.now() + 20000);
 			g_PudimInitialCavalryDispatched = true;
@@ -4063,17 +4228,17 @@ function pudim_ReturnPanicUnitsToWork(manual)
 
 		if (task.type === "gather" && task.target)
 		{
-			Engine.PostNetworkCommand({
+			pudim_Ordenar({
 				"type": "gather",
 				"entities": [+entId],
 				"target": task.target,
 				"queued": false,
 				"pushFront": false
-			});
+			}, "pudim_ReturnPanicUnitsToWork");
 		}
 		else if (task.type === "gather-near-position" && task.resType)
 		{
-			Engine.PostNetworkCommand({
+			pudim_Ordenar({
 				"type": "gather-near-position",
 				"entities": [+entId],
 				"resourceType": task.resType,
@@ -4082,7 +4247,7 @@ function pudim_ReturnPanicUnitsToWork(manual)
 				"z": task.z,
 				"queued": false,
 				"force": false
-			});
+			}, "pudim_ReturnPanicUnitsToWork");
 		}
 	}
 
@@ -4119,7 +4284,10 @@ function pudim_ProcessPanic()
 	const now = Date.now();
 	let panicData;
 	try {
-		panicData = Engine.GuiInterfaceCall("pudim_GetPanicData");
+		// A lista de ordens suas vai junto: o pânico era a única rotina que mexia em
+		// unidade sem ela. Ver "O PÂNICO NÃO PASSA POR CIMA DE VOCÊ" na simulação.
+		panicData = Engine.GuiInterfaceCall("pudim_GetPanicData",
+			{ "playerOrdered": pudim_GetPlayerOrderedIds() });
 	} catch(e) { return; }
 	if (!panicData) return;
 
@@ -4268,7 +4436,7 @@ function pudim_ProcessPanic()
 					g_PudimPanicPreTask[worker.id] = worker.currentOrder;
 				const shelter = escolherAbrigo(worker);
 				if (shelter) {
-					Engine.PostNetworkCommand({ "type": "garrison", "entities": [worker.id], "target": shelter.id, "queued": false });
+					pudim_Ordenar({ "type": "garrison", "entities": [worker.id], "target": shelter.id, "queued": false }, "pudim_ProcessPanic");
 					g_PudimPanicGarrisoned[worker.id] = { shelterID: shelter.id };
 					shelter.freeSlots--;
 					abrigados++;
@@ -4281,8 +4449,8 @@ function pudim_ProcessPanic()
 					    pudim_PodeAndar(worker.id, PUDIM_ANDAR_FUGIR, nowPanic)) {
 						g_PudimFleeAt[worker.id] = nowPanic;
 						pudim_RegistrarAndada(worker.id, PUDIM_ANDAR_FUGIR, nowPanic);
-						Engine.PostNetworkCommand({ "type": "walk", "entities": [worker.id],
-							"x": worker.fleeX, "z": worker.fleeZ, "queued": false });
+						pudim_Ordenar({ "type": "walk", "entities": [worker.id],
+							"x": worker.fleeX, "z": worker.fleeZ, "queued": false }, "pudim_ProcessPanic");
 						fugindo++;
 					}
 				}
@@ -4372,23 +4540,23 @@ function pudim_ProcessPanic()
 
 			const shelter = pickWorkerShelter(worker.x, worker.z);
 			if (shelter) {
-				Engine.PostNetworkCommand({
+				pudim_Ordenar({
 					"type": "garrison",
 					"entities": [worker.id],
 					"target": shelter.id,
 					"queued": false
-				});
+				}, "pudim_ProcessPanic");
 				g_PudimPanicGarrisoned[worker.id] = { shelterID: shelter.id };
 				shelter.freeSlots--;
 			} else if (rallyCCPos && pudim_PodeAndar(worker.id, PUDIM_ANDAR_ABRIGO, Date.now())) {
 				// Sem abrigo disponível: mover para perto do CC
-				Engine.PostNetworkCommand({
+				pudim_Ordenar({
 					"type": "walk",
 					"entities": [worker.id],
 					"x": rallyCCPos.x + (Math.random() * 20 - 10),
 					"z": rallyCCPos.z + (Math.random() * 20 - 10),
 					"queued": false
-				});
+				}, "pudim_ProcessPanic");
 				pudim_RegistrarAndada(worker.id, PUDIM_ANDAR_ABRIGO, Date.now());
 				g_PudimPanicGarrisoned[worker.id] = { shelterID: null };
 			}
@@ -4407,12 +4575,12 @@ function pudim_ProcessPanic()
 			const shelter = pickSoldierShelter(soldier.x, soldier.z);
 			if (!shelter) continue;
 
-			Engine.PostNetworkCommand({
+			pudim_Ordenar({
 				"type": "garrison",
 				"entities": [soldier.id],
 				"target": shelter.id,
 				"queued": false
-			});
+			}, "pudim_ProcessPanic");
 			g_PudimPanicGarrisoned[soldier.id] = { shelterID: shelter.id };
 			shelter.freeSlots--;
 		}
@@ -4484,13 +4652,13 @@ function pudim_ProcessHeroAura()
 		return;
 	g_PudimHeroLastAt = agora;
 	pudim_RegistrarAndada(d.heroId, PUDIM_ANDAR_HEROI, agora);
-	Engine.PostNetworkCommand({
+	pudim_Ordenar({
 		"type": "walk",
 		"entities": [d.heroId],
 		"x": d.x,
 		"z": d.z,
 		"queued": false
-	});
+	}, "pudim_ProcessHeroAura");
 	// Protege contra outros sistemas (pânico, abrigo, despacho) reclamarem o herói durante
 	// a caminhada. Mesmo mecanismo já usado pelos construtores.
 	pudim_ProtectBuilder(d.heroId, agora + 4000);
@@ -4909,7 +5077,7 @@ function pudim_ProcessPalicada()
 		return;
 	}
 
-	Engine.PostNetworkCommand({
+	pudim_Ordenar({
 		"type": "construct-wall",
 		"entities": g_PudimPalicadaEquipe,
 		"wallSet": g_PudimPalicadaWallSet,
@@ -4919,7 +5087,7 @@ function pudim_ProcessPalicada()
 		"autorepair": true,
 		"autocontinue": true,
 		"queued": true
-	});
+	}, "pudim_ProcessPalicada");
 	limpar();
 }
 
@@ -5181,7 +5349,7 @@ function pudim_ProcessSerie(tipo, st)
 		return;
 	}
 
-	Engine.PostNetworkCommand({
+	pudim_Ordenar({
 		"type": "construct",
 		"entities": d.builderIds,
 		"template": d.template,
@@ -5192,7 +5360,7 @@ function pudim_ProcessSerie(tipo, st)
 		"autorepair": true,
 		"autocontinue": true,
 		"queued": false
-	});
+	}, "pudim_ProcessSerie");
 	pudim_MarkModBuilt(escolhida.x, escolhida.z);
 	// Guardado para o ciclo seguinte conferir se isto virou fundacao de verdade.
 	st.ultimoPonto = { x: escolhida.x, z: escolhida.z };
@@ -6074,22 +6242,22 @@ function pudim_ProcessAutoKite()
 		// reordenacoes aconteciam em menos de 6s no replay de 24/08.
 		if (!pudim_PodeAndar(item.ent, PUDIM_ANDAR_KITE, now))
 			continue;
-		Engine.PostNetworkCommand({
+		pudim_Ordenar({
 			"type": "walk",
 			"entities": [item.ent],
 			"x": item.x,
 			"z": item.z,
 			"queued": false
-		});
+		}, "pudim_ProcessAutoKite");
 		pudim_RegistrarAndada(item.ent, PUDIM_ANDAR_KITE, now);
 		// Após reposicionar, retoma ataque ao inimigo mais próximo para não ficar parada
 		if (item.enemyTarget)
-			Engine.PostNetworkCommand({
+			pudim_Ordenar({
 				"type": "attack",
 				"entities": [item.ent],
 				"target": item.enemyTarget,
 				"queued": true
-			});
+			}, "pudim_ProcessAutoKite");
 		g_PudimKiting[item.ent] = now;
 	}
 }

@@ -39,6 +39,9 @@ const posted = [];
 const logged = [];
 const sandbox = {
 	Engine: { PostNetworkCommand: c => posted.push(c) },
+	// O árbitro (27/09) é testado em tools/test_arbitro.js; aqui ele só repassa, para este
+	// teste continuar medindo o que o rally decide mandar.
+	pudim_Ordenar: (c, dono) => { posted.push(c); return true; },
 	pudim_Log: (lvl, tag, msg) => logged.push(tag + ": " + msg),
 	Date: Date,
 	Math: Math,

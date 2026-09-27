@@ -298,7 +298,7 @@ function pudim_ToggleScout(type) {
 			delete g_PudimScoutFleeing[ent];
 			delete g_PudimScoutClearTicks[ent];
 			delete g_PudimScoutSameCount[ent];
-			Engine.PostNetworkCommand({"type": "stop", "entities": [ent], "queued": false});
+			pudim_Ordenar({"type": "stop", "entities": [ent], "queued": false}, "pudim_ToggleScout");
 		} else {
 			g_PudimScouts[ent] = type;
 			g_PudimScoutActivatedAt[ent] = Date.now();
@@ -400,7 +400,7 @@ function pudim_ForceScoutTick() {
 			g_PudimScoutFleeing[ent] = true;
 			g_PudimScoutClearTicks[ent] = 0;
 			delete g_PudimScoutTargets[ent];
-			Engine.PostNetworkCommand({ "type": "walk", "entities": [ent], "x": fleeX, "z": fleeZ, "queued": false });
+			pudim_Ordenar({ "type": "walk", "entities": [ent], "x": fleeX, "z": fleeZ, "queued": false }, "pudim_ForceScoutTick");
 			g_PudimScoutLastPos[ent] = { x: pos.x, z: pos.z, stuckCount: 0 };
 			continue;
 		}
@@ -450,7 +450,7 @@ function pudim_ForceScoutTick() {
 							}
 							retreatXt = nearCCt.x; retreatZt = nearCCt.z;
 						}
-						Engine.PostNetworkCommand({ "type": "walk", "entities": [ent], "x": retreatXt, "z": retreatZt, "queued": false });
+						pudim_Ordenar({ "type": "walk", "entities": [ent], "x": retreatXt, "z": retreatZt, "queued": false }, "pudim_ForceScoutTick");
 						continue;
 					} else {
 						delete g_PudimScoutTargetTime[ent];
@@ -511,7 +511,7 @@ function pudim_ForceScoutTick() {
 					}
 					retreatX = nearCC.x; retreatZ = nearCC.z;
 				}
-				Engine.PostNetworkCommand({ "type": "walk", "entities": [ent], "x": retreatX, "z": retreatZ, "queued": false });
+				pudim_Ordenar({ "type": "walk", "entities": [ent], "x": retreatX, "z": retreatZ, "queued": false }, "pudim_ForceScoutTick");
 				continue;
 			} else {
 				g_PudimScoutLastPos[ent] = { x: pos.x, z: pos.z, stuckCount: 0 };
@@ -645,10 +645,10 @@ function pudim_ForceScoutTick() {
 			g_PudimScoutSameCount[ent] = 0;
 			g_PudimScoutTargets[ent] = { x: bestCell.x, z: bestCell.z };
 			g_PudimScoutTargetTime[ent] = now;
-			Engine.PostNetworkCommand({
+			pudim_Ordenar({
 				"type": "walk", "entities": [ent],
 				"x": bestCell.x, "z": bestCell.z, "queued": false
-			});
+			}, "pudim_ForceScoutTick");
 		}
 	}
 }

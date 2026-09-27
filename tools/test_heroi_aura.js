@@ -85,7 +85,7 @@ check("a função está registrada na lista de chamadas permitidas",
 
 // Multiplayer: leitura na simulação, escrita só por PostNetworkCommand.
 check("o painel escreve por PostNetworkCommand, nunca direto na simulação",
-	/pudim_ProcessHeroAura[\s\S]{0,2200}?Engine\.PostNetworkCommand\(\{[\s\S]{0,120}?"type": "walk"/.test(panel));
+	/pudim_ProcessHeroAura[\s\S]{0,2200}?(?:Engine\.PostNetworkCommand|pudim_Ordenar)\(\{[\s\S]{0,120}?"type": "walk"/.test(panel));
 check("a função da simulação não escreve nada — só lê componentes",
 	!/pudim_GetHeroAuraData[\s\S]*?(?=GuiInterface\.prototype\.pudim_GetAutoKiteData)/.test(src) ||
 	!/pudim_GetHeroAuraData[\s\S]*?PostNetworkCommand[\s\S]*?(?=GuiInterface\.prototype\.pudim_GetAutoKiteData)/.test(src));

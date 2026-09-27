@@ -135,11 +135,15 @@ const guiFiles = listarJs(path.join(RAIZ, "gui"));
 const tiposUsados = new Set();
 for (const f of guiFiles) {
 	const src = semComentarios(fs.readFileSync(f, "utf8"));
-	// Só o "type" que acompanha um PostNetworkCommand interessa.
-	for (const bloco of src.split("Engine.PostNetworkCommand").slice(1)) {
-		const m = bloco.slice(0, 400).match(/"type"\s*:\s*"([a-z-]+)"/);
-		if (m) tiposUsados.add(m[1]);
-	}
+	// Só o "type" que acompanha um comando de rede interessa. Desde 27/09 são DOIS caminhos:
+	// Engine.PostNetworkCommand direto (ordens de edifício) e pudim_Ordenar, o árbitro por
+	// onde passa toda ordem a unidade. Olhar só o primeiro deixaria 42 ordens fora desta
+	// verificação — e um tipo inventado passaria justamente por ali.
+	for (const via of ["Engine.PostNetworkCommand", "pudim_Ordenar("])
+		for (const bloco of src.split(via).slice(1)) {
+			const m = bloco.slice(0, 400).match(/"type"\s*:\s*"([a-z-]+)"/);
+			if (m) tiposUsados.add(m[1]);
+		}
 }
 const foraDoPadrao = [...tiposUsados].filter(t => !VANILLA.has(t));
 check("todo comando de rede e do jogo base", foraDoPadrao.length === 0, foraDoPadrao.join(", "));

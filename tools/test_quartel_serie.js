@@ -344,7 +344,7 @@ check("o painel escreve só por PostNetworkCommand", (function() {
 	const i = panel.indexOf("function pudim_ProcessQuartel");
 	const j = panel.indexOf('"entities": d.builderIds');
 	return i > 0 && j > i &&
-		/Engine\.PostNetworkCommand/.test(panel.slice(i, j + 60));
+		/Engine\.PostNetworkCommand|pudim_Ordenar\(/.test(panel.slice(i, j + 60));
 })());
 check("e o estado da série vive só na GUI",
 	/var g_PudimSeries = \{\};/.test(panel) && !/g_PudimSeries/.test(sim));

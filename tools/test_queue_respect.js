@@ -85,7 +85,7 @@ check("a quantidade ainda passa por pudim_ComputeAffordableCount",
 // E o estoque nao e o unico teto: desde 15/09 o lote tambem nao passa das vagas de
 // populacao. Enfileirar o que nao pode nascer prende recurso num lote parado.
 check("e tambem pelas vagas de populacao",
-	/const vagasPop = Math\.max\(0, \(aqData\.popLimit \|\| 0\) - \(aqData\.popCount \|\| 0\)\);/.test(PANEL));
+	/let vagasPop = Math\.max\(0, \(aqData\.popLimit \|\| 0\) - \(aqData\.popCount \|\| 0\)\);/.test(PANEL));
 
 // Réplica: com 146 de comida e aldeã a 50, cabem 2 — foi o "2" que apareceu na tela.
 function cabem(estoque, custo, desejado) { return Math.min(desejado, Math.floor(estoque / custo)); }

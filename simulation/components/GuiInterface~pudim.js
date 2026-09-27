@@ -2154,7 +2154,26 @@ GuiInterface.prototype.pudim_GetPanicData = function(player, data)
 	// 60m e o compromisso: cavalaria cobre isso em poucos segundos, entao ainda da tempo de
 	// chegar a um abrigo, mas quem esta coletando do outro lado da base segue trabalhando.
 	const PUDIM_RISCO_RAIO = 60;
+
+	// ── O PÂNICO NÃO PASSA POR CIMA DE VOCÊ ─────────────────────────────────────────────
+	//
+	// Esta era a única rotina que mexe em unidade e não recebia a lista de ordens do
+	// jogador. MEDIDO em 167 partidas: 25.149 guarnições do mod caíram em cima de uma ordem
+	// sua na mesma unidade em até 60s — 2.742 delas em menos de 3s. O cenário é o de sempre:
+	// você manda a tropa lutar perto da base, e o pânico a enfia numa torre.
+	//
+	// Diretriz: "se um trabalhador receber uma ordem do jogador, não pode receber nenhuma
+	// ordem do mod". E "quando tem luta, as unidades de combate não podem ficar em auto
+	// serviço" — guardar soldado que está atacando é tirá-lo da luta.
+	const panicOrdered = new Set(((data && data.playerOrdered) || []).map(Number));
+	const atacando = function(ent) {
+		const ai = Engine.QueryInterface(ent, IID_UnitAI);
+		const o = ai && ai.orderQueue && ai.orderQueue.length ? ai.orderQueue[0] : null;
+		return !!(o && (o.type === "Attack" || o.type === "WalkAndFight"));
+	};
+
 	for (const ent of myEnts) {
+		if (panicOrdered.has(ent)) continue;
 		const id = Engine.QueryInterface(ent, IID_Identity);
 		if (!id) continue;
 		const cmpHealth = Engine.QueryInterface(ent, IID_Health);
@@ -2205,7 +2224,10 @@ GuiInterface.prototype.pudim_GetPanicData = function(player, data)
 			                            x: wp2 ? wp2.x : null, z: wp2 ? wp2.y : null,
 			                            dist: distInimigo,
 			                            fleeX: fuga ? fuga.x : null, fleeZ: fuga ? fuga.z : null });
-		} else if (isSoldier) {
+		} else if (isSoldier && !atacando(ent)) {
+			// Soldado que está ATACANDO fica na luta. Só entra na lista quem está perto do
+			// inimigo sem estar brigando — coletando, parado, andando.
+			//
 			// Posicao tambem para o soldado, pela mesma razao do trabalhador: a torre MAIS
 			// PERTO. Sem ela o painel mandava todo mundo para a primeira da lista.
 			const spos = Engine.QueryInterface(ent, IID_Position);

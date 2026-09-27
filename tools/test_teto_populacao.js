@@ -5,19 +5,21 @@
  * ficar colocando unidades na fila (economizar recursos)... mas logo que morrer unidades,
  * colocar pra treinar imediatamente".
  *
- * MEDIDO no replay 2026-09-14_0004, cruzando a amostra de populacao (uma a cada 30s, de
- * metadata.json) com os comandos `train` da mesma janela:
+ * CORRECAO DA PROVA (27/09). Esta nota citava o replay 2026-09-14_0004 e "26 unidades
+ * enfileiradas com a populacao em 200". A medicao estava ERRADA: o script tomava o id do
+ * jogador como indice+1, mas o indice 0 do metadata e a Gaia — os treinos eram do jogador
+ * seguinte (warlock2). A cadencia exata de 1,8s entre edificios ja denunciava que nao era
+ * o mod. A secao "A procedencia" no fim trava para que a prova errada nao volte.
  *
- *   t= 800s  pop 200   train  2        t=1037s  pop 200   train  0
- *   t= 830s  pop 200   train  0        t=1067s  pop 200   train 26
- *   t= 859s  pop 200   train  1        t=1096s  pop 200   train  5
- *   t= 889s  pop 200   train  0
- *   t= 919s  pop 200   train  0
- *   t= 948s  pop 200   train  3
+ * A PROVA BOA veio do log do proprio mod, partida 20260927-174017:
  *
- * Dez amostras seguidas com a populacao cravada em 200, e 37 unidades enfileiradas nelas —
- * 26 numa janela so. O recurso sai do banco quando o lote comeca e fica preso num lote que
- * nao nasce.
+ *   53,2s  abriu vaga de populacao (1): retomando o treino
+ *   53,2s  fila semeada em 247 x1 / 7730 x1 / 10430 x1 / 10594 x1 / 10702 x1
+ *   95,2s  sete edificios semeados x1, com a populacao no teto
+ *
+ * Cinco lotes para UMA vaga: o limite era aplicado por edificio e nunca descontado entre um
+ * e outro. Agora `vagasPop` e um SALDO, descontado a cada lote pelo custo de populacao do
+ * template.
  *
  * A regra vale nos DOIS tetos, e por isso usa o ATUAL (popLimit), nao o maximo da partida:
  * `popLimit - popCount` e quantas unidades podem nascer agora, e e a mesma conta que o jogo
@@ -59,7 +61,7 @@ check("e continua enviando popCount, que e o outro lado da conta",
 
 // ── 2. A auto-fila calcula as vagas e para em zero ─────────────────────────────────────
 check("a auto-fila calcula as vagas a partir do teto atual",
-	/const vagasPop = Math\.max\(0, \(aqData\.popLimit \|\| 0\) - \(aqData\.popCount \|\| 0\)\);/.test(execP));
+	/let vagasPop = Math\.max\(0, \(aqData\.popLimit \|\| 0\) - \(aqData\.popCount \|\| 0\)\);/.test(execP));
 check("e 'cheio' passou a ser 'sem vaga', nao 'no maximo da partida'",
 	/const popCheio = vagasPop <= 0;/.test(execP) &&
 	!/const popCheio = \(aqData\.popMax/.test(execP));
@@ -70,7 +72,7 @@ check("e 'cheio' passou a ser 'sem vaga', nao 'no maximo da partida'",
 check("semeadura: o lote nao passa das vagas",
 	/const affordable = Math\.min\(\s*\n?\s*pudim_ComputeAffordableCount\(template, desiredCount, res\), vagasPop\);/.test(execP));
 check("troca por proporcao: nem acontece sem vaga, e o lote e limitado",
-	/if \(isOurs && \(cur\.progress \|\| 0\) <= 0 && tplDesejado && !popCheio\)/.test(execP) &&
+	/if \(isOurs && \(cur\.progress \|\| 0\) <= 0 && tplDesejado && vagasPop > 0\)/.test(execP) &&
 	/Math\.min\(desiredCount, affordable, vagasPop\)/.test(execP));
 check("lote degradado: so troca se o lote inteiro couber nas vagas",
 	/curCount < desiredCount &&\s*\n?\s*desiredCount <= vagasPop/.test(execP));
@@ -127,9 +129,39 @@ check("duas batalhas, dois disparos",
 check("e sem nunca encher, nenhum disparo — o gatilho e da borda, nao do estado",
 	gatilho([5, 4, 3, 2]) === 0);
 
+// ── O saldo: cada lote semeado desconta as vagas ───────────────────────────────────────
+check("as vagas viraram saldo, descontado a cada lote",
+	/const gastaVagas = function\(tpl, n\)/.test(execP) &&
+	/vagasPop = Math\.max\(0, vagasPop - custo \* n\);/.test(execP));
+check("pelo custo de populacao do template, nao por 1 fixo",
+	/td\.cost && td\.cost\.population > 0\) custo = td\.cost\.population;/.test(execP));
+check("e os TRES caminhos que semeiam descontam",
+	(execP.match(/gastaVagas\((tplDesejado, lote|tpl, desiredCount|template, affordable)\);/g) || []).length === 3,
+	(execP.match(/gastaVagas\(/g) || []).length - 1 + " chamada(s)");
+
+// O caso do log 20260927-174017, espelhado: uma vaga, cinco edificios querendo semear.
+function ciclo(vagas, edificios, custo) {
+	let saldo = vagas, semeados = 0;
+	for (let i = 0; i < edificios; i++) {
+		const n = Math.min(1, saldo);
+		if (n <= 0) continue;
+		semeados += n;
+		saldo = Math.max(0, saldo - custo * n);
+	}
+	return semeados;
+}
+check("uma vaga e cinco edificios: sai UM lote, nao cinco", ciclo(1, 5, 1) === 1);
+check("sete edificios no teto: nenhum", ciclo(0, 7, 1) === 0);
+check("com espaco, cada edificio semeia o seu", ciclo(10, 5, 1) === 5);
+check("unidade de custo 2 esgota as vagas duas vezes mais rapido", ciclo(3, 5, 2) === 2);
+
 // ── A procedencia ──────────────────────────────────────────────────────────────────────
-check("a medicao do replay fica no codigo, com a janela das 26",
-	/2026-09-14_0004/.test(panel) && /train 26/.test(panel));
+// A prova certa fica no codigo, e a errada NAO volta: um replay de outro jogador nao pode
+// ser citado como comportamento do mod.
+check("a prova certa fica no codigo: o log do mod de 27/09, cinco lotes para uma vaga",
+	/20260927-174017/.test(panel) && /Cinco lotes para UMA vaga/.test(panel));
+check("e a medicao errada de 15/09 esta marcada como errada, nao repetida como prova",
+	/Aquela medi(ç|c)(ã|a)o estava ERRADA/.test(panel) && !/Vinte e seis unidades enfileiradas/.test(panel));
 
 console.log(fails === 0 ? "\nTODOS OS TESTES PASSARAM" : "\n" + fails + " TESTE(S) FALHARAM");
 process.exit(fails === 0 ? 0 : 1);

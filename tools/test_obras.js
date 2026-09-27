@@ -191,7 +191,7 @@ check("com os três números que separam as causas",
 check("e só quando não há nada na tela",
 	/if \(!obras\.length && d && d\._dbg\) \{/.test(execP));
 check("e é chamado no tique, protegido, para não derrubar o resto",
-	/try \{ pudim_AtualizarObras\(\); \} catch \(e\) \{\}/.test(execP));
+	/try \{ pudim_Medir\("AtualizarObras", pudim_AtualizarObras\); \} catch \(e\) \{\}/.test(execP));
 
 // ── ASSISTINDO TAMBÉM ──────────────────────────────────────────────────────────────────
 //
@@ -201,21 +201,21 @@ check("e é chamado no tique, protegido, para não derrubar o resto",
 //
 // A regra: leitura em cima do return, comando embaixo. A barra de aliados sempre esteve do
 // lado certo; o indicador novo caiu do lado errado.
-const iObras = execP.indexOf("pudim_AtualizarObras();");
+const iObras = execP.indexOf('pudim_Medir("AtualizarObras", pudim_AtualizarObras)');
 const iTrava = execP.indexOf("g_IsObserver !== \"undefined\" && g_IsObserver) return;");
 check("o indicador é atualizado ANTES da trava de espectador",
 	iObras > 0 && iTrava > 0 && iObras < iTrava,
 	"obras em " + iObras + ", trava em " + iTrava);
-const iBarra = execP.indexOf("pudim_UpdateAllyBar();");
+const iBarra = execP.indexOf('pudim_Medir("UpdateAllyBar", pudim_UpdateAllyBar)');
 check("a barra de aliados também, como sempre esteve",
 	iBarra > 0 && iBarra < iTrava);
 // 06/09, assistindo: "o estimador de batalha nao ta funcionando", e a Proporção de Unidades
 // dizendo "Nada para treinar ainda" com a base inteira produzindo. Os dois só leem e
 // desenham, e estavam abaixo do return.
-const iComb = execP.indexOf("pudim_RefreshCombat();", iBarra);
+const iComb = execP.indexOf('pudim_Medir("RefreshCombat", pudim_RefreshCombat)', iBarra);
 check("o estimador de combate também é atualizado antes da trava",
 	iComb > 0 && iComb < iTrava, "estimador em " + iComb + ", trava em " + iTrava);
-const iUni = execP.indexOf("pudim_AtualizarUnidades(); } catch(e) {}");
+const iUni = execP.indexOf('pudim_Medir("AtualizarUnidades", pudim_AtualizarUnidades); } catch(e) {}');
 check("e a lista da proporção de unidades também",
 	iUni > 0 && iUni < iTrava, "lista em " + iUni + ", trava em " + iTrava);
 check("e a razão está escrita, para ninguém 'arrumar' movendo de volta",

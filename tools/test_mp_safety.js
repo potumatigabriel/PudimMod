@@ -203,8 +203,14 @@ check("nenhuma chamada nova ao GuiInterface do jogo base sem auditoria",
 
 	// Quem é chamado antes da trava.
 	const antes = painel.slice(iTick, iTrava);
-	const chamadasAntes = [...new Set([...antes.matchAll(/(pudim_[A-Za-z]+)\(/g)]
-		.map(m => m[1]))].filter(n => n !== "pudim_Tick");
+	// Duas formas de chamar: `pudim_X()` e, desde 27/09, `pudim_Medir("X", pudim_X)` — a
+	// medicao de custo recebe a funcao como REFERENCIA, sem parenteses. Sem a segunda forma
+	// o rastreio parava em pudim_Medir e aprovava o caminho do espectador sem ter auditado
+	// nada: exatamente o "teste que passa por vazio" que a ancora abaixo existe para pegar.
+	const chamadasDe = src => [...src.matchAll(/(pudim_[A-Za-z]+)\(/g)].map(m => m[1])
+		.concat([...src.matchAll(/pudim_Medir\("[^"]*",\s*(pudim_[A-Za-z]+)\)/g)].map(m => m[1]));
+	const chamadasAntes = [...new Set(chamadasDe(antes))]
+		.filter(n => n !== "pudim_Tick" && n !== "pudim_Medir");
 	check("há funções rodando antes da trava (senão este teste não mede nada)",
 		chamadasAntes.length >= 3, chamadasAntes.join(", "));
 
@@ -246,8 +252,8 @@ check("nenhuma chamada nova ao GuiInterface do jogo base sem auditoria",
 		const c = corpo(nome);
 		if (!c) continue;
 		if (/PostNetworkCommand|SendNetworkFlare/.test(c)) emissores.push(nome);
-		for (const m of c.matchAll(/(pudim_[A-Za-z]+)\(/g))
-			if (!vistos.has(m[1])) fila.push(m[1]);
+		for (const n of chamadasDe(c))
+			if (!vistos.has(n)) fila.push(n);
 	}
 	check("nenhuma função do caminho do espectador emite comando de rede",
 		emissores.length === 0, emissores.join(", "));

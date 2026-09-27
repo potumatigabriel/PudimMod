@@ -155,7 +155,7 @@ check("a torre continua espalhando em anel, não agrupando",
 console.log("\npalicada e quartel ao mesmo tempo");
 
 check("os dois processos rodam no mesmo tique",
-	/pudim_ProcessQuartel\(\);\s*\n\s*try \{ pudim_ProcessPalicada\(\);/.test(panel));
+	/pudim_Medir\("ProcessQuartel", pudim_ProcessQuartel\);\s*\n\s*try \{ pudim_Medir\("ProcessPalicada", pudim_ProcessPalicada\);/.test(panel));
 // Desde 01/09 cada TIPO tem o seu estado (g_PudimSeries), nao so palicada-vs-serie: mandar
 // estabulos no meio dos quarteis apagava a serie de quarteis, porque as oito variaveis do
 // estado eram escalares e o dropdown as reescrevia.

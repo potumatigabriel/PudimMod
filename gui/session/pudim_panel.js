@@ -147,6 +147,44 @@ function pudim_LogError(msg) { pudim_Log("ERROR", msg); }
 var g_PudimSnapshotAccum = 0;
 const PUDIM_SNAPSHOT_INTERVAL = 60000;
 
+// ─── Quanto custa cada sistema do mod ──────────────────────────────────────────────────
+//
+// Pedido de 27/09: "veja possiveis bugs e melhorias de performance".
+//
+// Não havia um único número de custo no mod: o log não media tempo, e o replay não guarda o
+// profiler. Otimizar sem isso é escolher o alvo no chute. Então primeiro a régua: cada
+// sistema chamado pelo tique é medido por inteiro — a consulta à simulação E o trabalho do
+// lado da interface. Isso importa: o contra-treino, por exemplo, pede GetEntityState de
+// cada entidade sua a cada 3s, e isso não aparece se só as chamadas diretas à simulação
+// forem medidas.
+//
+// try/finally, e não try/catch: a medição não pode engolir erro nenhum — quem já tratava a
+// exceção continua tratando, e quem não tratava continua sem tratar.
+var g_PudimCusto = {};   // sistema -> { n, ms, max }
+function pudim_Medir(nome, fn)
+{
+	const t0 = Date.now();
+	try { return fn(); }
+	finally {
+		const dt = Date.now() - t0;
+		const c = g_PudimCusto[nome] || (g_PudimCusto[nome] = { n: 0, ms: 0, max: 0 });
+		c.n++; c.ms += dt;
+		if (dt > c.max) c.max = dt;
+	}
+}
+
+/** Uma linha por minuto: o custo total e os cinco sistemas mais caros. */
+function pudim_LogCusto()
+{
+	const itens = Object.keys(g_PudimCusto).map(k => [k, g_PudimCusto[k]]);
+	if (!itens.length) return;
+	itens.sort((a, b) => b[1].ms - a[1].ms);
+	const total = itens.reduce((s, x) => s + x[1].ms, 0);
+	pudim_Log("INFO", "CUSTO", total + "ms/min | " + itens.slice(0, 5).map(x =>
+		x[0] + " " + x[1].ms + "ms/" + x[1].n + "x max" + x[1].max).join(" | "));
+	g_PudimCusto = {};
+}
+
 function pudim_LogSnapshot() {
 	try {
 		const allies = Engine.GuiInterfaceCall("pudim_GetAllyStats");
@@ -2287,7 +2325,7 @@ var g_PudimKiting = {}; // entId -> timestamp do último kite
  */
 function pudim_Tick(dt)
 {
-	if (typeof pudim_UpdateAllyBar === "function") { try { pudim_UpdateAllyBar(); } catch(e) { error("AllyBar Error: " + e); } }
+	if (typeof pudim_UpdateAllyBar === "function") { try { pudim_Medir("UpdateAllyBar", pudim_UpdateAllyBar); } catch(e) { error("AllyBar Error: " + e); } }
 
 	// ── O QUE SÓ LÊ VEM ANTES DA TRAVA DE ESPECTADOR ────────────────────────────────────
 	//
@@ -2304,7 +2342,7 @@ function pudim_Tick(dt)
 	if (g_PudimObrasAccum >= PUDIM_OBRAS_INTERVAL)
 	{
 		g_PudimObrasAccum = 0;
-		try { pudim_AtualizarObras(); } catch (e) {}
+		try { pudim_Medir("AtualizarObras", pudim_AtualizarObras); } catch (e) {}
 	}
 
 	// Estimativa de combate: a cada 3 segundos (apenas quando painel aberto).
@@ -2313,7 +2351,7 @@ function pudim_Tick(dt)
 	if (g_PudimPanelOpen && g_PudimCombatAccum >= PUDIM_COMBAT_INTERVAL)
 	{
 		g_PudimCombatAccum = 0;
-		pudim_RefreshCombat();
+		pudim_Medir("RefreshCombat", pudim_RefreshCombat);
 	}
 
 	// Lista da Proporcao de Unidades: idem, so le e desenha. Assistindo, ela dizia "Nada
@@ -2322,7 +2360,7 @@ function pudim_Tick(dt)
 	if (g_PudimUnitAccum >= 1500)
 	{
 		g_PudimUnitAccum = 0;
-		try { pudim_AtualizarUnidades(); } catch(e) {}
+		try { pudim_Medir("AtualizarUnidades", pudim_AtualizarUnidades); } catch(e) {}
 	}
 
 	// Não enviar comandos de rede se for espectador (causaria OOS)
@@ -2364,36 +2402,37 @@ function pudim_Tick(dt)
 	g_PudimAdvancedAIAccum += dt;
 
 	// Idioma pode demorar a ficar detectável (dicionário do jogo carrega depois do init)
-	try { pudim_RefreshTooltipsIfNeeded(); } catch(e) {}
+	try { pudim_Medir("RefreshTooltipsIfNeeded", pudim_RefreshTooltipsIfNeeded); } catch(e) {}
 
 	g_PudimSnapshotAccum += dt;
 	if (g_PudimSnapshotAccum >= PUDIM_SNAPSHOT_INTERVAL)
 	{
 		g_PudimSnapshotAccum = 0;
 		pudim_LogSnapshot();
+		try { pudim_LogCusto(); } catch (e) {}
 	}
 
 	// Auto-Trabalho: bloqueado durante pânico (não redirecionar trabalhadores em batalha)
 	if (g_PudimAutoWorkEnabled && g_PudimAutoWorkAccum >= PUDIM_AUTOWORK_INTERVAL && g_PudimInitialBalanceDone && !g_PudimPanicFull)
 	{
 		g_PudimAutoWorkAccum = 0;
-		pudim_RunAutoWork();
+		pudim_Medir("RunAutoWork", pudim_RunAutoWork);
 	}
 
 	// Repetir Construção: a cada 1 segundo (sempre rodando em background se houver repeats ativos)
 	if (g_PudimRepeatAccum >= 1000)
 	{
 		g_PudimRepeatAccum = 0;
-		pudim_ProcessRepeatBuildings();
+		pudim_Medir("ProcessRepeatBuildings", pudim_ProcessRepeatBuildings);
 		if (g_PudimPanelOpen)
-			pudim_UpdateGlobalRepeatStatus();
+			pudim_Medir("UpdateGlobalRepeatStatus", pudim_UpdateGlobalRepeatStatus);
 	}
 
 	// Inteligência Avançada (Mercado, Armazéns, Foco de Fogo, Torres): a cada 2 segundos
 	if (g_PudimAdvancedAIAccum >= 2000)
 	{
 		g_PudimAdvancedAIAccum = 0;
-		pudim_ProcessAdvancedAI();
+		pudim_Medir("ProcessAdvancedAI", pudim_ProcessAdvancedAI);
 	}
 
 	// Auto-Kite (Ranged foge de melee): a cada 600ms para ser responsivo
@@ -2401,7 +2440,7 @@ function pudim_Tick(dt)
 	if (g_PudimKiteAccum >= 600 && g_PudimCombatAssistsEnabled)
 	{
 		g_PudimKiteAccum = 0;
-		pudim_ProcessAutoKite();
+		pudim_Medir("ProcessAutoKite", pudim_ProcessAutoKite);
 	}
 
 	// Herói na aura: a cada 1.2s. Mais lento que o kite de propósito — a posição dele muda
@@ -2410,7 +2449,7 @@ function pudim_Tick(dt)
 	if (g_PudimHeroAccum >= 1200 && g_PudimCombatAssistsEnabled)
 	{
 		g_PudimHeroAccum = 0;
-		pudim_ProcessHeroAura();
+		pudim_Medir("ProcessHeroAura", pudim_ProcessHeroAura);
 	}
 
 	// Lista de unidades treinaveis: a cada 1,5s.
@@ -2427,8 +2466,8 @@ function pudim_Tick(dt)
 	if (g_PudimQuartelAccum >= 1000)
 	{
 		g_PudimQuartelAccum = 0;
-		pudim_ProcessQuartel();
-		try { pudim_ProcessPalicada(); } catch (e) { pudim_Log("ERROR", "PALICADA", "" + e); }
+		pudim_Medir("ProcessQuartel", pudim_ProcessQuartel);
+		try { pudim_Medir("ProcessPalicada", pudim_ProcessPalicada); } catch (e) { pudim_Log("ERROR", "PALICADA", "" + e); }
 	}
 
 	// Sistema de Pânico: a cada 1.5 segundos
@@ -2436,7 +2475,7 @@ function pudim_Tick(dt)
 	if (g_PudimPanicAccum >= 1500)
 	{
 		g_PudimPanicAccum = 0;
-		pudim_ProcessPanic();
+		pudim_Medir("ProcessPanic", pudim_ProcessPanic);
 	}
 
 	// Auto-Fila: re-ativa autoqueue em todos os edifícios a cada 3 segundos (se habilitado)
@@ -2463,7 +2502,7 @@ function pudim_Tick(dt)
 		if (g_PudimAutoQueueAccum >= PUDIM_AUTOQUEUE_INTERVAL)
 		{
 			g_PudimAutoQueueAccum = 0;
-			pudim_ProcessAutoQueue();
+			pudim_Medir("ProcessAutoQueue", pudim_ProcessAutoQueue);
 		}
 	}
 
@@ -2479,7 +2518,7 @@ function pudim_Tick(dt)
 		if (g_PudimFarmAccum >= (g_PudimFarmUrgente ? 1500 : 5000))
 		{
 			g_PudimFarmAccum = 0;
-			pudim_ProcessFarms();
+			pudim_Medir("ProcessFarms", pudim_ProcessFarms);
 		}
 	}
 
@@ -2488,7 +2527,7 @@ function pudim_Tick(dt)
 	if (g_PudimResearchAccum >= 15000)
 	{
 		g_PudimResearchAccum = 0;
-		pudim_ProcessAutoResearch();
+		pudim_Medir("ProcessAutoResearch", pudim_ProcessAutoResearch);
 	}
 
 	// Fundações de dropsite: workers novos → ajudar construir; dropsite concluído → redirecionar workers
@@ -2497,7 +2536,7 @@ function pudim_Tick(dt)
 		if (g_PudimFoundationAccum >= 3000)
 		{
 			g_PudimFoundationAccum = 0;
-			pudim_ProcessDropsiteFoundations();
+			pudim_Medir("ProcessDropsiteFoundations", pudim_ProcessDropsiteFoundations);
 		}
 	}
 }

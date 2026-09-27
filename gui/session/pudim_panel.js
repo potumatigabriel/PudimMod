@@ -5710,6 +5710,60 @@ function pudim_AtualizarUnidades()
 	pudim_DesenharUnidades();
 }
 
+/**
+ * A ficha da unidade, para aparecer ao passar o mouse na lista de proporção.
+ *
+ * Pedido de 27/09: "ao passar o mouse sobre a unidade em proporção da unidade, mostrar o
+ * modal com dados da unidade".
+ *
+ * NADA AQUI É INVENTADO. A receita é a MESMA que o jogo usa no botão de treinar, conferida
+ * no disco em gui/session/selection_panels~training.js: nome, classes, texto do template,
+ * custo, e — quando o jogador liga "tooltips detalhados" — vida, ataque, resistência e
+ * velocidade. Estes ajudantes são globais da sessão; o moderngui os chama exatamente assim.
+ *
+ * CADA CHAMADA VAI GUARDADA. Um ajudante que não exista neste contexto derrubaria a lista
+ * inteira, e a lista é o que o jogador usa — vale mais perder uma linha da ficha do que a
+ * tela. É a mesma cautela do `typeof escapeText === "function"` da barra de aliados.
+ */
+function pudim_TooltipUnidade(u)
+{
+	let td;
+	try { td = GetTemplateData(u.tpl); } catch (e) { return ""; }
+	if (!td) return "";
+
+	const jogador = (typeof g_ViewedPlayer !== "undefined" && g_ViewedPlayer > 0)
+		? g_ViewedPlayer : Engine.GetPlayerID();
+
+	const linhas = [];
+	const junta = function(fn, arg2) {
+		if (typeof fn !== "function") return;
+		try {
+			const t = (arg2 === undefined) ? fn(td) : fn(td, arg2);
+			if (t) linhas.push(t);
+		} catch (e) {}
+	};
+
+	junta(typeof getEntityNamesFormatted === "function" ? getEntityNamesFormatted : null);
+	junta(typeof getVisibleEntityClassesFormatted === "function" ? getVisibleEntityClassesFormatted : null);
+	junta(typeof getEntityTooltip === "function" ? getEntityTooltip : null);
+	junta(typeof getEntityCostTooltip === "function" ? getEntityCostTooltip : null, jogador);
+	// Os detalhados. O jogo os esconde atrás da opção "showdetailedtooltips"; aqui eles vão
+	// sempre, porque esta lista existe justamente para COMPARAR unidades — sem ataque e
+	// resistência não há o que comparar, e foi por isso que ele pediu a ficha.
+	junta(typeof getHealthTooltip === "function" ? getHealthTooltip : null);
+	junta(typeof getAttackTooltip === "function" ? getAttackTooltip : null);
+	junta(typeof getResistanceTooltip === "function" ? getResistanceTooltip : null);
+	junta(typeof getSpeedTooltip === "function" ? getSpeedTooltip : null);
+
+	// E o que só o mod sabe: onde esta unidade está na conta dele.
+	const peso = g_PudimUnitPesos[u.tpl] || 0;
+	linhas.push("[color=\"255 200 120\"]PudimMod:[/color] " +
+		(u.existentes || 0) + " em campo, " + (u.emFila || 0) + " na fila, peso " + peso +
+		(peso > 0 ? "" : " (nao treina)"));
+
+	return linhas.join("\n");
+}
+
 function pudim_DesenharUnidades()
 {
 	for (let i = 0; i < PUDIM_UNIT_LINHAS; i++)
@@ -5728,6 +5782,16 @@ function pudim_DesenharUnidades()
 		// cegas, sem saber o que já tem.
 		if (lbl) try { lbl.caption = u.nome + " (" + u.existentes + ")"; } catch (e) {}
 		if (val) try { val.caption = String(g_PudimUnitPesos[u.tpl] || 0); } catch (e) {}
+
+		// A ficha da unidade, no rótulo e nos dois botões: o jogador passa o mouse em
+		// qualquer ponto da linha, não só no texto. Os rótulos deixaram de ser `ghost` no
+		// XML por isto — objeto ghost não recebe mouse, e sem mouse não há tooltip.
+		const ficha = pudim_TooltipUnidade(u);
+		for (const parte of ["Label", "Minus", "Val", "Plus"]) {
+			const o = Engine.TryGetGUIObjectByName("pudim_unit" + parte + i);
+			if (!o) continue;
+			try { o.tooltip = ficha; o.tooltip_style = "sessionToolTipBold"; } catch (e) {}
+		}
 	}
 	const vazio = Engine.TryGetGUIObjectByName("pudim_unitVazio");
 	if (vazio) try { vazio.hidden = g_PudimUnitLista.length > 0; } catch (e) {}

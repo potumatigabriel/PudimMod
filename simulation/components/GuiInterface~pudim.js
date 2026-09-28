@@ -2403,7 +2403,16 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 			let margem = 25;
 			const cmpMot = Engine.QueryInterface(e, IID_UnitMotion);
 			if (cmpMot && cmpMot.GetWalkSpeed) {
-				try { margem += 2 * (+cmpMot.GetWalkSpeed() || 0); } catch (e2) {}
+				// Cavalaria: 5 s CORRENDO, não 2 s andando (pedido de 28/09, "tratar quem corre
+				// como mais perigoso"). A mesma regra de pudim_GetScoutStatus.
+				try {
+					const idA = Engine.QueryInterface(e, IID_Identity);
+					const anda = +cmpMot.GetWalkSpeed() || 0;
+					if (idA && idA.HasClass("FastMoving"))
+						margem += 5 * anda * (cmpMot.GetRunMultiplier ? (+cmpMot.GetRunMultiplier() || 1) : 1);
+					else
+						margem += 2 * anda;
+				} catch (e2) {}
 			}
 			const q = pos.GetPosition2D();
 			out.push({ x: q.x, z: q.y, reach: rng + margem });
@@ -2488,6 +2497,47 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 		// calculado no menor raio serve para todos os maiores.
 		const ORBIT_STEP = Math.min(1.2, (arrivalRadius * 1.3 * 1.2) / R_MIN);
 
+		// ── POR DENTRO DA BASE, FORA DO ALCANCE (28/09) ──────────────────────────────────
+		//
+		// Pedido: "explorar a base deles, mas sem se expor". Contornar a fronteira do
+		// território só mostra a BORDA: o território vai a ~140 do CC e a visão da
+		// cavalaria é 80 (template_unit_cavalry.xml), então o miolo — CC, quartéis, exército
+		// — nunca aparecia. Aqui o batedor entra no território até o ponto MAIS FUNDO que
+		// ainda está fora do alcance de tudo (as mesmas ameaças com folga de cima) e com
+		// caminho seguro, e só vai se o ponto revelar algo: amostras no círculo da visão
+		// que estão encobertas (fogged) ou nunca vistas (hidden, vale o dobro). Segue o
+		// sentido da órbita; nada a revelar por dentro → contorno pela fronteira, abaixo.
+		if (losAt) {
+			const visao = (data && data.visao > 0) ? data.visao : 80;
+			const novidade = function(cx, cz) {
+				let n = 0;
+				for (let t = 0; t < 8; ++t) {
+					const ang = t * Math.PI / 4;
+					for (const f of [0.45, 0.85]) {
+						const v = losAt(cx + Math.cos(ang) * visao * f, cz + Math.sin(ang) * visao * f);
+						if (v === "hidden") n += 2; else if (v === "fogged") n += 1;
+					}
+				}
+				return n;
+			};
+			for (let k = 1; k <= 32; ++k) {
+				const a = theta + k * ORBIT_STEP;
+				// Do fundo para fora: o primeiro ponto seguro é o mais fundo seguro nesse ângulo.
+				for (let r = 40; r <= R_MAX; r += 15) {
+					const cx = enemyBasePos.x + Math.cos(a) * r;
+					const cz = enemyBasePos.z + Math.sin(a) * r;
+					if (cx < 15 || cx > mapSize - 15 || cz < 15 || cz > mapSize - 15) continue;
+					if (blocked[Math.floor(cx / gridSize) + "," + Math.floor(cz / gridSize)]) continue;
+					if (!pudimPointSafe(cx, cz, threats)) continue;
+					if (!pudimPathSafe(scoutX, scoutZ, cx, cz, threats)) continue;   // um pouco mais fora pode ter caminho
+					if (novidade(cx, cz) >= 4)
+						return { "x": cx, "z": cz, "orbitAngle": a, "unexplored": true, "losOk": true,
+						         "dentro": true, "orbitR": Math.round(r), "threats": threats.length };
+					break;   // o mais fundo seguro não revela nada: próximo ângulo
+				}
+			}
+		}
+
 		// Duas passadas: a primeira só aceita ponto ainda não explorado (por nós ou por
 		// aliado, via GetSharedLosMask); a segunda aceita qualquer ponto, para que uma volta
 		// já conhecida ainda progrida em vez de travar. Em ambas o ponto E O TRAJETO até ele
@@ -2548,6 +2598,20 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 		const dxb = qb.x - ccX, dzb = qb.y - ccZ;
 		const db = Math.sqrt(dxb*dxb + dzb*dzb) + 40;
 		if (db > baseRadius) baseRadius = db;
+	}
+	// ... e até a FRONTEIRA do nosso território (28/09). Com só "estrutura mais distante +
+	// 40", recurso um pouco além — a próxima floresta, uma mina — ficava fora da patrulha,
+	// ainda dentro de casa. 16 direções, de 10 em 10, até o chão deixar de ser nosso.
+	if (mode !== "deep") {
+		for (let i = 0; i < 16; ++i) {
+			const ang = i * Math.PI / 8;
+			for (let r = 10; r <= 400; r += 10) {
+				const tx = ccX + Math.cos(ang) * r, tz = ccZ + Math.sin(ang) * r;
+				if (tx < 10 || tz < 10 || tx > mapSize - 10 || tz > mapSize - 10) break;
+				if (cmpTerritoryManager.GetOwner(tx, tz) !== player) break;
+				if (r > baseRadius) baseRadius = r;
+			}
+		}
 	}
 	// Raio-alvo em espiral: uma volta de theta (2π) percorre da borda interna à externa.
 	// theta avança 45° por waypoint no cliente, então são 8 paradas por volta e o raio sobe
@@ -5532,15 +5596,58 @@ GuiInterface.prototype.pudim_GetScoutStatus = function(player, data) {
     const cmpDiplomacy = playerEnt ? Engine.QueryInterface(playerEnt, IID_Diplomacy) : null;
     const enemyPlayers = cmpDiplomacy ? cmpDiplomacy.GetEnemies() : [];
 
-    const FLEE_RADIUS = 80; // m — detectar inimigos a até 80m do scout
+    // ── O QUE AMEAÇA O BATEDOR (28/09) ───────────────────────────────────────────────────
+    //
+    // Pedido: "explorar a base deles, mas sem se expor, e sempre evitando ser morto". A
+    // versão anterior fugia de QUALQUER estrutura inimiga num raio fixo de 80m — casa,
+    // campo e armazém inclusive — e ignorava o alcance real de quem atira. Agora:
+    //   • só conta o que ATACA (IID_Attack), pelo alcance real de cada um
+    //     (Attack.GetFullAttackRange, que já aplica as melhorias do inimigo) + folga;
+    //   • folga de quem anda: 2 s de caminhada a pé; CAVALARIA, 5 s correndo
+    //     (UnitMotion.GetWalkSpeed × GetRunMultiplier, expostos em ICmpUnitMotion.cpp) —
+    //     "tratar quem corre como mais perigoso";
+    //   • `cavNoRadar`: cavalaria inimiga dentro da VISÃO do batedor (Vision.GetRange,
+    //     ICmpVision.cpp). Pedido: "fugir até a cavalaria inimiga sumir do radar";
+    //   • animal perigoso da Gaia (postura aggressive/violent, UnitAI.GetStanceName) também;
+    //   • vida (Health) e se está guarnecido (Garrisonable.IsGarrisoned / HolderID), para o
+    //     recuo de cura;
+    //   • CCs inimigos dentro da visão, para o painel lembrar de CADA base encontrada.
+    const PUDIM_SCOUT_BUSCA = 220;       // raio da consulta: cobre a folga da cavalaria
+    const PUDIM_SCOUT_FOLGA = 25;        // dispersão do projétil + distância de frenagem
+    const PUDIM_SCOUT_SEG_PE = 2;        // segundos de deslocamento de quem anda
+    const PUDIM_SCOUT_SEG_CAVALO = 5;    // ... e de quem corre
+    const jogadoresBusca = enemyPlayers.filter(id => id > 0).concat([0]);
+    // Casa amiga para curar: CC ou qualquer prédio nosso que cure quem está dentro
+    // (GarrisonHolder/BuffHeal — o CC da A28 tem 1).
+    for (const ent of (cmpRangeManager ? cmpRangeManager.GetEntitiesByPlayer(player) : [])) {
+        const cId = Engine.QueryInterface(ent, IID_Identity);
+        if (!cId || !cId.HasClass("CivCentre") || Engine.QueryInterface(ent, IID_Foundation)) continue;
+        const cp = Engine.QueryInterface(ent, IID_Position);
+        if (cp && cp.IsInWorld()) {
+            const q = cp.GetPosition2D();
+            (result.abrigos = result.abrigos || []).push({ "id": ent, "x": q.x, "z": q.y });
+        }
+    }
 
     for (const entStr in data.scouts) {
         const ent = +entStr;
+        const cmpHealth = Engine.QueryInterface(ent, IID_Health);
+        const hpFrac = cmpHealth && cmpHealth.GetMaxHitpoints() > 0 ?
+            cmpHealth.GetHitpoints() / cmpHealth.GetMaxHitpoints() : 1;
+        const cmpGarr = Engine.QueryInterface(ent, IID_Garrisonable);
         const cmpPos = Engine.QueryInterface(ent, IID_Position);
-        if (!cmpPos || !cmpPos.IsInWorld()) continue;
+        if (!cmpPos || !cmpPos.IsInWorld()) {
+            // Dentro de um prédio: o painel precisa saber para soltar quando curar.
+            if (cmpGarr && cmpGarr.IsGarrisoned())
+                result.scouts.push({ "ent": ent, "guarnecido": true, "abrigo": cmpGarr.HolderID(),
+                    "hpFrac": hpFrac, "orderType": "Garrisoned", "idle": false, "pos": null });
+            continue;
+        }
 
         const p2d = cmpPos.GetPosition2D();
         const pos = { x: p2d.x, z: p2d.y }; // normalizado
+        const cmpVis = Engine.QueryInterface(ent, IID_Vision);
+        const visao = cmpVis ? (+cmpVis.GetRange() || 80) : 80;
 
         const cmpUnitAI = Engine.QueryInterface(ent, IID_UnitAI);
         const isIdle = cmpUnitAI ? cmpUnitAI.IsIdle() : true;
@@ -5548,37 +5655,68 @@ GuiInterface.prototype.pudim_GetScoutStatus = function(player, data) {
         if (cmpUnitAI && cmpUnitAI.orderQueue && cmpUnitAI.orderQueue.length > 0)
             orderType = cmpUnitAI.orderQueue[0].type;
 
-        // Detecção proativa de ameaças: inimigos a ≤ FLEE_RADIUS do scout
-        let inDanger = false;
-        let enemyPos = null;
-        let enemyIsBuilding = false;
-        if (cmpRangeManager && enemyPlayers.length > 0) {
-            // ExecuteQueryAroundPos espera Vector2D {x, y} (globalscripts/vector.js).
-            // Passava-se {x, z}: o campo y ficava undefined, a consulta não devolvia nada e o
-            // scout NUNCA detectava perigo — por isso o modo agressivo entrava na base
-            // inimiga e morria. p2d é o GetPosition2D() original, já no formato correto.
-            const nearEnemies = cmpRangeManager.ExecuteQueryAroundPos(
-                p2d, 0, FLEE_RADIUS, enemyPlayers, IID_Identity, false
-            );
-            let minDist = Infinity;
-            for (const eEnt of nearEnemies) {
-                const eId = Engine.QueryInterface(eEnt, IID_Identity);
-                if (!eId) continue;
-                const isBuilding = eId.HasClass("Structure");
-                if (!isBuilding && !eId.HasClass("CitizenSoldier") && !eId.HasClass("FastMoving") &&
-                    !eId.HasClass("Hero") && !eId.HasClass("Siege")) continue;
-                const ePos = Engine.QueryInterface(eEnt, IID_Position);
-                if (!ePos || !ePos.IsInWorld()) continue;
-                const ep = ePos.GetPosition2D();
-                const dx = ep.x - p2d.x, dz = ep.y - p2d.y;
-                const d = dx*dx + dz*dz;
-                if (d < minDist) {
-                    minDist = d;
-                    inDanger = true;
-                    enemyPos = { x: ep.x, z: ep.y }; // normalizado
-                    enemyIsBuilding = isBuilding;
+        const ameacas = [];
+        let cavNoRadar = false;
+        let perto = null;
+        const ccsVistos = [];
+        if (cmpRangeManager && jogadoresBusca.length > 0) {
+            // ExecuteQueryAroundPos espera Vector2D {x, y}; p2d é GetPosition2D() cru.
+            let achados = [];
+            try { achados = cmpRangeManager.ExecuteQueryAroundPos(p2d, 0, PUDIM_SCOUT_BUSCA, jogadoresBusca, IID_Attack, false); }
+            catch (e) { achados = []; }
+            for (const e of achados) {
+                const ep = Engine.QueryInterface(e, IID_Position);
+                if (!ep || !ep.IsInWorld()) continue;
+                const own = Engine.QueryInterface(e, IID_Ownership);
+                const dono = own ? own.GetOwner() : -1;
+                const eAI = Engine.QueryInterface(e, IID_UnitAI);
+                if (dono === 0) {
+                    // Gaia: só bicho que ataca por conta própria.
+                    const postura = eAI && eAI.GetStanceName ? eAI.GetStanceName() : "";
+                    if (postura !== "aggressive" && postura !== "violent") continue;
                 }
+                const eId = Engine.QueryInterface(e, IID_Identity);
+                const cmpAtk = Engine.QueryInterface(e, IID_Attack);
+                let alcance = 0;
+                try { alcance = +cmpAtk.GetFullAttackRange().max || 0; } catch (e2) { continue; }
+                const predio = !!(eId && eId.HasClass("Structure"));
+                const cavalo = !!(eId && eId.HasClass("FastMoving"));
+                let folga = PUDIM_SCOUT_FOLGA;
+                const mot = Engine.QueryInterface(e, IID_UnitMotion);
+                if (mot && mot.GetWalkSpeed) {
+                    const anda = +mot.GetWalkSpeed() || 0;
+                    const corre = anda * (mot.GetRunMultiplier ? (+mot.GetRunMultiplier() || 1) : 1);
+                    folga += cavalo ? PUDIM_SCOUT_SEG_CAVALO * corre : PUDIM_SCOUT_SEG_PE * anda;
+                }
+                const q = ep.GetPosition2D();
+                const dx = q.x - p2d.x, dz = q.y - p2d.y;
+                const d = Math.sqrt(dx * dx + dz * dz);
+                if (cavalo && dono > 0 && d <= visao) cavNoRadar = true;
+                const alc = alcance + folga;
+                if (d >= alc) continue;
+                const a = { "x": q.x, "z": q.y, "r": alc, "d": d, "predio": predio, "cavalo": cavalo };
+                ameacas.push(a);
+                if (!perto || d < perto.d) perto = a;
             }
+            // CCs inimigos que ele enxerga (só dentro da visão): a memória de bases do painel.
+            let ccs = [];
+            try { ccs = cmpRangeManager.ExecuteQueryAroundPos(p2d, 0, visao, enemyPlayers, IID_Identity, false); }
+            catch (e) { ccs = []; }
+            for (const e of ccs) {
+                const eId = Engine.QueryInterface(e, IID_Identity);
+                if (!eId || !eId.HasClass("CivCentre")) continue;
+                const ep = Engine.QueryInterface(e, IID_Position);
+                if (!ep || !ep.IsInWorld()) continue;
+                const q = ep.GetPosition2D();
+                ccsVistos.push({ "x": q.x, "z": q.y });
+            }
+        }
+        // Fugir de TODAS: o centro das ameaças, pesado por quão dentro do alcance ele está.
+        let fugaDe = null;
+        if (ameacas.length) {
+            let sx = 0, sz = 0, sp = 0;
+            for (const a of ameacas) { const w = Math.max(1, a.r - a.d); sx += a.x * w; sz += a.z * w; sp += w; }
+            fugaDe = { "x": sx / sp, "z": sz / sp };
         }
 
         result.scouts.push({
@@ -5586,10 +5724,16 @@ GuiInterface.prototype.pudim_GetScoutStatus = function(player, data) {
             "idle": isIdle,
             "orderType": orderType,
             "pos": pos,
-            "inDanger": inDanger,
-            "enemyPos": enemyPos,
-            "enemyIsBuilding": enemyIsBuilding,
-            "enemyIsMobile": inDanger && !enemyIsBuilding
+            "visao": visao,
+            "hpFrac": hpFrac,
+            "inDanger": ameacas.length > 0,
+            "ameacas": ameacas.map(a => ({ "x": Math.round(a.x), "z": Math.round(a.z), "r": Math.round(a.r) })),
+            "fugaDe": fugaDe,
+            "enemyPos": perto ? { "x": perto.x, "z": perto.z } : null,
+            "enemyIsBuilding": !!(perto && perto.predio),
+            "enemyIsMobile": !!(perto && !perto.predio),
+            "cavNoRadar": cavNoRadar,
+            "ccsInimigos": ccsVistos
         });
     }
 

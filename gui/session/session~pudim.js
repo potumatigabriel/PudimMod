@@ -368,8 +368,18 @@ var g_PudimScoutTargetTime = {};     // entId -> timestamp de quando o alvo foi 
 var g_PudimScoutSameCount = {};      // entId -> vezes seguidas que o mesmo alvo foi escolhido
 var g_PudimScoutFleeing = {};        // entId -> true enquanto aguarda área limpar após fuga
 var g_PudimScoutClearTicks = {};     // entId -> ticks consecutivos sem perigo (retomar após ≥2)
-var g_PudimScoutEnemyBase = null;    // { x, z } base inimiga detectada no modo deep
+var g_PudimScoutEnemyBase = null;    // (antigo) — substituído por g_PudimScoutBases
 var PUDIM_SCOUT_GRID = 8;
+// ── BATEDOR QUE NÃO MORRE (28/09) ────────────────────────────────────────────────────
+// Pedido: "explorar a base deles, mas sem se expor, e sempre evitando ser morto"; e,
+// para a cavalaria inimiga, "fugir até a cavalaria inimiga sumir do radar".
+var g_PudimScoutBases = [];          // CCs inimigos vistos: { x, z, visitas }
+var g_PudimScoutBaseAtual = {};      // entId -> índice em g_PudimScoutBases
+var g_PudimScoutCurando = {};        // entId -> true enquanto recua / cura no abrigo
+const PUDIM_SCOUT_TICK = 600;        // ms entre checagens (era 2 s: dava para entrar no alcance entre duas)
+const PUDIM_SCOUT_CURAR_ABAIXO = 0.5;
+const PUDIM_SCOUT_CURADO = 0.9;
+const PUDIM_SCOUT_VISITAS_BASE = 10; // waypoints em volta de uma base antes de passar à próxima
 
 function pudim_ToggleScout(type) {
 	const selection = g_Selection ? g_Selection.toList() : [];
@@ -398,9 +408,55 @@ function pudim_ToggleScout(type) {
 
 var g_LastScoutTick = 0;
 
+/**
+ * Para onde fugir. 16 direções; cada uma precisa de um TRAJETO que nunca entre mais fundo
+ * numa zona de tiro do que ele já está (quem foge já está dentro de alguma — exigir
+ * "fora de todas" desde o primeiro passo recusaria todas as direções). Entre as válidas,
+ * vence a que mais se afasta do centro das ameaças; ir para casa desempata; terminar fora
+ * de todas as zonas vale bônus. Nenhuma válida: casa.
+ */
+function pudim_ScoutRotaDeFuga(pos, info, abrigos, ccList, mapSize)
+{
+	const zonas = info.ameacas || [];
+	const de = info.fugaDe || info.enemyPos;
+	const casas = (abrigos && abrigos.length) ? abrigos : (ccList || []);
+	let casa = null, dCasa = Infinity;
+	for (const c of casas) {
+		const d = (c.x - pos.x) * (c.x - pos.x) + (c.z - pos.z) * (c.z - pos.z);
+		if (d < dCasa) { dCasa = d; casa = c; }
+	}
+	const dist = (ax, az, bx, bz) => Math.sqrt((ax - bx) * (ax - bx) + (az - bz) * (az - bz));
+	const inicio = zonas.map(zn => dist(pos.x, pos.z, zn.x, zn.z));
+	const pontoOk = (x, z) => zonas.every((zn, k) => {
+		const d = dist(x, z, zn.x, zn.z);
+		return d >= zn.r || d >= inicio[k] - 1;
+	});
+	const foraDeTodas = (x, z) => zonas.every(zn => dist(x, z, zn.x, zn.z) >= zn.r);
+	const alcance = Math.max((info.visao || 80) + 60, 140);
+	const norm = (x, z) => { const l = Math.sqrt(x * x + z * z) || 1; return { x: x / l, z: z / l }; };
+	const longe = de ? norm(pos.x - de.x, pos.z - de.z) : null;
+	const paraCasa = casa ? norm(casa.x - pos.x, casa.z - pos.z) : null;
+	let melhor = null, melhorNota = -Infinity;
+	for (let i = 0; i < 16; ++i) {
+		const ang = i * Math.PI / 8;
+		const dx = Math.cos(ang), dz = Math.sin(ang);
+		const x = Math.max(15, Math.min(mapSize - 15, pos.x + dx * alcance));
+		const z = Math.max(15, Math.min(mapSize - 15, pos.z + dz * alcance));
+		const n = Math.max(1, Math.ceil(dist(pos.x, pos.z, x, z) / 12));
+		let ok = true;
+		for (let t = 1; t <= n && ok; ++t) ok = pontoOk(pos.x + (x - pos.x) * t / n, pos.z + (z - pos.z) * t / n);
+		if (!ok) continue;
+		const nota = (longe ? 2 * (dx * longe.x + dz * longe.z) : 0) +
+			(paraCasa ? (dx * paraCasa.x + dz * paraCasa.z) : 0) + (foraDeTodas(x, z) ? 3 : 0);
+		if (nota > melhorNota) { melhorNota = nota; melhor = { x: x, z: z }; }
+	}
+	if (melhor) return melhor;
+	return casa ? { x: casa.x, z: casa.z } : { x: mapSize / 2, z: mapSize / 2 };
+}
+
 function pudim_ForceScoutTick() {
 	const now = Date.now();
-	if (now - g_LastScoutTick < 1500) return;
+	if (now - g_LastScoutTick < PUDIM_SCOUT_TICK) return;
 	g_LastScoutTick = now;
 
 	const scoutList = Object.keys(g_PudimScouts).map(Number);
@@ -423,9 +479,56 @@ function pudim_ForceScoutTick() {
 		if (v !== Infinity && v < now) delete g_PudimScoutBlocked[key];
 	}
 
+	const abrigos = statusData.abrigos || [];
 	for (const scoutInfo of statusData.scouts) {
 		const { ent, idle, pos, inDanger, enemyPos, enemyIsBuilding, enemyIsMobile, orderType } = scoutInfo;
 		const mode = g_PudimScouts[ent];
+
+		// ── MEMÓRIA DE BASES: cada CC inimigo visto, não só o primeiro prédio ─────────────
+		// Antes a "base" era a posição do primeiro prédio que assustou o batedor — uma casa,
+		// às vezes — e só UMA ficava guardada: num 2v2 ele contornava uma e nunca procurava
+		// as outras.
+		for (const cc of (scoutInfo.ccsInimigos || [])) {
+			const jaTem = g_PudimScoutBases.some(b => (b.x - cc.x) * (b.x - cc.x) + (b.z - cc.z) * (b.z - cc.z) < 60 * 60);
+			if (!jaTem) {
+				g_PudimScoutBases.push({ "x": cc.x, "z": cc.z, "visitas": 0 });
+				pudim_Log("INFO", "SCOUT", "base inimiga encontrada em (" + Math.round(cc.x) + "," + Math.round(cc.z) + ")");
+			}
+		}
+
+		// ── RECUAR PARA CURAR ─────────────────────────────────────────────────────────────
+		// Abaixo de PUDIM_SCOUT_CURAR_ABAIXO de vida ele entra no CC mais perto (o CC cura
+		// quem está dentro: GarrisonHolder/BuffHeal 1 no template da A28) e só sai com
+		// PUDIM_SCOUT_CURADO. Antes o batedor não olhava a própria vida.
+		if (scoutInfo.guarnecido) {
+			if (g_PudimScoutCurando[ent] && (scoutInfo.hpFrac || 0) >= PUDIM_SCOUT_CURADO) {
+				pudim_Ordenar({ "type": "unload", "garrisonHolder": scoutInfo.abrigo, "entities": [ent], "queued": false }, "pudim_ForceScoutTick");
+				delete g_PudimScoutCurando[ent];
+				g_PudimScoutActivatedAt[ent] = now;   // a saída não pode ser lida como ordem sua
+				pudim_Log("INFO", "SCOUT", "batedor " + ent + " curado — voltando a explorar");
+			}
+			continue;
+		}
+		if (!pos) continue;
+		if (g_PudimScoutCurando[ent]) {
+			// A caminho do abrigo. Se a ordem de guarnecer sumiu (abrigo cheio ou destruído),
+			// ele cai na regra de baixo e tenta de novo.
+			if (orderType === "Garrison") continue;
+			delete g_PudimScoutCurando[ent];
+		}
+		if ((scoutInfo.hpFrac === undefined ? 1 : scoutInfo.hpFrac) < PUDIM_SCOUT_CURAR_ABAIXO && abrigos.length) {
+			let ab = abrigos[0], dMin = Infinity;
+			for (const a of abrigos) {
+				const d = (a.x - pos.x) * (a.x - pos.x) + (a.z - pos.z) * (a.z - pos.z);
+				if (d < dMin) { dMin = d; ab = a; }
+			}
+			pudim_Ordenar({ "type": "garrison", "entities": [ent], "target": ab.id, "queued": false }, "pudim_ForceScoutTick");
+			g_PudimScoutCurando[ent] = true;
+			g_PudimScoutActivatedAt[ent] = now;
+			delete g_PudimScoutTargets[ent];
+			pudim_Log("INFO", "SCOUT", "batedor " + ent + " com " + Math.round((scoutInfo.hpFrac || 0) * 100) + "% de vida — recuando para curar");
+			continue;
+		}
 
 		// Auto-desativar se o jogador deu um comando manual (grace period de 3s após ativação)
 		// Flee é gerado pelo motor em combate — não deativar; o scout vai fugir e continuar
@@ -439,55 +542,44 @@ function pudim_ForceScoutTick() {
 				delete g_PudimScoutFleeing[ent];
 				delete g_PudimScoutClearTicks[ent];
 				delete g_PudimScoutSameCount[ent];
+				delete g_PudimScoutCurando[ent];
 				pudim_UpdateSelectionButton();
 				continue;
 			}
 		}
 
-		// Fuga imediata de ameaças — ignorar qualquer alvo de setor
-		if (inDanger) {
-			// Estrutura inimiga: blacklist permanente do setor + adjacentes
+		// ── FUGIR: de TODAS as ameaças, por caminho seguro, e da cavalaria até ela sumir ────
+		// A fuga antiga ia 200m para o lado oposto do inimigo mais perto, sem olhar o
+		// caminho — podia levar o batedor mais para dentro do território inimigo ou para cima
+		// de outro grupo. Agora: 16 direções, cada uma com destino E trajeto fora de toda
+		// zona de tiro (a lista vem da simulação já com a folga), preferindo afastar do centro
+		// das ameaças e, no desempate, ir para casa. Com cavalaria inimiga no radar (dentro
+		// da visão dele) a fuga continua a cada checagem até ela sumir.
+		if (inDanger || scoutInfo.cavNoRadar) {
+			// Só quem ATIRA marca o mapa, e só a célula dele (era 3×3 para sempre, por qualquer
+			// prédio — ver uma casa inimiga cegava 1/7 do mapa).
 			if (enemyIsBuilding && enemyPos) {
 				const tc = Math.max(0, Math.min(PUDIM_SCOUT_GRID - 1, Math.floor(enemyPos.x / cellSize)));
 				const tr = Math.max(0, Math.min(PUDIM_SCOUT_GRID - 1, Math.floor(enemyPos.z / cellSize)));
 				g_PudimScoutBlocked[tc + "," + tr] = Infinity;
-				for (let dc = -1; dc <= 1; dc++) {
-					for (let dr = -1; dr <= 1; dr++) {
-						const nc = tc + dc; const nr = tr + dr;
-						if (nc >= 0 && nc < PUDIM_SCOUT_GRID && nr >= 0 && nr < PUDIM_SCOUT_GRID)
-							g_PudimScoutBlocked[nc + "," + nr] = Infinity;
-					}
-				}
-				const scCol = Math.max(0, Math.min(PUDIM_SCOUT_GRID - 1, Math.floor(pos.x / cellSize)));
-				const scRow = Math.max(0, Math.min(PUDIM_SCOUT_GRID - 1, Math.floor(pos.z / cellSize)));
-				g_PudimScoutSectors[scCol + "," + scRow] = now;
-				// Modo deep: guardar posição da base inimiga para orbitar
-				if (mode === "deep") g_PudimScoutEnemyBase = enemyPos;
 			}
-			// Tropa móvel: blacklist temporária (2 min) do setor atual do scout
 			if (enemyIsMobile) {
 				const scCol = Math.max(0, Math.min(PUDIM_SCOUT_GRID - 1, Math.floor(pos.x / cellSize)));
 				const scRow = Math.max(0, Math.min(PUDIM_SCOUT_GRID - 1, Math.floor(pos.z / cellSize)));
 				g_PudimScoutBlocked[scCol + "," + scRow] = now + 120000;
 			}
-			// Fugir na direção oposta ao inimigo (não em direção ao CC)
-			let fleeX = pos.x, fleeZ = pos.z;
-			if (enemyPos) {
-				const angle = Math.atan2(pos.z - enemyPos.z, pos.x - enemyPos.x);
-				fleeX = Math.max(15, Math.min(mapSize - 15, pos.x + Math.cos(angle) * 200));
-				fleeZ = Math.max(15, Math.min(mapSize - 15, pos.z + Math.sin(angle) * 200));
-			} else if (ccList.length > 0) {
-				let nearCC = ccList[0], minD = Infinity;
-				for (const cc of ccList) {
-					const d = (cc.x - pos.x)*(cc.x - pos.x) + (cc.z - pos.z)*(cc.z - pos.z);
-					if (d < minD) { minD = d; nearCC = cc; }
-				}
-				fleeX = nearCC.x; fleeZ = nearCC.z;
-			}
+			const fuga = pudim_ScoutRotaDeFuga(pos, scoutInfo, abrigos, ccList, mapSize);
+			// Não reenviar a mesma fuga a cada 0,6 s: cada walk reinicia o caminho.
+			const ant = g_PudimScoutTargets[ent];
+			const mesma = ant && g_PudimScoutFleeing[ent] &&
+				(ant.x - fuga.x) * (ant.x - fuga.x) + (ant.z - fuga.z) * (ant.z - fuga.z) < 30 * 30;
 			g_PudimScoutFleeing[ent] = true;
 			g_PudimScoutClearTicks[ent] = 0;
-			delete g_PudimScoutTargets[ent];
-			pudim_Ordenar({ "type": "walk", "entities": [ent], "x": fleeX, "z": fleeZ, "queued": false }, "pudim_ForceScoutTick");
+			if (!mesma) {
+				g_PudimScoutTargets[ent] = { x: fuga.x, z: fuga.z };
+				g_PudimScoutTargetTime[ent] = now;
+				pudim_Ordenar({ "type": "walk", "entities": [ent], "x": fuga.x, "z": fuga.z, "queued": false }, "pudim_ForceScoutTick");
+			}
 			g_PudimScoutLastPos[ent] = { x: pos.x, z: pos.z, stuckCount: 0 };
 			continue;
 		}
@@ -634,14 +726,28 @@ function pudim_ForceScoutTick() {
 		g_PudimScoutTheta[ent] += Math.PI / 4;  // avança 45° por waypoint
 		if (g_PudimScoutTheta[ent] > 2 * Math.PI) g_PudimScoutTheta[ent] -= 2 * Math.PI;
 
+		// Qual base explorar: a atual até PUDIM_SCOUT_VISITAS_BASE destinos em volta dela,
+		// depois a próxima ainda não explorada; todas vistas → volta a procurar mapa novo.
+		let baseAlvo = null;
+		if (mode === "deep" && g_PudimScoutBases.length) {
+			let idx = g_PudimScoutBaseAtual[ent];
+			if (idx === undefined || !g_PudimScoutBases[idx] || g_PudimScoutBases[idx].visitas >= PUDIM_SCOUT_VISITAS_BASE) {
+				idx = g_PudimScoutBases.findIndex(b => b.visitas < PUDIM_SCOUT_VISITAS_BASE);
+				g_PudimScoutBaseAtual[ent] = idx >= 0 ? idx : undefined;
+			}
+			if (idx !== undefined && idx >= 0) baseAlvo = g_PudimScoutBases[idx];
+		}
+
 		const targetData = Engine.GuiInterfaceCall("pudim_GetScoutBorderTarget", {
 			"scoutId": ent,
 			"mode": mode,
 			"blockedSectors": g_PudimScoutBlocked,
 			"gridSize": cellSize,
 			"theta": g_PudimScoutTheta[ent],
-			"enemyBasePos": g_PudimScoutEnemyBase || null
+			"enemyBasePos": baseAlvo ? { "x": baseAlvo.x, "z": baseAlvo.z } : null,
+			"visao": scoutInfo.visao || 80
 		});
+		if (baseAlvo && targetData && (targetData.onBorder || targetData.dentro)) baseAlvo.visitas++;
 
 		// Uma vez por partida: registra se a leitura de exploração está disponível.
 		// Se losOk=false o scout profundo continua escolhendo por ângulo e distância, sem
@@ -744,7 +850,7 @@ pudim_patchApplyN("onTick", function(target, that, args) {
 	const result = target.apply(that, args);
 
 	const now = Date.now();
-	if (now - g_LastScoutTick > 2000) {
+	if (now - g_LastScoutTick > PUDIM_SCOUT_TICK) {
 		try {
 			pudim_ForceScoutTick();
 		} catch(e) {}

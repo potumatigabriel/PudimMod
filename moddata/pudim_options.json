@@ -22,9 +22,9 @@
 				"type": "boolean",
 				"config": "pudim.advanced.focus",
 				"label": "[color=\"255 200 120\"]Combate:[/color] Foco de Fogo",
-				"tooltip": "Faz seus soldados concentrarem no MESMO alvo em vez de cada um escolher um inimigo diferente. Matar um inimigo por vez reduz o dano que você recebe a cada segundo, porque inimigo morto para de atirar — dez unidades feridas fazem o mesmo estrago que dez inteiras. Unidade que recebeu ordem sua não é tocada.",
+				"tooltip": "Faz seus soldados matarem um inimigo por vez em vez de espalharem o dano — inimigo morto para de atirar, e dez feridos fazem o mesmo estrago que dez inteiros. Os de CORPO A CORPO vão no mesmo alvo. Os de LONGE são divididos em grupos: cada grupo tem só as flechas necessárias para matar o seu alvo numa rajada (dano de cada flecha contra a armadura daquele alvo, com a conta do próprio jogo), e grupos diferentes atiram em inimigos diferentes — com 100 arqueiros, nenhuma rajada é desperdiçada num alvo que 8 já matariam. Quem já está atirando num alvo que ainda precisa dele continua nele. Unidade que recebeu ordem sua não é tocada.",
 				"label_en": "[color=\"255 200 120\"]Combat:[/color] Focus Fire",
-				"tooltip_en": "Makes your soldiers concentrate on the SAME target instead of each picking a different enemy. Killing one enemy at a time cuts the damage you take per second, because a dead enemy stops shooting — ten wounded units hit just as hard as ten healthy ones. A unit you gave an order to is never touched."
+				"tooltip_en": "Makes your soldiers kill one enemy at a time instead of spreading damage — a dead enemy stops shooting, and ten wounded hit as hard as ten healthy. MELEE units go for the same target. RANGED units are split into groups: each group has only the arrows needed to kill its target in one volley (each arrow's damage against that target's armour, using the game's own formula), and different groups shoot different enemies — with 100 archers, no volley is wasted on a target that 8 would kill. Units already shooting a target that still needs them stay on it. A unit you gave an order to is never touched."
 			},
 			{
 				"type": "boolean",

@@ -6200,6 +6200,72 @@ GuiInterface.prototype.pudim_GetInitialBalanceData = function(player, data)
 // Focus fire: direciona todos os soldados em combate para o alvo mais fraco.
 // Prioridade: unidades de ataque à distância (Ranged) com HP mais baixo.
 // Retorna: [{ units: [entityIds], target: entityId }] ou []
+// ── QUANTAS FLECHAS MATAM ESTE ALVO ─────────────────────────────────────────────────────
+//
+// Dano de uma flecha contra ESTE alvo pela conta do próprio jogo:
+// AttackHelper.GetTotalAttackEffects(alvo, efeitos, "Damage", 1) — simulation/helpers/Attack.js
+// da A28: soma de Damage[tipo] × 0,9^resistência[tipo] (Resistance.GetEffectiveResistanceAgainst).
+// Os efeitos do arqueiro saem de Attack.GetAttackEffectsData("Ranged"), com as melhorias dele.
+// O bônus contra classe (Attack/Bonuses) fica de fora: subestimar o dano manda arqueiro a
+// MAIS para o alvo, nunca a menos.
+//
+// PUDIM_FOCO_ACERTO é margem, não número do motor: flecha tem dispersão e erra alvo que anda.
+const PUDIM_FOCO_ACERTO = 0.75;
+
+function pudim_DanoDaFlecha(arqueiro, alvo) {
+	try {
+		const atk = Engine.QueryInterface(arqueiro, IID_Attack);
+		const ef = atk && atk.GetAttackEffectsData("Ranged");
+		if (!ef) return 0;
+		return AttackHelper.GetTotalAttackEffects(alvo, ef, "Damage", 1) * PUDIM_FOCO_ACERTO;
+	} catch (e) { return 0; }
+}
+
+/**
+ * Reparte arqueiros entre os alvos de um grupo inimigo: cada alvo recebe arqueiros até uma
+ * rajada somar a vida dele. Ordem dos alvos = a do grupo (arqueiro inimigo mais fraco
+ * primeiro). Quem JÁ atira num alvo que ainda precisa dele fica (reemitir "attack" reinicia a
+ * mira); só muda quem sobra num alvo com flecha de mais, ou está sem alvo / em alvo morto /
+ * em outra frente. Sobrou arqueiro depois de todos cobertos: vai para o primeiro alvo.
+ * Devolve correções no formato de sempre: [{ units, target }].
+ */
+function pudim_FocoRajada(arqueiros, alvos) {
+	if (!arqueiros.length || !alvos.length) return [];
+	const idsAlvo = new Set(alvos.map(a => a.id));
+	const falta = {};      // alvo -> vida que ainda falta cobrir
+	for (const a of alvos) falta[a.id] = a.hp;
+	const livres = [];
+	// 1. Quem já está num alvo deste grupo fica, enquanto aquele alvo ainda precisar.
+	for (const u of arqueiros) {
+		const t = u.currentTarget;
+		const h = t && Engine.QueryInterface(t, IID_Health);
+		if (t && idsAlvo.has(t) && h && h.GetHitpoints() > 0 && falta[t] > 0) {
+			falta[t] -= pudim_DanoDaFlecha(u.id, t);
+			continue;
+		}
+		livres.push(u);
+	}
+	// 2. Os livres cobrem os alvos em ordem, o mais perto de cada alvo primeiro.
+	const porAlvo = {};
+	for (const a of alvos) {
+		if (!livres.length) break;
+		if (falta[a.id] <= 0) continue;
+		livres.sort((p, q) => ((p.x - a.x) ** 2 + (p.z - a.z) ** 2) - ((q.x - a.x) ** 2 + (q.z - a.z) ** 2));
+		while (livres.length && falta[a.id] > 0) {
+			const u = livres.shift();
+			const d = pudim_DanoDaFlecha(u.id, a.id);
+			if (d <= 0) { (porAlvo[alvos[0].id] = porAlvo[alvos[0].id] || []).push(u.id); continue; }
+			falta[a.id] -= d;
+			(porAlvo[a.id] = porAlvo[a.id] || []).push(u.id);
+		}
+	}
+	// 3. Todos cobertos e ainda sobra: reforçam o primeiro.
+	for (const u of livres) (porAlvo[alvos[0].id] = porAlvo[alvos[0].id] || []).push(u.id);
+	const out = [];
+	for (const t in porAlvo) out.push({ units: porAlvo[t], target: +t });
+	return out;
+}
+
 GuiInterface.prototype.pudim_GetFocusFireCorrections = function(player, data)
 {
 	const cmpRangeManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_RangeManager);
@@ -6273,6 +6339,7 @@ GuiInterface.prototype.pudim_GetFocusFireCorrections = function(player, data)
 				seenEnemy.add(e);
 				enemyUnits.push({
 					id: e, x: epos2.x, z: epos2.y,
+					hp: cmpHealth.GetHitpoints(),
 					hpRatio: cmpHealth.GetHitpoints() / cmpHealth.GetMaxHitpoints(),
 					isRanged: eId.HasClass("Ranged")
 				});
@@ -6329,6 +6396,16 @@ GuiInterface.prototype.pudim_GetFocusFireCorrections = function(player, data)
 			});
 			group = freeSoldiers.splice(0, need);
 		}
+		// ── ARQUEIROS EM GRUPOS: UM ALVO POR RAJADA (28/09) ────────────────────────────
+		//
+		// Pedido: "se tiver 100 arqueiros, os 100 mandar em 1 só desperdiça; o ideal é um
+		// grupo de x arqueiros (o suficiente pra matar a unidade) atirar em uma unidade só,
+		// outro grupo em outra... matando uma unidade inimiga por disparo". Os de perto
+		// seguem no alvo do grupo, como antes; os de longe são repartidos por pudim_FocoRajada.
+		const rajada = pudim_FocoRajada(group.filter(u => u.isRanged), ec.units);
+		for (const c of rajada) corrections.push(c);
+		group = group.filter(u => !u.isRanged);
+
 		// NÃO reemitir ordem pra quem já está batendo num inimigo VÁLIDO deste mesmo grupo.
 		// Cada comando "attack" reinicia o ciclo de ataque (aproximação + windup) da unidade:
 		// re-mirando a cada 2s, o exército passava a partida andando e quase não dava dano —

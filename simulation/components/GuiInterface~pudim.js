@@ -1388,7 +1388,17 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 	}
 
 	const assignedEntities = {};
-	
+	// Aldeões ainda por distribuir neste ciclo: o soldado só vai para a comida se eles não
+	// derem conta (ver "NA COMIDA, SEMPRE O ALDEÃO PRIMEIRO", logo abaixo). Mesma regra de
+	// civil do laço: FemaleCitizen, ou Organic que não é soldado nem cavalaria.
+	let civisRestantes = 0;
+	for (const item of toRedirect) {
+		const idC = Engine.QueryInterface(item.id, IID_Identity);
+		if (idC && (idC.HasClass("FemaleCitizen") ||
+		    (idC.HasClass("Organic") && !idC.HasClass("CitizenSoldier") && !idC.HasClass("FastMoving"))))
+			civisRestantes++;
+	}
+
 	for (const item of toRedirect) {
 		const ent = item.id;
 		const cmpPos = Engine.QueryInterface(ent, IID_Position);
@@ -1419,12 +1429,23 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 		// metal, então na prática ele não tinha vocação nenhuma: ia para o que estivesse
 		// mais vazio no momento.
 		let localDeficits = { ...deficits };
+		// ── NA COMIDA, SEMPRE O ALDEÃO PRIMEIRO (28/09) ─────────────────────────────────
+		//
+		// Pedido: "na comida, a prioridade sempre é os aldeões, porque eles catam mais rápido
+		// comida, e guerreiros são mais rápidos nos outros recursos". O bônus de antes
+		// (déficit × 2 + 1,5) podia perder para um déficit grande de madeira, e o soldado com
+		// −1,5 ainda ia para a fruta mesmo havendo aldeão livre no mesmo ciclo.
+		//   • aldeão: havendo falta de comida, comida vem PRIMEIRO, sem disputa;
+		//   • soldado: só vai para a comida se a falta for MAIOR que os aldeões que ainda
+		//     vão ser distribuídos neste ciclo — se um aldeão pode cobrir, é dele.
+		if (isFemale) civisRestantes--;
 		if (isFemale) {
-			// Aldeões preferem comida mas respeitam a cota — boost só quando há déficit real
-			if ((localDeficits.food || 0) > 0) localDeficits.food = localDeficits.food * 2 + 1.5;
+			if ((localDeficits.food || 0) > 0) localDeficits.food = 1e6;
 		} else if (cmpId && cmpId.HasClass("CitizenSoldier")) {
-			// Comida é a vocação do aldeão: soldado só vai para lá se sobrar necessidade.
-			if (localDeficits.food !== undefined) localDeficits.food -= 1.5;
+			if (localDeficits.food !== undefined) {
+				if (localDeficits.food <= civisRestantes) localDeficits.food = -1e6;
+				else localDeficits.food -= 1.5;
+			}
 			// Madeira é a vocação primária do soldado — mesmo peso que a comida tem para o
 			// aldeão, para que os dois grupos se separem de fato em vez de disputarem.
 			if ((localDeficits.wood || 0) > 0) localDeficits.wood = localDeficits.wood * 2 + 1.5;

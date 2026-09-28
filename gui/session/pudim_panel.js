@@ -3917,11 +3917,16 @@ function pudim_ProcessAutoQueue()
 			// quartel faria o motor recusar em silencio, e a fila ficaria parada sem motivo
 			// visivel.
 			if (!template) {
-				const atrasada = pudim_UnidadeMaisAtrasada(b.trainerEntities || [],
-					g_PudimQueueSeededTpl[b.ent]);
+				// A mais atrasada que dá para pagar; sem recurso para ela, a seguinte (ver
+				// pudim_ProporcaoPagavel).
+				const atrasada = pudim_ProporcaoPagavel(b.trainerEntities || [],
+					g_PudimQueueSeededTpl[b.ent], res);
 				if (atrasada && !(atFemaleCap && isFemaleTemplate(atrasada.tpl))) {
 					template = atrasada.tpl;
 					g_PudimAutoQueueTemplates[b.ent] = template;
+					if (atrasada.substituta && g_PudimShowDebug)
+						pudim_Log("DEBUG", "PROP", "edifício " + b.ent + ": sem recurso para " +
+							atrasada.substituta.split("/").pop() + ", fazendo " + atrasada.tpl.split("/").pop());
 				}
 				pudim_ProporcaoDiag(b, atrasada);
 			}
@@ -7036,6 +7041,36 @@ function pudim_ProporcaoAlvo(permitidos, descontos, preferido)
 function pudim_UnidadeMaisAtrasada(permitidos, preferido)
 {
 	return pudim_ProporcaoAlvo(permitidos, null, preferido || null);
+}
+
+/**
+ * A mais atrasada que DÁ PARA PAGAR agora (28/09).
+ *
+ * Pedido: "quando balanceia as unidades, se não tem recursos da que mais precisa, faz das
+ * que tem recursos; quando tiver recursos, tenta balancear o tipo de tropas". Antes a
+ * escolhida era semeada pagável ou não, e o edifício ficava parado esperando o recurso dela.
+ * Agora: a mais atrasada não cabe no bolso → a seguinte mais atrasada entre as que o edifício
+ * treina, e assim por diante. Nenhuma cabe → a mais atrasada mesmo (espera, como antes).
+ * Quando o recurso voltar, a troca de lote ainda não iniciado (pudim_ProporcaoTrocaria)
+ * devolve o equilíbrio — e cada semeadura nova já pergunta de novo pela mais atrasada.
+ */
+function pudim_ProporcaoPagavel(permitidos, preferido, res)
+{
+	const alvo = pudim_ProporcaoAlvo(permitidos, null, preferido || null);
+	if (!alvo || pudim_ComputeAffordableCount(alvo.tpl, 1, res) >= 1) return alvo;
+	const tentados = new Set([alvo.tpl]);
+	let resto = (permitidos || []).filter(t => !tentados.has(t));
+	while (resto.length) {
+		const outra = pudim_ProporcaoAlvo(resto, null, preferido || null);
+		if (!outra) break;
+		if (pudim_ComputeAffordableCount(outra.tpl, 1, res) >= 1) {
+			outra.substituta = alvo.tpl;
+			return outra;
+		}
+		tentados.add(outra.tpl);
+		resto = resto.filter(t => !tentados.has(t));
+	}
+	return alvo;
 }
 
 /**

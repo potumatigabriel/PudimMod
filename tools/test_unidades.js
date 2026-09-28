@@ -174,7 +174,7 @@ check("peso zero nunca é escolhido",
 // edificio semeado com lanceiro no inicio repunha lanceiro para sempre com o peso dele
 // zerado. A ordem VIVA dele continua intocada — ela esta na fila, e a trava e `isOurs`.
 const iJogador = panel.indexOf("let template = propAtivaAqui ? null : (g_PudimPlayerQueueTpl[b.ent] || null);");
-const iProporcao = panel.indexOf("const atrasada = pudim_UnidadeMaisAtrasada(");
+const iProporcao = panel.indexOf("const atrasada = pudim_ProporcaoPagavel(");
 const iPalpite = panel.indexOf("const trainerEnts = b.trainerEntities || [];");
 check("a escolha do jogador é avaliada antes da proporção", iJogador > 0 && iJogador < iProporcao);
 check("a proporção vem depois dela", iProporcao > 0 && iProporcao < iPalpite);
@@ -188,7 +188,7 @@ check("e o palpite antigo fica por último", iPalpite > 0);
 // dali uma unidade que ele não treine. O comportamento está coberto de verdade em
 // tools/test_lote_proporcao.js, que roda a função.
 check("só escolhe unidade que AQUELE edifício treina",
-	/const atrasada = pudim_UnidadeMaisAtrasada\(b\.trainerEntities \|\| \[\],/.test(panel) &&
+	/const atrasada = pudim_ProporcaoPagavel\(b\.trainerEntities \|\| \[\],/.test(panel) &&
 	/\.filter\(u => !permitidos \|\| permitidos\.indexOf\(u\.tpl\) >= 0\)/.test(panel));
 check("e respeita o teto de mulheres",
 	/if \(atrasada && !\(atFemaleCap && isFemaleTemplate\(atrasada\.tpl\)\)\)/.test(panel));

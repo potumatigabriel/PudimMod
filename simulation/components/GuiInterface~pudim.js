@@ -4722,15 +4722,26 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 			if (Engine.QueryInterface(ent, IID_Foundation)) continue;
 			const p = Engine.QueryInterface(ent, IID_Position);
 			if (!p || !p.IsInWorld()) continue;
-			dropsitesRota.push({ pos: p.GetPosition2D(), tipos: cmpDs.GetTypes() });
+			// É o CC? Só ele justifica a isenção em volta do nó — ver naRota, abaixo.
+			const cmpIdDs = Engine.QueryInterface(ent, IID_Identity);
+			dropsitesRota.push({ pos: p.GetPosition2D(), tipos: cmpDs.GetTypes(),
+			                     cc: !!(cmpIdDs && cmpIdDs.HasClass("CivCentre")) });
 		}
 
 		const vistos = {};
 		for (const ent of allEnts) {
 			const cmpAI = Engine.QueryInterface(ent, IID_UnitAI);
 			if (!cmpAI || !cmpAI.orderQueue || !cmpAI.orderQueue.length) continue;
-			const ord = cmpAI.orderQueue[0];
-			if (ord.type !== "Gather") continue;
+			// QUEM ESTÁ VOLTANDO CARREGADO TAMBÉM ESTÁ NA ROTA.
+			//
+			// Só a primeira ordem era olhada, e só se fosse Coletar. Mas quando a carga
+			// enche, o motor põe a entrega NA FRENTE da coleta (UnitAI.js:
+			// PushOrderFront("ReturnResource", ...)), e a coleta — com a árvore — fica logo
+			// atrás. A qualquer momento algo como metade dos lenhadores está nesse estado, e
+			// a rota deles simplesmente não existia para esta regra. Procurar a coleta na
+			// fila inteira devolve a árvore dos dois casos.
+			const ord = cmpAI.orderQueue.find(o => o && o.type === "Gather");
+			if (!ord) continue;
 			const alvo = ord.data && ord.data.target;
 			if (!alvo || vistos[alvo]) continue;
 			const rs = Engine.QueryInterface(alvo, IID_ResourceSupply);
@@ -4751,7 +4762,8 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 			// Rota longa demais não entra: ela ainda vai ganhar um dropsite próprio, e
 			// proteger um corredor de 150m tomaria metade da base.
 			if (melhor && melhorD <= PUDIM_CASA_ROTA_MAX * PUDIM_CASA_ROTA_MAX)
-				rotasColeta.push({ ax: rpos.x, az: rpos.y, bx: melhor.pos.x, bz: melhor.pos.y });
+				rotasColeta.push({ ax: rpos.x, az: rpos.y, bx: melhor.pos.x, bz: melhor.pos.y,
+				                   cc: melhor.cc });
 		}
 	}
 
@@ -5062,11 +5074,21 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 
 	const naRota = (cx, cz) => {
 		for (const r of rotasColeta) {
-			// O trecho colado no dropsite é exceção: TODAS as rotas convergem ali, e ele
-			// costuma ficar junto ao CC, que é justamente onde o vilarejo cresce. Vetar
-			// aquele nó deixaria a base sem lugar nenhum para casa.
+			// A ISENÇÃO EM VOLTA DO NÓ VALE SÓ PARA O CC.
+			//
+			// Ela existia para qualquer dropsite, com a justificativa de que o nó "costuma
+			// ficar junto ao CC, que é justamente onde o vilarejo cresce". Isso é verdade
+			// para o CC — vetar o entorno dele deixaria a base sem casa. Para o ARMAZÉM é o
+			// contrário: ele fica na beira da floresta, e o entorno dele é exatamente onde
+			// todas as rotas de madeira se encontram.
+			//
+			// Relato de 28/09: "fizeram casas automaticamente entre o armazem e os
+			// coletores de arvore, atrapalhando a coleta". MEDIDO em ago-set, distância de
+			// cada casa ao armazém mais próximo: 15% das 2.619 casas do mod a menos de 25m,
+			// contra 9% das suas e 8% das dos outros jogadores — o acúmulo cai exatamente
+			// dentro do raio desta isenção (24m).
 			const ddx = cx - r.bx, ddz = cz - r.bz;
-			if (ddx*ddx + ddz*ddz <= PUDIM_CASA_ROTA_ISENCAO * PUDIM_CASA_ROTA_ISENCAO)
+			if (r.cc && ddx*ddx + ddz*ddz <= PUDIM_CASA_ROTA_ISENCAO * PUDIM_CASA_ROTA_ISENCAO)
 				continue;
 			if (distRota(cx, cz, r) < PUDIM_CASA_ROTA_FOLGA) return true;
 		}

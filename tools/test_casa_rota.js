@@ -48,7 +48,7 @@ check("o dropsite vem do componente, não de uma lista de nomes de template",
 check("a rota liga o recurso ao dropsite que ACEITA aquele recurso",
 	/ds\.tipos\.indexOf\(generico\) === -1/.test(src));
 check("fundação de dropsite não conta como rota (ainda não recebe carga)",
-	/if \(Engine\.QueryInterface\(ent, IID_Foundation\)\) continue;[\s\S]{0,200}?dropsitesRota\.push/.test(src));
+	/if \(Engine\.QueryInterface\(ent, IID_Foundation\)\) continue;[\s\S]{0,500}?dropsitesRota\.push/.test(src));
 check("o filtro é distância ponto-segmento, não distância ao ponto",
 	/const distRota = \(px, pz, r\)/.test(src) && /len2 > 0 \?/.test(src));
 check("o candidato bloqueado vai para uma lista separada",
@@ -71,13 +71,14 @@ function distSeg(px, pz, ax, az, bx, bz) {
 }
 function naRota(px, pz, r) {
 	const ddx = px - r.bx, ddz = pz - r.bz;
-	if (ddx * ddx + ddz * ddz <= ISENCAO * ISENCAO) return false;
+	// Desde 28/09 a isenção em volta do nó vale SÓ quando o dropsite é o CC.
+	if (r.cc && ddx * ddx + ddz * ddz <= ISENCAO * ISENCAO) return false;
 	return distSeg(px, pz, r.ax, r.az, r.bx, r.bz) < FOLGA;
 }
 
-// Cenário do relato: bosque a oeste (0,0), CC a leste (100,0). Os lenhadores andam pela
-// linha z=0 e voltam carregados por ela.
-const rota = { ax: 0, az: 0, bx: 100, bz: 0 };
+// Cenário do relato de 25/08: bosque a oeste (0,0), CC a leste (100,0). Os lenhadores andam
+// pela linha z=0 e voltam carregados por ela.
+const rota = { ax: 0, az: 0, bx: 100, bz: 0, cc: true };
 
 check("casa bem no meio do corredor é rejeitada", naRota(50, 0, rota));
 check("casa ligeiramente ao lado, ainda no corredor, é rejeitada", naRota(50, FOLGA - 2, rota));
@@ -87,8 +88,37 @@ check("casa depois do dropsite, fora do segmento, passa", !naRota(140, 0, rota))
 
 // A isenção existe porque TODAS as rotas convergem no dropsite, e o dropsite fica junto do
 // CC, que é onde o vilarejo naturalmente cresce. Sem ela a base não teria onde pôr casa.
-check("colado no dropsite a regra não vale", !naRota(100 - ISENCAO / 2, 0, rota));
+check("colado no CC a regra não vale", !naRota(100 - ISENCAO / 2, 0, rota));
 check("mas logo depois da isenção ela volta a valer", naRota(100 - ISENCAO - 5, 0, rota));
+
+// ── E NO ARMAZÉM A ISENÇÃO NÃO EXISTE ──────────────────────────────────────────────────
+//
+// Relato de 28/09: "fizeram casas automaticamente entre o armazem e os coletores de
+// arvore, atrapalhando a coleta". MEDIDO em ago-set: 15% das 2.619 casas do mod a menos
+// de 25m de um armazém, contra 9% das suas e 8% das dos outros — o acúmulo cai dentro do
+// raio da isenção (24m). O armazém fica na beira da floresta, e o entorno dele é onde
+// todas as rotas de madeira se encontram: é o último lugar para isentar.
+const rotaArmazem = { ax: 0, az: 0, bx: 30, bz: 0, cc: false };   // árvore a 30m do armazém
+check("colado no ARMAZÉM, no lado da floresta, a casa é barrada — era o caso do relato",
+	naRota(30 - ISENCAO / 2, 0, rotaArmazem));
+check("do outro lado do armazém, fora do corredor, a casa continua podendo",
+	!naRota(30 + ISENCAO, 0, rotaArmazem));
+check("no código, a isenção só vale com r.cc",
+	/if \(r\.cc && ddx\*ddx \+ ddz\*ddz <= PUDIM_CASA_ROTA_ISENCAO \* PUDIM_CASA_ROTA_ISENCAO\)/.test(src));
+check("e o dropsite sabe se é o CC — pela classe, não por nome de template",
+	/cc: !!\(cmpIdDs && cmpIdDs\.HasClass\("CivCentre"\)\)/.test(src) && /cc: melhor\.cc/.test(src));
+
+// ── QUEM VOLTA CARREGADO TAMBÉM ESTÁ NA ROTA ───────────────────────────────────────────
+// Com a carga cheia o motor põe a entrega NA FRENTE da coleta (UnitAI.js,
+// PushOrderFront("ReturnResource")). Olhar só a primeira ordem deixava de fora algo como
+// metade dos lenhadores.
+check("a coleta é procurada na fila inteira, não só na primeira ordem",
+	/const ord = cmpAI\.orderQueue\.find\(o => o && o\.type === "Gather"\);/.test(src));
+function acharColeta(fila) { return fila.find(o => o && o.type === "Gather"); }
+check("lenhador voltando carregado: a árvore vem da coleta logo atrás da entrega",
+	acharColeta([{ type: "ReturnResource", data: { target: 9 } }, { type: "Gather", data: { target: 55 } }]).data.target === 55);
+check("e o modo antigo não a via",
+	[{ type: "ReturnResource" }, { type: "Gather" }][0].type !== "Gather");
 
 // A folga precisa caber a casa inteira mais passagem. A casa gaul tem ~20 units de
 // footprint (comentário do próprio código, na geração de candidatos com offset 20).

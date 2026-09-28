@@ -2079,6 +2079,9 @@ var g_PudimPanicAccum = 0;
 /** Acumulador de tempo para re-ativar auto-fila */
 var g_PudimAutoQueueAccum = 0;
 const PUDIM_AUTOQUEUE_INTERVAL = 3000;
+// Repor o próximo lote quando faltar isto para o atual acabar. Maior que o intervalo do
+// ciclo (3s), senão o lote termina entre dois ciclos e a janela passa despercebida.
+const PUDIM_REPOR_ANTES_MS = 3500;
 // Estava sem vaga de população na última verificação? A transição de sem-vaga para
 // com-vaga é o gatilho de retomada imediata; ver o bloco da auto-fila no tique.
 var g_PudimSemVagaPop = false;
@@ -2924,7 +2927,26 @@ function pudim_ProcessAutoQueue()
 				}
 			}
 
-			if (!b.queueEmpty) {
+			// ── REPOR ANTES DE ESVAZIAR ─────────────────────────────────────────────────
+			//
+			// A semeadura só acontecia com a fila VAZIA. Entre o fim de um lote e o próximo
+			// ciclo (3s) o edifício ficava parado. O ModernGUI repõe quando o último item
+			// tem pouco tempo restante (PanelScripts.trainUnits: "queue.length === 1 &&
+			// timeRemaining <= intervalo") — ideia reescrita aqui.
+			//
+			// Estritamente limitado, por causa da regra logo abaixo ("NO MÁXIMO UM lote"):
+			// só com EXATAMENTE um lote, reconhecidamente do mod, já andando, a menos de
+			// PUDIM_REPOR_ANTES_MS do fim; nunca com a auto-fila do motor ligada (ela já
+			// repete sozinha) e nunca com o lote parado por falta de população (neededSlots,
+			// campo do Trainer.Item.GetBasicInfo do motor). A fila chega a 2 por um instante e
+			// volta a 1 quando o primeiro termina — nunca empilha.
+			const q0 = (b.trainingQueue && b.trainingQueue.length === 1) ? b.trainingQueue[0] : null;
+			const reporAntes = !!(q0 && !b.autoqueue && q0.unitTemplate &&
+				q0.unitTemplate === g_PudimQueueSeededTpl[b.ent] &&
+				(q0.progress || 0) > 0 && typeof q0.timeRemaining === "number" &&
+				q0.timeRemaining <= PUDIM_REPOR_ANTES_MS && !(q0.neededSlots > 0));
+
+			if (!b.queueEmpty && !reporAntes) {
 				// REGRA: a auto-fila mantém NO MÁXIMO UM lote. Um lote degradado por escassez
 				// (ticket 6278) loopa para sempre no autoqueue nativo — o motor re-enfileira o
 				// mesmo tamanho que terminou, então a fila nunca volta sozinha ao lote
@@ -3113,6 +3135,8 @@ function pudim_ProcessAutoQueue()
 			// itens (leitura errada) ou se cada semeadura viu vazio de verdade (corrida).
 			pudim_Log("INFO", "QUEUE", "fila semeada em " + b.ent + " x" + affordable + " " +
 				template.split("/").pop() + (doJogador ? " (escolha do jogador)" : "") +
+				(reporAntes ? " (repondo antes de esvaziar, faltavam " +
+					Math.round(q0.timeRemaining / 100) / 10 + "s)" : "") +
 				" qlen=" + ((b.trainingQueue && b.trainingQueue.length) || 0) +
 				(g_PudimShowDebug ? " | " + pudim_LoteDiag(template, res, buildings) : ""));
 		}

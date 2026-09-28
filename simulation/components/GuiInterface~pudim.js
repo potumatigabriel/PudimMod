@@ -2696,6 +2696,7 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 
 	const farmsteadPositions = [];
 	const fieldFoundations = [];
+	const fieldPositions = [];
 	for (const ent of allEnts) {
 		const cmpIdent = Engine.QueryInterface(ent, IID_Identity);
 		if (cmpIdent) {
@@ -2711,6 +2712,12 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 				// Fundação de campo ainda inacabada. Contada à parte porque ela muda a
 				// decisão: enquanto existir uma, não se começa outra.
 				if (Engine.QueryInterface(ent, IID_Foundation)) fieldFoundations.push(ent);
+				// Posição de todo campo (pronto ou em obra): a grade dos novos se alinha a ela.
+				const posF = Engine.QueryInterface(ent, IID_Position);
+				if (posF && posF.IsInWorld()) {
+					const pf = posF.GetPosition2D();
+					fieldPositions.push({ x: pf.x, z: pf.y });
+				}
 			}
 			if (cmpIdent.HasClass("Farmstead")) {
 				const pos = Engine.QueryInterface(ent, IID_Position);
@@ -3462,28 +3469,57 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	// com 8 fixas, um anel de 90 deixaria vãos de 70 units e perderia espaço livre óbvio.
 	// A ordenação abaixo continua preferindo perto e seguro, então os anéis largos só
 	// entram em jogo quando os de perto acabaram.
+	//
+	// ── E OS PONTOS SÃO UMA GRADE, NÃO UM ANEL (28/09) ──────────────────────────────────
+	//
+	// Relato: "a construção automática de fazendas melhorou muito, mas ainda está um pouco
+	// desordenada". No replay 2026-09-28_0004 os campos saíram em (698,240) (689,261)
+	// (668,270) (638,240) (668,210) (644,214) (696,218) (696,208) (614,240) (615,228): pontos
+	// de ANEL, espaçados ~12 ao longo da circunferência, e cada campo ia "onde coube" — com
+	// vãos tortos entre eles que nenhum campo novo preenche.
+	//
+	// Agora os pontos são uma GRADE com passo igual à obstrução do campo (22 na A28,
+	// template_structure_resource_field.xml, Obstruction/Static; lida do template da civ, que
+	// pode ser outra), alinhada ao primeiro campo que já existe — ou ao CC, se não há nenhum.
+	// Todo campo novo cai encostado nos outros, em bloco. O raio de busca e a ordem de
+	// preferência (CC, depois celeiros do mais perto ao mais longe) continuam os mesmos; e,
+	// dentro do mesmo seed e da mesma faixa de segurança, ganha quem ENCOSTA em mais campos.
+	let passoCampo = 22;
+	try {
+		const cmpTM = Engine.QueryInterface(SYSTEM_ENTITY, IID_TemplateManager);
+		const tplCampo = fieldTemplate && cmpTM.GetTemplate(fieldTemplate);
+		const w = tplCampo && tplCampo.Obstruction && tplCampo.Obstruction.Static && +tplCampo.Obstruction.Static["@width"];
+		if (w > 0) passoCampo = w;
+	} catch (e) {}
+	// Meio metro de folga: borda com borda exata depende de arredondamento no teste de
+	// colisão, e se ele acusar sobreposição a grade INTEIRA seria recusada. Não se vê em jogo.
+	passoCampo += 0.5;
+	result.passoCampo = passoCampo;
+	const origem = fieldPositions.length ? fieldPositions[0] : { x: cx, z: cz };
 	const candidates = [];
-	// Tetos de custo: cada candidato faz uma consulta espacial. O teto POR SEED existe para
-	// que o primeiro (o CC) não consuma a cota inteira e deixe os celeiros sem candidato.
-	const PUDIM_FARM_CAND_PER_SEED = 250;
 	const PUDIM_FARM_CAND_TOTAL = 600;
+	const vistos = new Set();
 	outerSeeds: for (let si = 0; si < seedPoints.length; si++) {
 		const seed = seedPoints[si];
-		let nSeed = 0;
-		for (let r = PUDIM_FAZENDA_ANEL_MIN; r <= PUDIM_FAZENDA_ANEL_MAX; r += PUDIM_FAZENDA_ANEL_PASSO) {
-			const dirs = Math.max(8, Math.round(2 * Math.PI * r / 12));
-			for (let i = 0; i < dirs; i++) {
-				const angle = (i / dirs) * 2 * Math.PI;
-				candidates.push({
-					x: Math.max(15, Math.min(mapSize - 15, seed.x + Math.cos(angle) * r)),
-					z: Math.max(15, Math.min(mapSize - 15, seed.z + Math.sin(angle) * r)),
-					seedIdx: si,
-					rSeed: r
-				});
-				if (++nSeed >= PUDIM_FARM_CAND_PER_SEED) break;
+		// O nó da grade mais perto do seed, e a vizinhança dele até o raio máximo.
+		const bi = Math.round((seed.x - origem.x) / passoCampo);
+		const bj = Math.round((seed.z - origem.z) / passoCampo);
+		const k = Math.ceil(PUDIM_FAZENDA_ANEL_MAX / passoCampo);
+		for (let di = -k; di <= k; di++) {
+			for (let dj = -k; dj <= k; dj++) {
+				const x = origem.x + (bi + di) * passoCampo;
+				const z = origem.z + (bj + dj) * passoCampo;
+				const r = Math.sqrt((x - seed.x) * (x - seed.x) + (z - seed.z) * (z - seed.z));
+				if (r < PUDIM_FAZENDA_ANEL_MIN || r > PUDIM_FAZENDA_ANEL_MAX) continue;
+				const chave = (bi + di) + "," + (bj + dj);
+				if (vistos.has(chave)) continue;   // o mesmo nó já entrou por um seed anterior
+				vistos.add(chave);
+				let encosta = 0;
+				for (const f of fieldPositions)
+					if (Math.abs(Math.abs(f.x - x) + Math.abs(f.z - z) - passoCampo) < 1) ++encosta;
+				candidates.push({ x: x, z: z, seedIdx: si, rSeed: r, encosta: encosta });
 				if (candidates.length >= PUDIM_FARM_CAND_TOTAL) break outerSeeds;
 			}
-			if (nSeed >= PUDIM_FARM_CAND_PER_SEED) break;
 		}
 	}
 
@@ -3508,6 +3544,7 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 		const tierA = Math.round(a.safety * 4); // 0..4
 		const tierB = Math.round(b.safety * 4);
 		if (tierA !== tierB) return tierB - tierA; // mais seguro primeiro
+		if (a.encosta !== b.encosta) return b.encosta - a.encosta;   // encostado em mais campos
 		return a.rSeed - b.rSeed;                  // e mais colado ao seed
 	});
 

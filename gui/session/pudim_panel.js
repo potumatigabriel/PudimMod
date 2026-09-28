@@ -4126,6 +4126,13 @@ function pudim_ProcessFarms()
 		const GROUP_SIZE = 5;
 		let posIdx = 0;
 		let farmsBuilt = 0;
+		// Campos escolhidos NESTE ciclo. SetBuildingPlacementPreview não os enxerga: o comando
+		// ainda não chegou à simulação, a fundação não existe. No replay 2026-09-28_0004 saíram
+		// no mesmo segundo (696,218) e (696,208), 10 de distância — um em cima do outro, e o
+		// motor recusou o segundo. Quadrados alinhados se sobrepõem quando |dx| e |dz| são os
+		// dois menores que o lado.
+		const escolhidos = [];
+		const lado = farmData.passoCampo || 22;
 
 		for (let g = 0; g < allFoodWorkers.length; g += GROUP_SIZE) {
 			const group = allFoodWorkers.slice(g, g + GROUP_SIZE);
@@ -4134,6 +4141,7 @@ function pudim_ProcessFarms()
 			let foundX = null, foundZ = null;
 			while (posIdx < farmData.candidatePositions.length) {
 				const pos = farmData.candidatePositions[posIdx++];
+				if (escolhidos.some(e => Math.abs(e.x - pos.x) < lado && Math.abs(e.z - pos.z) < lado)) continue;
 				let res = null;
 				try {
 					res = Engine.GuiInterfaceCall("SetBuildingPlacementPreview", {
@@ -4172,6 +4180,7 @@ function pudim_ProcessFarms()
 			pudim_Log("SUCCESS", "FARM", "campo #" + (farmsBuilt + 1) +
 				" em (" + foundX.toFixed(0) + "," + foundZ.toFixed(0) + ")" +
 				" workers=" + group.length);
+			escolhidos.push({ x: foundX, z: foundZ });
 			farmsBuilt++;
 		}
 		try { Engine.GuiInterfaceCall("SetBuildingPlacementPreview", { "template": "" }); } catch(e) {}

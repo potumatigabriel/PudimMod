@@ -206,8 +206,11 @@ check("o log diz a que distância do centro cívico a obra saiu",
 
 // O anel da fazenda passou a sair de constantes: com 6 e 90 escritos no laço, mexer no
 // alcance dela sem mexer no cinturão traria o problema de volta sem ninguém notar.
-check("o anel das fazendas vem das constantes, não de números soltos no laço",
-	/for \(let r = PUDIM_FAZENDA_ANEL_MIN; r <= PUDIM_FAZENDA_ANEL_MAX; r \+= PUDIM_FAZENDA_ANEL_PASSO\)/.test(sim));
+// Desde 28/09 os pontos são uma grade (ver tools/test_fazenda_grade.js), mas o ALCANCE
+// continua saindo das mesmas constantes.
+check("o alcance das fazendas vem das constantes, não de números soltos no laço",
+	/const k = Math\.ceil\(PUDIM_FAZENDA_ANEL_MAX \/ passoCampo\);/.test(sim) &&
+	/if \(r < PUDIM_FAZENDA_ANEL_MIN \|\| r > PUDIM_FAZENDA_ANEL_MAX\) continue;/.test(sim));
 
 // ── A equipe ATRAVESSA a série, não é recrutada de novo a cada obra ────────────────────
 //

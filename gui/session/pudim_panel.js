@@ -4136,6 +4136,14 @@ function pudim_ProcessFarms()
 
 		for (let g = 0; g < allFoodWorkers.length; g += GROUP_SIZE) {
 			const group = allFoodWorkers.slice(g, g + GROUP_SIZE);
+			// Cinco por campo (pedido de 28/09). A simulação já manda a equipe em múltiplos de
+			// 5; sobra incompleta só quando faltou gente no pool — e aí ela NÃO abre um segundo
+			// campo pela metade: espera o próximo ciclo. O primeiro campo sai mesmo incompleto,
+			// para a comida não ficar sem campo nenhum.
+			if (group.length < GROUP_SIZE && farmsBuilt > 0) {
+				pudim_Log("INFO", "FARM", "sobra de " + group.length + " sem campo novo: espera juntar 5");
+				break;
+			}
 
 			// Encontrar próxima posição válida — SetBuildingPlacementPreview cuida da colisão
 			let foundX = null, foundZ = null;

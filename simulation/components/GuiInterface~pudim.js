@@ -1278,6 +1278,23 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 	const PUDIM_POP_REBALANCE = 140;
 	const popCountRb = cmpPlayer ? cmpPlayer.GetPopulationCount() : 0;
 	const bigPopRb = popCountRb >= PUDIM_POP_REBALANCE;
+	// ── QUEM ESTÁ NO CAMPO FICA NO CAMPO ─────────────────────────────────────────────────
+	//
+	// Pedido de 28/09: "deixar sempre os trabalhadores na fazenda; se a pop for maior de 130
+	// e a quantidade de comida for maior que 3000, aí rebalanceia. Porque ao longo do jogo a
+	// principal unidade vai ser a cavalaria, ela gasta muito mais comida". Tirar alguém do
+	// campo só vale com as DUAS condições; fora delas o campo é intocável por este
+	// rebalanceamento (e pelo longWalkers, mais abaixo).
+	const PUDIM_FAZENDA_SOLTA_POP = 130;
+	const PUDIM_FAZENDA_SOLTA_COMIDA = 3000;
+	const comidaRb = cmpPlayer ? (cmpPlayer.GetResourceCounts().food || 0) : 0;
+	const podeTirarDoCampo = popCountRb > PUDIM_FAZENDA_SOLTA_POP && comidaRb > PUDIM_FAZENDA_SOLTA_COMIDA;
+	const colheCampo = function(ent) {
+		const ai = Engine.QueryInterface(ent, IID_UnitAI);
+		const o = ai && ai.orderQueue && ai.orderQueue[0];
+		const tp = o && o.data && (o.data.type || o.data.resourceType);
+		return !!(tp && tp.generic === "food" && tp.specific === "grain");
+	};
 	const surplusThreshold = bigPopRb ? 8 : 20;
 
 	if (totalWeight > 0) {
@@ -1350,6 +1367,8 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 				// sua, 1.242 foram com população 140+, a faixa em que só este rebalanceamento
 				// roda. Era ele que arrancava da fila quem você tinha mandado coletar.
 				if (pudimSkipUnit(ent, Engine.QueryInterface(ent, IID_UnitAI))) continue;
+				// Campo: só sai com pop > 130 E comida > 3000 (ver PUDIM_FAZENDA_SOLTA_*).
+				if (!podeTirarDoCampo && colheCampo(ent)) continue;
 
 				const id = Engine.QueryInterface(ent, IID_Identity);
 				if (id && (id.HasClass("CitizenSoldier") || id.HasClass("FastMoving"))) {
@@ -1589,6 +1608,9 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 		} else {
 			continue;
 		}
+		// Quem está no CAMPO fica no campo (pedido de 28/09; ver PUDIM_FAZENDA_SOLTA_POP). Campo
+		// não é recurso que se troca por outro mais perto: a regra aqui é para árvore e fruta.
+		if (targetResType.specific === "grain") continue;
 
 		// Verificar se o recurso-alvo está longe (> 100m) de qualquer dropsite que aceite esse tipo
 		let nearestDropDist = Infinity;
@@ -3375,6 +3397,21 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	}
 
 	result.action = "build";
+
+	// ── CINCO POR CAMPO, DESDE A OBRA (28/09) ────────────────────────────────────────────
+	//
+	// Pedido: "tem que já mandar os 5 aldeões pra cada fazenda, já desde a hora de
+	// construir". A equipe era o DÉFICIT exato: com falta de 7, o painel abria um campo com 5
+	// e outro com 2 — e o de 2 demora o dobro para subir e fica colhendo pela metade até
+	// alguém chegar. No replay 2026-09-28_0004 saíram campos com 1 e 2 construtores.
+	// Agora a equipe sobe para o múltiplo de 5 seguinte (a capacidade do campo), dentro do
+	// que o pool tem — a mesma ordem de sempre: ocioso e aldeão antes de soldado.
+	{
+		const campos = Math.ceil(farFoodWorkers.length / PUDIM_FIELD_CAPACITY);
+		const equipe = Math.min(poolFazenda.length, campos * PUDIM_FIELD_CAPACITY);
+		if (equipe > farFoodWorkers.length) farFoodWorkers = poolFazenda.slice(0, equipe);
+		result._dbg.equipe = farFoodWorkers.length;
+	}
 
 	let bId = null;
 	if (farFoodWorkers.length > 0) {

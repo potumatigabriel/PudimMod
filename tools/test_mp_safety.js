@@ -134,7 +134,11 @@ const VANILLA = new Set(["attack", "autoqueue-on", "autoqueue-off", "barter", "c
 	// tribute: tratado em simulation/helpers/Commands.js do jogo BASE
 	// ("tribute": function(player, cmd, data) → cmpPlayer.TributeResource), igual em todo
 	// cliente. Entrou com o tributo automático, em 28/09.
-	"tribute"]);
+	"tribute",
+	// set-trading-goods: simulation/helpers/Commands.js do jogo BASE
+	// (→ cmpPlayer.SetTradingGoods), o mesmo que a tela de comércio manda
+	// (gui/session/trade/TradeButtonManager.js). Entrou com a divisão lembrada, em 28/09.
+	"set-trading-goods"]);
 const guiFiles = listarJs(path.join(RAIZ, "gui"));
 const tiposUsados = new Set();
 for (const f of guiFiles) {
@@ -169,8 +173,13 @@ check("o mod realmente envia comandos (o teste acima nao passou por vazio)",
 // GuiInterface.js: o corpo inteiro e um `return RequirementsHelper.AreRequirementsMet(...)`.
 // Le e devolve, nao escreve nada. E o que a propria interface do jogo usa para cinzar botao
 // de treino (gui/session/selection_panels.js).
+//
+// GetTradingGoods entrou em 28/09, com a divisão de mercadorias lembrada. Conferido em
+// GuiInterface.js: `return cmpPlayer.GetTradingGoods()`, e Player.GetTradingGoods só monta
+// um objeto NOVO a partir de this.tradingGoods — lê, não escreve. É o que a tela de comércio
+// do jogo chama (gui/session/trade/TradeButtonManager.js).
 const SEGUROS = new Set(["GetNeededResources", "SetBuildingPlacementPreview",
-	"SetWallPlacementPreview", "AreRequirementsMet"]);
+	"SetWallPlacementPreview", "AreRequirementsMet", "GetTradingGoods"]);
 const chamadas = new Set();
 for (const f of guiFiles) {
 	const src = semComentarios(fs.readFileSync(f, "utf8"));

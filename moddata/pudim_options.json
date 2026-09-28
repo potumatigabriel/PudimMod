@@ -100,6 +100,14 @@
 			},
 			{
 				"type": "boolean",
+				"config": "pudim.comercio.lembrar",
+				"label": "[color=\"120 220 255\"]Economia:[/color] Lembrar a divisão de mercadorias do comércio",
+				"tooltip": "Guarda como você dividiu as mercadorias das rotas de comércio (quanto de comida, madeira, pedra e metal os mercadores trazem) e aplica a mesma divisão no começo da próxima partida. Só repete a SUA escolha: sem nada gravado, fica a do jogo.",
+				"label_en": "[color=\"120 220 255\"]Economy:[/color] Remember the trade goods split",
+				"tooltip_en": "Remembers how you split the goods of your trade routes (how much food, wood, stone and metal traders bring back) and applies the same split at the start of the next match. It only repeats YOUR choice: with nothing saved, the game default stays."
+			},
+			{
+				"type": "boolean",
 				"config": "pudim.autowork.enabled",
 				"label": "[color=\"120 220 255\"]Economia:[/color] Auto-Trabalho ativo ao iniciar a partida",
 				"tooltip": "Começa a partida já enviando cidadão ocioso para coletar. Se desligar, o Auto-Trabalho continua existindo no painel; ele só não vem ligado sozinho.",

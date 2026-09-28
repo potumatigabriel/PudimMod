@@ -2063,6 +2063,83 @@ function pudim_ProcessMercado() {
 		t.buy + " (faltavam " + Math.ceil(t.falta) + ")");
 }
 
+// ─── Divisão de mercadorias do comércio, lembrada entre partidas ────────────────────────
+//
+// Ideia do ModernGUI (TradeButton~moderngui.js), reescrita: lá eles substituem a classe
+// TradeButtonManager do jogo; aqui nada da tela é tocado, o que não briga com outro mod que
+// mexa nela. O mod só OBSERVA a divisão atual a cada PUDIM_MERCADORIAS_INTERVALO:
+//   • no começo da partida, se houver divisão gravada e ela for válida, reaplica;
+//   • depois, sempre que ela mudar (foi você, na tela de comércio), grava.
+//
+// Conferido na A28: a leitura é GuiInterface.GetTradingGoods ({recurso: %}); o comando é
+// {"type": "set-trading-goods", "tradingGoods"}, o mesmo de TradeButtonManager.js, e
+// Player.SetTradingGoods recusa (com erro na tela) recurso fora dos comercializáveis ou soma
+// diferente de 100 — por isso a gravada é validada contra os recursos da partida atual.
+const PUDIM_MERCADORIAS_CHAVE = "pudim.comercio.mercadorias";
+const PUDIM_MERCADORIAS_INTERVALO = 5000;
+var g_PudimMercadoriasAccum = 0;
+var g_PudimMercadoriasAplicada = false;
+var g_PudimMercadoriasUltima = null;      // texto da última divisão vista ou aplicada
+var g_PudimMercadoriasEsperaAte = 0;      // depois de aplicar, a leitura antiga ainda chega
+
+/** {food: 25, ...} → "food:25,metal:25,..." em ordem fixa, para comparar e gravar. */
+function pudim_MercadoriasTexto(m) {
+	return Object.keys(m || {}).sort().map(r => r + ":" + m[r]).join(",");
+}
+
+/** A divisão gravada, se ela serve para a partida atual (mesmos recursos, soma 100); ou null. */
+function pudim_MercadoriasGravadas(texto, atual) {
+	if (!texto || !atual) return null;
+	const m = {};
+	for (const par of String(texto).split(",")) {
+		const [r, v] = par.split(":");
+		const n = Number(v);
+		if (!r || !Number.isInteger(n) || n < 0) return null;
+		m[r] = n;
+	}
+	const chavesA = Object.keys(atual).sort().join(","), chavesM = Object.keys(m).sort().join(",");
+	if (chavesA !== chavesM) return null;
+	let soma = 0;
+	for (const r in m) soma += m[r];
+	return soma === 100 ? m : null;
+}
+
+/** Reaplica no início e grava quando muda. Emite comando: roda abaixo da trava de espectador. */
+function pudim_ProcessMercadorias() {
+	if (Engine.ConfigDB_GetValue("user", "pudim.comercio.lembrar") === "false") return;
+	const sim = GetSimState();
+	if (!sim || (sim.timeElapsed || 0) < 1000) return;   // antes disso o jogador ainda nem existe direito
+	let atual;
+	try { atual = Engine.GuiInterfaceCall("GetTradingGoods"); } catch (e) { return; }
+	if (!atual || !Object.keys(atual).length) return;
+	const agora = Date.now();
+	if (!g_PudimMercadoriasAplicada) {
+		g_PudimMercadoriasAplicada = true;
+		const gravada = pudim_MercadoriasGravadas(Engine.ConfigDB_GetValue("user", PUDIM_MERCADORIAS_CHAVE), atual);
+		if (gravada && pudim_MercadoriasTexto(gravada) !== pudim_MercadoriasTexto(atual)) {
+			Engine.PostNetworkCommand({ "type": "set-trading-goods", "tradingGoods": gravada });
+			g_PudimMercadoriasUltima = pudim_MercadoriasTexto(gravada);
+			g_PudimMercadoriasEsperaAte = agora + 15000;
+			pudim_Log("INFO", "COMERCIO", "divisao de mercadorias da partida anterior: " + g_PudimMercadoriasUltima);
+			return;
+		}
+		g_PudimMercadoriasUltima = pudim_MercadoriasTexto(atual);
+		return;
+	}
+	const texto = pudim_MercadoriasTexto(atual);
+	// Logo depois de aplicar, a simulação ainda pode devolver a divisão velha por um ou dois
+	// turnos. Gravar ela ali desfaria justamente o que acabou de ser aplicado.
+	if (agora < g_PudimMercadoriasEsperaAte) {
+		if (texto === g_PudimMercadoriasUltima) g_PudimMercadoriasEsperaAte = 0;
+		return;
+	}
+	if (texto === g_PudimMercadoriasUltima) return;
+	g_PudimMercadoriasUltima = texto;
+	Engine.ConfigDB_CreateValue("user", PUDIM_MERCADORIAS_CHAVE, texto);
+	Engine.ConfigDB_SaveChanges("user");
+	pudim_Log("INFO", "COMERCIO", "divisao de mercadorias gravada: " + texto);
+}
+
 /** Manda o tributo, quando ligado e quando há sobra. Emite comando. */
 function pudim_ProcessTributo() {
 	if (Engine.ConfigDB_GetValue("user", "pudim.tributo.auto") !== "true") return;
@@ -2683,6 +2760,11 @@ function pudim_Tick(dt)
 	if (g_PudimMercadoAccum >= PUDIM_MERCADO_INTERVALO) {
 		g_PudimMercadoAccum = 0;
 		try { pudim_ProcessMercado(); } catch (e) {}
+	}
+	g_PudimMercadoriasAccum += dt;
+	if (g_PudimMercadoriasAccum >= PUDIM_MERCADORIAS_INTERVALO) {
+		g_PudimMercadoriasAccum = 0;
+		try { pudim_ProcessMercadorias(); } catch (e) {}
 	}
 
 	// Balanceamento inicial de workers: a cada 1s até concluído

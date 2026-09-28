@@ -3676,7 +3676,8 @@ function pudim_ProcessAutoQueue()
 			if (!b.queueEmpty && b.trainingQueue && b.trainingQueue.length >= 1) {
 				const cab = b.trainingQueue[0];
 				const doMod = !!(cab.unitTemplate && cab.unitTemplate === g_PudimQueueSeededTpl[b.ent]);
-				const custoPop = pudim_CustoPopulacao(cab.unitTemplate);
+				// Só unidade: pesquisa na fila não tem template nem população.
+				const custoPop = doMod ? pudim_CustoPopulacao(cab.unitTemplate) : 0;
 				const cabem = custoPop > 0 ? Math.floor(vagasPop / custoPop) : 0;
 				if (doMod && (cab.neededSlots || 0) > 0 && (cab.progress || 0) <= 0 &&
 				    cab.id !== undefined && cabem >= 1 && cabem < (cab.count || 1)) {
@@ -7098,6 +7099,11 @@ function pudim_QuantosTreinam(template, buildings)
 /** Quantas vagas de população UMA unidade deste template ocupa (cost.population; 1 se faltar). */
 function pudim_CustoPopulacao(tpl)
 {
+	// Sem template não há o que perguntar. Item de PESQUISA na fila não tem unitTemplate, e
+	// GetTemplateData(undefined) derruba a chamada na simulação ("Script value conversion
+	// check failed ... got type undefined", GuiInterface.js:647) — o erro vermelho que
+	// apareceu na tela em 28/09, repetido a cada ciclo da auto-fila.
+	if (typeof tpl !== "string" || !tpl) return 1;
 	try {
 		const td = GetTemplateData(tpl);
 		if (td && td.cost && td.cost.population > 0) return td.cost.population;

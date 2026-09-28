@@ -39,6 +39,22 @@ check("as vagas contam o custo de população do template",
 check("cancela e repõe com as vagas que há (o motor devolve o recurso de lote sem progresso)",
 	/"type": "stop-production", "entity": b\.ent, "id": cab\.id[\s\S]{0,200}"template": cab\.unitTemplate, "count": cabem/.test(execP));
 
+// Erro vermelho de 28/09: item de PESQUISA na fila não tem unitTemplate, e
+// GetTemplateData(undefined) quebrava na simulação a cada ciclo. Roda a função real.
+{
+	const a = panel.indexOf("function pudim_CustoPopulacao(tpl)");
+	const b = panel.indexOf("\n}", a) + 2;
+	let chamou = 0;
+	const ctx = { GetTemplateData: t => { chamou++; if (typeof t !== "string") throw new Error("undefined"); return { cost: { population: 2 } }; } };
+	vm.createContext(ctx);
+	vm.runInContext(panel.slice(a, b) + "\nthis.f = pudim_CustoPopulacao;", ctx);
+	check("custo de população de item SEM template (pesquisa): 1, sem nem perguntar à simulação",
+		ctx.f(undefined) === 1 && ctx.f("") === 1 && chamou === 0);
+	check("e de unidade, o do template", ctx.f("units/x") === 2 && chamou === 1);
+	check("o lote parado só pergunta o custo se for unidade do mod",
+		/const custoPop = doMod \? pudim_CustoPopulacao\(cab\.unitTemplate\) : 0;/.test(execP));
+}
+
 // ── 2. Reforço na casa, rodando a função real ────────────────────────────────────────
 const i = sim.indexOf("const PUDIM_CASA_REFORCO_MAX = 5;");
 const j = sim.indexOf("// ── QUARTÉIS DO JOGADOR, CONTANDO FUNDAÇÃO");

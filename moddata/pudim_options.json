@@ -76,6 +76,22 @@
 			},
 			{
 				"type": "boolean",
+				"config": "pudim.reserva.fase",
+				"label": "[color=\"120 220 255\"]Economia:[/color] Guardar recurso para a próxima fase",
+				"tooltip": "Quando a próxima fase já pode ser pesquisada (as construções que ela exige estão de pé), o treino e a pesquisa automáticos param de gastar o custo dela. Assim o dinheiro da fase se junta sem você precisar pausar nada. Casas, armazéns e fazendas continuam sendo construídos normalmente.",
+				"label_en": "[color=\"120 220 255\"]Economy:[/color] Save resources for the next phase",
+				"tooltip_en": "Once the next phase can be researched (the buildings it requires are standing), automatic training and research stop spending its cost. The phase money builds up without you pausing anything. Houses, storehouses and farms keep being built as usual."
+			},
+			{
+				"type": "boolean",
+				"config": "pudim.reserva.faseauto",
+				"label": "[color=\"120 220 255\"]Economia:[/color] Subir de fase sozinho",
+				"tooltip": "Pesquisa a próxima fase assim que ela puder ser pesquisada e houver recurso, no centro cívico com a fila mais curta, passando na frente do lote em andamento (que fica pausado, sem perder o progresso). Também guarda o recurso da fase enquanto espera. Desligado por padrão: a hora de subir de fase é uma decisão de estratégia.",
+				"label_en": "[color=\"120 220 255\"]Economy:[/color] Phase up automatically",
+				"tooltip_en": "Researches the next phase as soon as it can be researched and resources allow, at the civic centre with the shortest queue, jumping ahead of the batch in progress (which is paused without losing progress). It also saves the phase resources while waiting. Off by default: when to phase up is a strategic decision."
+			},
+			{
+				"type": "boolean",
 				"config": "pudim.autowork.enabled",
 				"label": "[color=\"120 220 255\"]Economia:[/color] Auto-Trabalho ativo ao iniciar a partida",
 				"tooltip": "Começa a partida já enviando cidadão ocioso para coletar. Se desligar, o Auto-Trabalho continua existindo no painel; ele só não vem ligado sozinho.",

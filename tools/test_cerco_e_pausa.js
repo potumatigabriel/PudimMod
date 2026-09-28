@@ -80,8 +80,16 @@ check("e so no clique, uma vez — religar a cada ciclo brigaria com o jogador",
 check("nada de cancelar producao em andamento: o recurso ja saiu do banco",
 	!/g_PudimTreinoPausado[\s\S]{0,400}stop-production/.test(execP));
 
-check("o rotulo diz em que estado esta",
-	/lbl\.caption = g_PudimTreinoPausado \? "▶ Retomar treino" : "❚❚ Pausar treino";/.test(execP));
+// Desde 28/09 o botao tem TRES estados: normal -> guardar para cerco -> pausado. Guardar e a
+// pausa mais inteligente — a producao continua e so o custo de uma arma de cerco fica fora
+// do alcance do treino automatico (reserva de recurso, ideia do ModernGUI reescrita).
+check("o rotulo diz em que estado esta — os tres",
+	/"▶ Treino normal",\s*\n?\s*"◆ Guardar p\/ cerco",\s*\n?\s*"❚❚ Treino pausado"\]\[g_PudimModoTreino\]/.test(execP));
+check("o clique percorre os tres estados, e so o terceiro e a pausa de antes",
+	/g_PudimModoTreino = \(g_PudimModoTreino \+ 1\) % 3;/.test(execP) &&
+	/g_PudimTreinoPausado = g_PudimModoTreino === PUDIM_MODO_PAUSA;/.test(execP));
+check("e a dica mostra, em numeros, o que esta guardado",
+	/"\\nGuardando " \+ pudim_CustoCurto\(cercoItem\.custo\)/.test(panel));
 check("e o botao e inicializado junto com os outros",
 	/pudim_AtualizarBotaoPausa\(\);/.test(execP));
 check("o botao entra na lista do modo compacto",

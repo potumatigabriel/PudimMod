@@ -7269,6 +7269,92 @@ GuiInterface.prototype.pudim_GetSmartDropsiteData = function(player, data)
 /** População mínima para o mod investir em tecnologia de combate (forja) */
 const PUDIM_FORGE_MIN_POP = 150;
 
+// ─── Reserva de recurso: quanto guardar, e para quê ────────────────────────────────────
+//
+// Ideia do ModernGUI (PanelScripts: "priority queue" — o treino automático não gasta o que
+// está reservado para uma pesquisa, construção ou fase), reescrita aqui: o repositório deles
+// não tem licença.
+//
+// SÓ OLHA. Devolve o que está reservado; quem desconta é o painel, e quem pesquisa também.
+//
+// A FASE só é reservada quando ela já PODE ser pesquisada tirando o dinheiro —
+// TechnologyManager.CanResearch confere par em andamento, pré-requisito (as construções que
+// a fase exige), já pesquisada e em andamento. Guardar antes disso seria parar a economia
+// por uma fase que ainda não existe.
+//
+// O custo é a conta do motor (Technology.Queue): Math.floor(multiplicador × custo), com o
+// multiplicador do próprio CC (Researcher.GetTechCostMultiplier).
+GuiInterface.prototype.pudim_GetPlanoReserva = function(player, data)
+{
+	const result = { "fase": null, "cadeia": [] };
+	const cmpRangeManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_RangeManager);
+	const cmpPlayerManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_PlayerManager);
+	if (!cmpRangeManager || !cmpPlayerManager) return result;
+	const playerEnt = cmpPlayerManager.GetPlayerByID(player);
+	const cmpTechMgr = playerEnt ? Engine.QueryInterface(playerEnt, IID_TechnologyManager) : null;
+	const cmpPlayer = playerEnt ? Engine.QueryInterface(playerEnt, IID_Player) : null;
+	if (!cmpTechMgr || !cmpPlayer) return result;
+	const res = cmpPlayer.GetResourceCounts();
+
+	const custoNo = function(ent, tech) {
+		const cmpR = Engine.QueryInterface(ent, IID_Researcher);
+		let mult = null;
+		try { mult = cmpR && cmpR.GetTechCostMultiplier ? cmpR.GetTechCostMultiplier() : null; } catch (e) {}
+		let tpl = null;
+		try { tpl = TechnologyTemplates.Get(tech); } catch (e) {}
+		const c = {};
+		if (tpl && tpl.cost)
+			for (const r in tpl.cost)
+				c[r] = Math.floor(((mult && mult[r] !== undefined) ? mult[r] : 1) * tpl.cost[r]);
+		return c;
+	};
+	const cabe = function(custo) {
+		for (const r in custo) if ((res[r] || 0) < custo[r]) return false;
+		return true;
+	};
+	const tempoFila = function(ent) {
+		const pq = Engine.QueryInterface(ent, IID_ProductionQueue);
+		if (!pq) return Infinity;
+		let t = 0;
+		for (const it of pq.GetQueue()) t += it.timeRemaining || 0;
+		return t;
+	};
+	// Lista de tecnologias de um edifício, abrindo o par {pair, top, bottom} (Researcher.js).
+	const techsDe = function(ent) {
+		const cmpR = Engine.QueryInterface(ent, IID_Researcher);
+		let lista = [];
+		try { lista = cmpR ? (cmpR.GetTechnologiesList() || []) : []; } catch (e) { return []; }
+		const out = [];
+		for (const it of lista) {
+			if (typeof it === "string") out.push(it);
+			else if (it && it.pair) { out.push(it.top); out.push(it.bottom); }
+		}
+		return out;
+	};
+
+	// ── A próxima fase ────────────────────────────────────────────────────────────────
+	if (data && data.fase) {
+		let melhor = null;
+		for (const ent of cmpRangeManager.GetEntitiesByPlayer(player)) {
+			if (Engine.QueryInterface(ent, IID_Foundation)) continue;
+			const cmpId = Engine.QueryInterface(ent, IID_Identity);
+			if (!cmpId || !cmpId.HasClass("CivCentre")) continue;
+			const fase = techsDe(ent).find(t => typeof t === "string" && t.indexOf("phase_") === 0 &&
+				typeof cmpTechMgr.CanResearch === "function" && cmpTechMgr.CanResearch(t));
+			if (!fase) continue;
+			// O CC com a fila mais curta: o ModernGUI escolhe assim (prepareNextPhase), e é o
+			// que põe a fase para andar mais cedo.
+			const t = tempoFila(ent);
+			if (!melhor || t < melhor.t) melhor = { ent: ent, tech: fase, t: t };
+		}
+		if (melhor) {
+			const custo = custoNo(melhor.ent, melhor.tech);
+			result.fase = { "cc": melhor.ent, "tech": melhor.tech, "custo": custo, "pronto": cabe(custo) };
+		}
+	}
+	return result;
+};
+
 GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 {
 	const result = { research: [] };
@@ -7478,6 +7564,10 @@ GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 	// PESQUISAR? E TEM COMO PAGAR?" logo abaixo).
 	const saldoPesquisa = {};
 	for (const r in res) saldoPesquisa[r] = res[r];
+	// O que o jogador mandou guardar (próxima fase, arma de cerco) não é dinheiro livre para
+	// a auto-pesquisa. Ver pudim_GetPlanoReserva.
+	const reservaP = (data && data.reserva) || {};
+	for (const r in reservaP) saldoPesquisa[r] = (saldoPesquisa[r] || 0) - (reservaP[r] || 0);
 
 	for (const ent of allEnts) {
 		if (Engine.QueryInterface(ent, IID_Foundation)) continue;
@@ -8001,6 +8091,7 @@ var pudim_exposedFunctions = {
   	"pudim_GetGuerreiros": 1,
   	"pudim_GetProductionBuildings": 1,
   	"pudim_GetSiegeGarrisonPlan": 1,
+  	"pudim_GetPlanoReserva": 1,
   	"pudim_GetScoutBorderTarget": 1,
   	"pudim_GetFarmBuildData": 1,
   	"pudim_GetPlayerKD": 1,

@@ -1843,8 +1843,115 @@ var g_PudimFarmDebugLastLog = 0;
 // criar, não para perder o que já pagou.
 var g_PudimTreinoPausado = false;
 
+// ── TRÊS ESTADOS: NORMAL → GUARDAR PARA CERCO → PAUSADO ───────────────────────────────
+//
+// O botão de pausa nasceu do relato "quero fazer arma de cerco e não dá, pq vai mais rápido
+// as unidades". Pausar resolve, mas para a produção inteira. Guardar resolve melhor: a
+// produção continua, e só o custo de UMA arma de cerco fica fora do alcance do treino
+// automático. Ideia do ModernGUI (reserva de recurso para item prioritário), reescrita.
+//
+//   0  treino normal
+//   1  guardar para cerco — reserva o custo de uma arma de cerco que você já pode treinar
+//   2  pausado — como antes: nada de treino automático
+const PUDIM_MODO_NORMAL = 0, PUDIM_MODO_CERCO = 1, PUDIM_MODO_PAUSA = 2;
+var g_PudimModoTreino = PUDIM_MODO_NORMAL;
+
+// O que está guardado agora: total por recurso e a lista do que o compõe. Recalculado a cada
+// PUDIM_RESERVA_INTERVALO por pudim_AtualizarReserva, lido pela auto-fila, pela
+// auto-pesquisa, pelo contra-treino e pelo tributo.
+var g_PudimGuardado = { total: {}, itens: [] };
+const PUDIM_RESERVA_INTERVALO = 2000;
+var g_PudimReservaAccum = PUDIM_RESERVA_INTERVALO;
+var g_PudimFaseMandadaEm = 0;   // anti-repetição da fase automática (latência de rede)
+// Edifícios cuja auto-fila NATIVA o próprio mod desligou (proporção, reserva, pausa). Sem
+// esta memória, no ciclo seguinte a auto-fila apagada parecia decisão do jogador.
+var g_PudimDesligadoPeloMod = new Map();   // ent -> instante em que o mod apagou
+// Edifícios que VOCÊ religou depois de o mod apagar: ficam como você deixou.
+var g_PudimReligadoPeloJogador = new Set();
+
+// Pesquisas que VOCÊ começou e cuja cadeia o mod continua (preenchido no passo da pesquisa
+// em cadeia; ver pudim_MarcarPesquisaDoJogador).
+var g_PudimCadeias = {};   // tech -> instante em que você a mandou
+function pudim_CadeiasAtivas() { return Object.keys(g_PudimCadeias); }
+
+function pudim_ReservaAtiva() {
+	const t = g_PudimGuardado.total;
+	for (const r in t) if (t[r] > 0) return true;
+	return false;
+}
+
+/** A arma de cerco que dá para treinar agora: aríete primeiro, senão a primeira que houver. */
+function pudim_CercoDisponivel() {
+	const lista = (typeof g_PudimUnitTodas !== "undefined" && g_PudimUnitTodas) || [];
+	// g_PudimUnitTodas já vem filtrada por requisito (AreRequirementsMet), então é o que
+	// dá para treinar de verdade — não o que o edifício sabe treinar algum dia.
+	const ram = lista.find(u => u.tpl && u.tpl.indexOf("siege_ram") !== -1);
+	if (ram) return ram.tpl;
+	const qualquer = lista.find(u => u.tpl && u.tpl.indexOf("/siege_") !== -1);
+	return qualquer ? qualquer.tpl : null;
+}
+
+/**
+ * Recalcula o que está guardado. Só LÊ: a pesquisa da fase automática sai de
+ * pudim_ProcessFaseAuto, abaixo da trava de espectador.
+ */
+function pudim_AtualizarReserva() {
+	const itens = [];
+	const faseReserva = Engine.ConfigDB_GetValue("user", "pudim.reserva.fase") === "true";
+	const faseAuto = Engine.ConfigDB_GetValue("user", "pudim.reserva.faseauto") === "true";
+	let plano = null;
+	try {
+		plano = Engine.GuiInterfaceCall("pudim_GetPlanoReserva",
+			{ "fase": faseReserva || faseAuto, "cadeias": pudim_CadeiasAtivas() });
+	} catch (e) {}
+	if (plano && plano.fase)
+		itens.push({ tipo: "fase", nome: plano.fase.tech, custo: plano.fase.custo,
+		             pronto: plano.fase.pronto, alvo: plano.fase.cc });
+	if (plano && plano.cadeia)
+		for (const c of plano.cadeia)
+			itens.push({ tipo: "cadeia", nome: c.tech, custo: c.custo, pronto: c.pronto, alvo: c.ent });
+	if (g_PudimModoTreino === PUDIM_MODO_CERCO) {
+		const tpl = pudim_CercoDisponivel();
+		if (tpl) {
+			let custo = {};
+			try {
+				const td = GetTemplateData(tpl);
+				if (td && td.cost) for (const r of ["food", "wood", "stone", "metal"])
+					if (td.cost[r] > 0) custo[r] = td.cost[r];
+			} catch (e) {}
+			itens.push({ tipo: "cerco", nome: tpl, custo: custo });
+		}
+	}
+	const total = {};
+	for (const it of itens)
+		for (const r in it.custo) total[r] = (total[r] || 0) + it.custo[r];
+	g_PudimGuardado = { total: total, itens: itens, fase: plano && plano.fase };
+	pudim_AtualizarBotaoPausa();
+}
+
+/** A fase sozinha, quando ligada e quando dá. Emite comando: roda abaixo da trava de espectador. */
+function pudim_ProcessFaseAuto() {
+	if (Engine.ConfigDB_GetValue("user", "pudim.reserva.faseauto") !== "true") return;
+	const f = g_PudimGuardado.fase;
+	if (!f || !f.pronto || !f.cc || !f.tech) return;
+	const agora = Date.now();
+	// A pesquisa só aparece na simulação um ou dois turnos depois; sem esta espera o mesmo
+	// pedido sairia duas vezes, e o segundo seria recusado com mensagem na tela.
+	if (agora - g_PudimFaseMandadaEm < 8000) return;
+	g_PudimFaseMandadaEm = agora;
+	// pushFront: o motor PAUSA o lote em andamento, sem perder o progresso, e começa a fase
+	// na hora (ProductionQueue.AddItem). É o que a sua tecla de "passar na frente" faz.
+	Engine.PostNetworkCommand({ "type": "research", "entity": f.cc, "template": f.tech,
+	                           "pushFront": true });
+	pudim_Log("INFO", "RESEARCH", "fase automatica: " + f.tech + " no CC " + f.cc);
+}
+
 function pudim_TogglePauseTrain() {
-	g_PudimTreinoPausado = !g_PudimTreinoPausado;
+	g_PudimModoTreino = (g_PudimModoTreino + 1) % 3;
+	g_PudimTreinoPausado = g_PudimModoTreino === PUDIM_MODO_PAUSA;
+	pudim_Log("INFO", "QUEUE", ["treino normal", "guardando para arma de cerco",
+		"treino PAUSADO"][g_PudimModoTreino] + " (escolha do jogador)");
+	g_PudimReservaAccum = PUDIM_RESERVA_INTERVALO;   // recalcula a reserva no próximo quadro
 	pudim_AtualizarBotaoPausa();
 
 	if (g_PudimTreinoPausado) {
@@ -1859,22 +1966,45 @@ function pudim_TogglePauseTrain() {
 			const off = ((d && d.buildings) || []).filter(b => b.autoqueue).map(b => b.ent);
 			if (off.length)
 				Engine.PostNetworkCommand({ "type": "autoqueue-off", "entities": off });
-			pudim_Log("INFO", "QUEUE", "treino PAUSADO pelo jogador; auto-fila desligada em " +
-				off.length + " edifício(s)");
+			// Lembrados como desligados PELO MOD: ao retomar, a auto-fila volta nesses, e
+			// ninguém confunde o apagão da pausa com decisão sua.
+			for (const e of off) g_PudimDesligadoPeloMod.set(e, Date.now());
+			pudim_Log("INFO", "QUEUE", "auto-fila desligada em " + off.length + " edifício(s)");
 		} catch (e) {
 			pudim_Log("WARN", "QUEUE", "treino pausado, mas a auto-fila do motor não pôde ser desligada");
 		}
-	} else {
-		pudim_Log("INFO", "QUEUE", "treino retomado pelo jogador");
 	}
+}
+
+/** Formata um custo curto: "300W 200M". */
+function pudim_CustoCurto(custo) {
+	const letra = { food: "F", wood: "W", stone: "S", metal: "M" };
+	return Object.keys(custo || {}).filter(r => custo[r] > 0)
+		.map(r => custo[r] + letra[r]).join(" ");
 }
 
 function pudim_AtualizarBotaoPausa() {
 	const lbl = Engine.TryGetGUIObjectByName("pudim_pauseTrainLabel");
-	if (lbl) try {
-		lbl.caption = g_PudimTreinoPausado ? "▶ Retomar treino" : "❚❚ Pausar treino";
-		lbl.textcolor = g_PudimTreinoPausado ? "255 190 120 255" : "255 255 255 255";
-	} catch (e) {}
+	const btn = Engine.TryGetGUIObjectByName("pudim_pauseTrainBtn");
+	const cercoItem = g_PudimGuardado.itens.find(i => i.tipo === "cerco");
+	const rotulo = [
+		"▶ Treino normal",
+		"◆ Guardar p/ cerco",
+		"❚❚ Treino pausado"][g_PudimModoTreino];
+	const cor = ["255 255 255 255", "150 220 255 255", "255 190 120 255"][g_PudimModoTreino];
+	if (lbl) try { lbl.caption = rotulo; lbl.textcolor = cor; } catch (e) {}
+	// A dica mostra O QUE está guardado, em números: sem isso "guardar" vira fé.
+	let dica = "Clique para alternar: treino normal → guardar para arma de cerco → pausado.";
+	if (g_PudimModoTreino === PUDIM_MODO_CERCO)
+		dica += cercoItem
+			? "\nGuardando " + pudim_CustoCurto(cercoItem.custo) + " para " +
+			  cercoItem.nome.split("/").pop() + ". A produção continua com o resto."
+			: "\nNenhuma arma de cerco disponível ainda (falta a oficina ou o requisito).";
+	const outros = g_PudimGuardado.itens.filter(i => i.tipo !== "cerco");
+	for (const it of outros)
+		dica += "\nReservado para " + it.nome + ": " + pudim_CustoCurto(it.custo) +
+			(it.pronto ? " (pronto)" : "");
+	if (btn) try { btn.tooltip = dica; btn.tooltip_style = "sessionToolTipBold"; } catch (e) {}
 }
 
 /**
@@ -2383,6 +2513,15 @@ function pudim_Tick(dt)
 	// Não enviar comandos de rede se for espectador (causaria OOS)
 	if (typeof g_IsObserver !== "undefined" && g_IsObserver) return;
 
+	// Reserva de recurso (fase, cerco, cadeia) e a fase automática. Abaixo da trava: a
+	// reserva só existe para os sistemas que gastam, e a fase automática manda comando.
+	g_PudimReservaAccum += dt;
+	if (g_PudimReservaAccum >= PUDIM_RESERVA_INTERVALO) {
+		g_PudimReservaAccum = 0;
+		try { pudim_Medir("AtualizarReserva", pudim_AtualizarReserva); } catch (e) {}
+		try { pudim_ProcessFaseAuto(); } catch (e) {}
+	}
+
 	// Balanceamento inicial de workers: a cada 1s até concluído
 	if (!g_PudimInitialBalanceDone && g_PudimAutoWorkEnabled)
 	{
@@ -2616,6 +2755,10 @@ function pudim_ProcessAutoQueue()
 				pudim_Log("DEBUG", "QUEUE", "treino em espera: " + g_PudimMadeiraReservada +
 					" de madeira reservados para campos de comida");
 		}
+		// O que você mandou guardar (arma de cerco, próxima fase, cadeia de pesquisa) também
+		// sai do dinheiro livre. Ver pudim_AtualizarReserva.
+		for (const r in g_PudimGuardado.total)
+			res[r] = Math.max(0, (+res[r] || 0) - (g_PudimGuardado.total[r] || 0));
 		// ── NÃO ENFILEIRAR O QUE NÃO PODE NASCER ────────────────────────────────────────
 		//
 		// Pedido de 15/09: "depois que a população atinge a população maxima, parar de
@@ -2731,13 +2874,38 @@ function pudim_ProcessAutoQueue()
 		// cada lote. Assim toda decisão passa pela proporção, sem cancelamento e sem
 		// desperdiçar o progresso de unidades pela metade.
 		const propAtiva = pudim_ProporcaoAtiva();
+		// Com reserva ativa vale o mesmo que com proporção: a auto-fila NATIVA repete lote e
+		// desconta recurso sozinha, sem passar por decisão nenhuma do mod — gastaria o que
+		// você mandou guardar. Então ela fica desligada e o mod semeia, já descontando.
+		const modSemeia = propAtiva || pudim_ReservaAtiva();
 
 		// Detectar desativações manuais e ativar apenas novos edifícios
 		const toEnable = [];
 		const toDisable = [];
+		// Acabou o motivo para o mod semear: quem você religou volta a ser tratado como antes.
+		if (!modSemeia) g_PudimReligadoPeloJogador.clear();
 		for (const b of buildings) {
+			if (b.autoqueue && g_PudimDesligadoPeloMod.has(b.ent) &&
+			    Date.now() - g_PudimDesligadoPeloMod.get(b.ent) > 5000) {
+				// O mod tinha apagado e ela está acesa: foi VOCÊ que religou. A ordem é sua —
+				// o mod não apaga de novo enquanto o motivo durar.
+				g_PudimDesligadoPeloMod.delete(b.ent);
+				g_PudimReligadoPeloJogador.add(b.ent);
+				pudim_Log("INFO", "QUEUE", "edifício " + b.ent +
+					" teve a auto-fila religada pelo jogador — o mod não mexe mais nela");
+				continue;
+			}
+			if (!b.autoqueue && g_PudimDesligadoPeloMod.has(b.ent)) {
+				// Quem apagou foi o MOD (proporção, reserva, pausa): não é decisão sua. Enquanto
+				// o motivo durar, fica apagada; acabou o motivo, volta a ligar.
+				if (!modSemeia) {
+					toEnable.push(b.ent);
+					g_PudimDesligadoPeloMod.delete(b.ent);
+				}
+				continue;
+			}
 			if (!b.autoqueue) {
-				if (b.alwaysQueue && propAtiva) {
+				if (b.alwaysQueue && modSemeia) {
 					// Proporção ativa: quem semeia é o mod, lote a lote. Não religar aqui.
 					g_PudimAutoQueueManagedByMod.add(b.ent);
 				} else if (b.alwaysQueue) {
@@ -2804,11 +2972,13 @@ function pudim_ProcessAutoQueue()
 					}
 				}
 				// Se está em UserDisabled (e não é alwaysQueue): ignorar completamente
-			} else if (propAtiva && g_PudimAutoQueueManagedByMod.has(b.ent)) {
-				// Estava ligada por nossa conta e a proporção entrou em cena: desliga, para o
-				// motor parar de repetir o último template por cima da escolha do jogador.
-				// Só mexemos no que NÓS ligamos — auto-fila que o jogador ligou é dele.
+			} else if (modSemeia && g_PudimAutoQueueManagedByMod.has(b.ent) &&
+			           !g_PudimReligadoPeloJogador.has(b.ent)) {
+				// Estava ligada por nossa conta e a proporção (ou a reserva) entrou em cena:
+				// desliga, para o motor parar de repetir o último template por cima da escolha
+				// do jogador. Só mexemos no que NÓS ligamos — auto-fila que o jogador ligou é dele.
 				toDisable.push(b.ent);
+				g_PudimDesligadoPeloMod.set(b.ent, Date.now());
 			} else {
 				// autoqueue=true: registrar como gerenciado
 				g_PudimAutoQueueManagedByMod.add(b.ent);
@@ -3200,6 +3370,8 @@ function pudim_ProcessAutoResearch()
 
 		const researchData = Engine.GuiInterfaceCall("pudim_GetAutoResearchData", {
 			blacklist: blacklistAtiva,
+			// O que está guardado (fase, cerco, cadeia) não é dinheiro para pesquisa de score.
+			reserva: g_PudimGuardado.total,
 			sentTechs: sentKeys,
 			// Prioridades de coleta: recurso com peso > 0 e recurso que voce quer, entao a
 			// tech que acelera a coleta dele deixa de esperar a Fase 2.
@@ -6395,6 +6567,9 @@ function pudim_RunCounterTrain()
 	// Guardar só a auto-fila deixaria o contra-treino repondo unidade e o botão não pausaria
 	// nada de fato — que é o mesmo buraco pelo qual o teto de população escapava.
 	if (g_PudimTreinoPausado) return;
+	// Com reserva ativa, quem treina é a auto-fila, que desconta o que está guardado. O
+	// contra-treino manda lote sem olhar custo nenhum — gastaria justamente a reserva.
+	if (pudim_ReservaAtiva()) return;
 
 	// A PROPORCAO DE UNIDADES TEM PRECEDENCIA ABSOLUTA.
 	//

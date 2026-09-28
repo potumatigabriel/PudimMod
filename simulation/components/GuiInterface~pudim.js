@@ -3820,6 +3820,24 @@ GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
     }
     return allies;
 };
+// ── QUARTÉIS DO JOGADOR, CONTANDO FUNDAÇÃO (barra de metas) ──────────────────────────────
+//
+// A referência das metas é o instante em que o quartel foi POSICIONADO (o comando construct
+// no replay), então a fundação conta. classCounts do TechnologyManager não serve: ele pula
+// fundação. A classe Barracks está em VisibleClasses de
+// template_structure_military_barracks.xml, e a fundação herda a Identity do prédio.
+// Só lê. `jogador` vem da GUI para quem assiste ver o jogador seguido.
+GuiInterface.prototype.pudim_ContarQuarteis = function(player, data) {
+	const quem = (data && data.jogador > 0) ? data.jogador : player;
+	const cmpRangeManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_RangeManager);
+	let n = 0;
+	for (const ent of cmpRangeManager.GetEntitiesByPlayer(quem) || []) {
+		const id = Engine.QueryInterface(ent, IID_Identity);
+		if (id && id.HasClass("Barracks")) ++n;
+	}
+	return n;
+};
+
 // ── FANTASMA DE OBRA NA ESPERA ───────────────────────────────────────────────────────────
 //
 // Você posiciona um prédio sem ter o recurso; o mod guarda a obra e deixa este fantasma no
@@ -8176,6 +8194,7 @@ GuiInterface.prototype.pudim_GetDropsiteFoundationData = function(player, data)
 
 var pudim_exposedFunctions = {
   	"pudim_GetAllyStats": 1,
+  	"pudim_ContarQuarteis": 1,
   	"pudim_CriarFantasma": 1,
   	"pudim_ApagarFantasma": 1,
  	"pudim_GetAutoHouseData": 1,

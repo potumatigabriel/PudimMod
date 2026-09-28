@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  PudimMod - Barra de metas
+
+  Pedido de 28/09: "veja os melhores marcos, como menor tempo pra atingir pop 100, pra chegar
+  na fase 3 e pra atingir a populacao maxima (200); deixar uma barra de metas, onde mostra a
+  proxima meta, e se esta perto ou longe de atingir, talvez com sistema de cores". E depois:
+  "quanto tempo e quanto de pop, quem atingiu pop 200 mais rapido tinha pra fazer o primeiro
+  e o segundo quartel".
+
+  Uma linha de texto com a proxima meta e uma barra de progresso por baixo; a lista inteira
+  vai na dica. A logica e os numeros estao em pudim_metas.js.
+
+  POSICAO: logo abaixo da barra do topo, a esquerda da coluna de pesquisas do jogo
+  (ResearchProgress.xml usa 100%-48 .. 100%-10, de y=40 para baixo) — para nao tampar os
+  icones de pesquisa. Some com o painel do mod aberto, como o indicador de obras.
+  Nao e ghost: precisa receber mouse para mostrar a dica.
+
+  A BARRA E EM PIXEL (4..224), como a do indicador de obras: obj.size.right de um "100%-x"
+  devolve o deslocamento, nao a largura. PUDIM_METAS_BAR_X1/X2 em pudim_metas.js batem com
+  estes numeros.
+-->
+<object name="pudimMetas" hidden="true" absolute="true" size="100%-280 40 100%-52 70" z="50"
+        type="image" sprite="color: 0 0 0 160" tooltip_style="sessionToolTipBold">
+  <object name="pudimMetasTxt" type="text" ghost="true" size="4 1 224 21"
+          font="sans-bold-12" text_align="left" text_valign="center" textcolor="235 235 235 255"/>
+  <object name="pudimMetasBarBg" type="image" ghost="true" size="4 22 224 27" sprite="color: 30 30 40 220"/>
+  <object name="pudimMetasBar" type="image" ghost="true" size="4 22 4 27" sprite="color: 60 190 80 230"/>
+</object>

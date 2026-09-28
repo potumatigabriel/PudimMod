@@ -273,7 +273,7 @@ check("a chave de debug é a que o painel realmente lê",
 // controle que não faz nada.
 // "Em algum lugar" = qualquer arquivo de sessão do mod: a da pesquisa em cadeia é lida no
 // gancho de addResearchToQueue, em session~pudim.js, e não no painel.
-const sessaoMod = ["session~pudim.js", "pudim_ally_bar.js"].map(f => {
+const sessaoMod = ["session~pudim.js", "pudim_ally_bar.js", "pudim_metas.js"].map(f => {
 	try { return fs.readFileSync(path.join(base, "gui", "session", f), "utf8"); } catch (e) { return ""; }
 }).join("\n");
 const semUso = lista.filter(o =>

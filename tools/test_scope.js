@@ -19,7 +19,8 @@ const ARQUIVOS = [
 	"simulation/components/GuiInterface~pudim.js",
 	"gui/session/pudim_panel.js",
 	"gui/session/pudim_ally_bar.js",
-	"gui/session/session~pudim.js"
+	"gui/session/session~pudim.js",
+	"gui/session/pudim_metas.js"
 ];
 
 // Globais do 0 A.D. e do JS que nunca são declarados no arquivo.
@@ -41,7 +42,10 @@ const GLOBAIS = new Set([
 	// Obra na espera (28/09), conferidos no public.zip da A28: placementSupport em
 	// gui/session/input.js, g_AutoFormation em gui/session/AutoFormation.js (usado por
 	// tryPlaceBuilding), g_SelectionPanels em gui/session/selection_panels.js.
-	"placementSupport", "g_AutoFormation", "g_SelectionPanels"
+	"placementSupport", "g_AutoFormation", "g_SelectionPanels",
+	// Barra de metas: g_InitAttributes e const de gui/session/session.js (A28), com
+	// settings.StartingResources/CheatsEnabled/Nomad — as mesmas chaves do mapSettings do replay.
+	"g_InitAttributes"
 ]);
 
 let fails = 0;

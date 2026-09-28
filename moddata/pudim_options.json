@@ -100,6 +100,14 @@
 			},
 			{
 				"type": "boolean",
+				"config": "pudim.metas.mostrar",
+				"label": "[color=\"120 220 255\"]Economia:[/color] Barra de metas (quartéis, pop 100, fases, pop 200)",
+				"tooltip": "Mostra no canto de cima a próxima meta da partida e se você está no ritmo: verde no ritmo, amarelo perto, vermelho atrasado. A referência é a mediana dos 20 jogadores que chegaram mais rápido a pop 200 nos replays multiplayer (1º quartel 3:07 com pop 40, 2º quartel 5:35 com pop 71, pop 100 aos 7:06, fase 2 aos 9:09, pop 200 aos 11:30, fase 3 aos 12:49). Também mostra o seu recorde, que é atualizado sozinho quando você bate um em partida com recurso inicial padrão. A lista completa aparece com o mouse em cima da barra.",
+				"label_en": "[color=\"120 220 255\"]Economy:[/color] Goals bar (barracks, pop 100, phases, pop 200)",
+				"tooltip_en": "Shows the next goal of the match at the top and whether you are on pace: green on pace, yellow close, red behind. The reference is the median of the 20 players who reached pop 200 fastest in the multiplayer replays (1st barracks 3:07 at pop 40, 2nd barracks 5:35 at pop 71, pop 100 at 7:06, phase 2 at 9:09, pop 200 at 11:30, phase 3 at 12:49). It also shows your record, which updates by itself when you beat one in a match with standard starting resources. Hover the bar for the full list."
+			},
+			{
+				"type": "boolean",
 				"config": "pudim.obra.espera",
 				"label": "[color=\"120 220 255\"]Economia:[/color] Posicionar prédio sem ter o recurso",
 				"tooltip": "O botão de construir deixa de ficar apagado quando só falta recurso. Você posiciona o prédio, fica um fantasma azulado no lugar, o custo é guardado (a fila automática não gasta ele) e o mod manda construir assim que juntar, com os construtores que você escolheu. Cancelar: clique direito no botão de treino do painel. A obra desiste sozinha depois de 3 minutos, se os construtores morrerem ou se o lugar for ocupado, sempre avisando. Muralha fica de fora.",

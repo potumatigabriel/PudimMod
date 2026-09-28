@@ -640,6 +640,7 @@ function pudim_TogglePanel()
 	// O indicador de obras some com o painel aberto e volta ao fechar — na hora, sem esperar
 	// o próximo segundo do tique.
 	try { pudim_AtualizarObras(); } catch (e) {}
+	try { pudim_AtualizarMetas(0); } catch (e) {}
 
 	if (g_PudimPanelOpen)
 	{
@@ -2921,6 +2922,16 @@ function pudim_Tick(dt)
 	{
 		g_PudimUnitAccum = 0;
 		try { pudim_Medir("AtualizarUnidades", pudim_AtualizarUnidades); } catch(e) {}
+	}
+
+	// Barra de metas (pudim_metas.js): só lê e desenha — e assistindo mostra as metas do
+	// jogador seguido. O recorde vai para o user.cfg, que é local e não passa pela rede.
+	g_PudimMetasAccum += dt;
+	if (g_PudimMetasAccum >= PUDIM_METAS_INTERVALO)
+	{
+		const passo = g_PudimMetasAccum;
+		g_PudimMetasAccum = 0;
+		try { pudim_Medir("AtualizarMetas", () => pudim_AtualizarMetas(passo)); } catch(e) {}
 	}
 
 	// Botão "Voltar ao Trabalho": só lê e desenha. Assistindo ele fica apagado sozinho — quem

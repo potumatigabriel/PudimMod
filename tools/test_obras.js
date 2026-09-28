@@ -293,5 +293,14 @@ check("o painel declara altura para todas as linhas",
 const largura = mPainel ? (+mPainel[1] - +mPainel[3]) : 0;
 check("a barra cabe na largura do painel", X2 <= largura, X2 + " de " + largura);
 
+// ── Com o painel do mod aberto, o indicador some (28/09) ──────────────────────────────
+// Relato: "fica ruim de ver as coisas, com o progresso das unidades atrás... ocultar os
+// progressos quando a barra estiver aberta". O indicador ficava por cima dos controles.
+console.log("\ncom o painel aberto");
+check("o indicador se esconde enquanto o painel estiver aberto, antes de consultar a simulação",
+	/if \(!painel\) return;\s*\n\s*if \(g_PudimPanelOpen\) \{ painel\.hidden = true; return; \}/.test(execP));
+check("abrir e fechar o painel atualiza o indicador na hora",
+	/panel\.hidden = !g_PudimPanelOpen;\s*\n\s*try \{ pudim_AtualizarObras\(\); \} catch \(e\) \{\}/.test(execP));
+
 console.log(fails === 0 ? "\nTODOS OS TESTES PASSARAM" : "\n" + fails + " TESTE(S) FALHARAM");
 process.exit(fails === 0 ? 0 : 1);

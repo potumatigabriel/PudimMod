@@ -637,6 +637,10 @@ function pudim_TogglePanel()
 	if (panel)
 		panel.hidden = !g_PudimPanelOpen;
 
+	// O indicador de obras some com o painel aberto e volta ao fechar — na hora, sem esperar
+	// o próximo segundo do tique.
+	try { pudim_AtualizarObras(); } catch (e) {}
+
 	if (g_PudimPanelOpen)
 	{
 		pudim_RefreshCombat();
@@ -2090,7 +2094,7 @@ function pudim_ProcessMercado() {
 const PUDIM_OBRA_ESPERA_MAX = 180000;
 const PUDIM_OBRA_INTERVALO = 1000;
 var g_PudimObrasEspera = [];   // { template, x, z, angle, actorSeed, entities, queued, pushFront, custo, fantasma, desde }
-var g_PudimObrasAccum = 0;
+var g_PudimObraEsperaAccum = 0;   // NÃO é o g_PudimObrasAccum do indicador de obras
 
 /** Espectador não posiciona obra nem religa botão. (Escrito assim, e não com a trava do
  *  tique, para o teste de multiplayer continuar achando A trava do tique.) */
@@ -2941,9 +2945,9 @@ function pudim_Tick(dt)
 		g_PudimMercadoAccum = 0;
 		try { pudim_ProcessMercado(); } catch (e) {}
 	}
-	g_PudimObrasAccum += dt;
-	if (g_PudimObrasAccum >= PUDIM_OBRA_INTERVALO) {
-		g_PudimObrasAccum = 0;
+	g_PudimObraEsperaAccum += dt;
+	if (g_PudimObraEsperaAccum >= PUDIM_OBRA_INTERVALO) {
+		g_PudimObraEsperaAccum = 0;
 		try { pudim_Medir("ProcessObrasEspera", pudim_ProcessObrasEspera); } catch (e) {}
 	}
 	g_PudimMercadoriasAccum += dt;
@@ -6317,6 +6321,12 @@ function pudim_AtualizarObras()
 {
 	const painel = Engine.TryGetGUIObjectByName("pudimObras");
 	if (!painel) return;
+
+	// Painel do mod aberto: o indicador fica POR CIMA dele e esconde os controles (relato de
+	// 28/09: "fica ruim de ver as coisas, com o progresso das unidades atrás... ocultar os
+	// progressos quando a barra estiver aberta"). Some enquanto o painel estiver aberto — e
+	// nem consulta a simulação, que não haveria onde mostrar.
+	if (g_PudimPanelOpen) { painel.hidden = true; return; }
 
 	// De quem são as obras: g_ViewedPlayer é a global do jogo para "quem estou vendo", e
 	// este mod já a usa em outra chamada de GuiInterface. Assistindo, é o jogador seguido;

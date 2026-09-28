@@ -96,9 +96,9 @@ pudim_patchApplyN("onTick", function(target, that, args)
 // ─── Ordens MANUAIS do jogador ────────────────────────────────────────────────
 
 /**
- * handleUnitAction(position, action) é o funil por onde passa TODA ordem que o jogador
- * dá às suas unidades (clique direito e botões de ação) — verificado em
- * gui/session/input.js:1303 do jogo, que resolve a seleção com g_Selection.toList().
+ * handleUnitAction(position, action) é o funil das ordens de clique direito e do minimapa
+ * — verificado em gui/session/input.js e minimap/MiniMap.js do jogo. NÃO é o de todas:
+ * construir e muralha saem de tryPlaceBuilding/tryPlaceWall, interceptados logo abaixo.
  *
  * Marcamos as unidades da seleção como "sob ordem do jogador". Enquanto estiverem
  * executando essa ordem, nenhum sistema do mod as toca. Quando ficarem ociosas, o mod
@@ -107,19 +107,60 @@ pudim_patchApplyN("onTick", function(target, that, args)
  * Sem isto o mod sobrepunha o comando do jogador: no replay 0013 foram 633 comandos
  * "gather" (contra 136 de um humano sem mod) — cada ordem nova zerando a anterior.
  */
+// ── FILA COM SHIFT ───────────────────────────────────────────────────────────────────
+//
+// Relato de 28/09: "quando dou ordens as unidades segurando shift, cria uma fila no 0ad, as
+// vezes o mod quando acaba a primeira ordem, já manda fazer outra coisa".
+//
+// MEDIDO em setembro: de 8.527 filas suas, o mod entrou em 29% antes de você mandar de novo.
+// As mais atingidas: construir+coletar (439), entregar+coletar (281), reparar+coletar (265).
+// E 29% das entradas chegaram DEPOIS dos 2 minutos de proteção — uma fila longa sobrevive ao
+// relógio, que contava do último clique.
+//
+// O motor garante que uma unidade com fila NUNCA fica ociosa entre uma ordem e a próxima
+// (UnitAI.FinishOrder processa a seguinte na hora; isIdle só vira verdadeiro com a fila
+// vazia). Então "enquanto tiver fila sua" é o mesmo que "até ficar ociosa" — e é isso que a
+// proteção passa a ser para ordem dada com shift, com um teto largo só como rede.
+//
+// A tecla é a mesma que o jogo lê em input.js: `session.queue` (fila) e
+// `session.pushorderfront` (executa agora e MANTÉM o resto da fila — também é fila).
+function pudim_MarcarOrdemDoJogador()
+{
+	if (typeof g_Selection === "undefined" || !g_Selection) return;
+	const now = Date.now();
+	let fila = false;
+	try {
+		fila = Engine.HotkeyIsPressed("session.queue") ||
+		       Engine.HotkeyIsPressed("session.pushorderfront");
+	} catch (e) {}
+	for (const ent of g_Selection.toList()) {
+		g_PudimPlayerOrders[ent] = now;
+		// Ordem SEM shift substitui a fila inteira da unidade: a fila antiga acabou.
+		if (fila) g_PudimPlayerQueued[ent] = now;
+		else delete g_PudimPlayerQueued[ent];
+	}
+}
+
 pudim_patchApplyN("handleUnitAction", function(target, that, args)
 {
-	try
-	{
-		if (typeof g_Selection !== "undefined" && g_Selection)
-		{
-			const now = Date.now();
-			for (const ent of g_Selection.toList())
-				g_PudimPlayerOrders[ent] = now;
-		}
-	}
-	catch (e) {}
+	try { pudim_MarcarOrdemDoJogador(); } catch (e) {}
+	return target.apply(that, args);
+});
 
+// ── CONSTRUIR TAMBÉM É ORDEM SUA ─────────────────────────────────────────────────────
+//
+// handleUnitAction NÃO é o funil de toda ordem, como dizia o comentário acima: posicionar um
+// prédio sai de tryPlaceBuilding, e uma muralha de tryPlaceWall, e as duas mandam o comando
+// direto (conferido em gui/session/input.js do motor). "Construir e, com shift, coletar" —
+// a fila mais atingida — começava sem registro nenhum.
+pudim_patchApplyN("tryPlaceBuilding", function(target, that, args)
+{
+	try { pudim_MarcarOrdemDoJogador(); } catch (e) {}
+	return target.apply(that, args);
+});
+pudim_patchApplyN("tryPlaceWall", function(target, that, args)
+{
+	try { pudim_MarcarOrdemDoJogador(); } catch (e) {}
 	return target.apply(that, args);
 });
 

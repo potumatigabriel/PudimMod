@@ -1342,7 +1342,15 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 			let count = 0;
 			for (const ent of candidates) {
 				if (count >= pullCount) break;
-				
+				// UNIDADE SUA NÃO É CANDIDATA. `activeGatherers` é montado ANTES da checagem
+				// de ordem do jogador — de propósito, porque a cota tem de contar quem coleta
+				// por ordem sua. Mas puxar sai da mesma lista, e ninguém tirava as suas dela.
+				//
+				// MEDIDO em setembro: das 1.642 vezes em que o auto-trabalho entrou numa fila
+				// sua, 1.242 foram com população 140+, a faixa em que só este rebalanceamento
+				// roda. Era ele que arrancava da fila quem você tinha mandado coletar.
+				if (pudimSkipUnit(ent, Engine.QueryInterface(ent, IID_UnitAI))) continue;
+
 				const id = Engine.QueryInterface(ent, IID_Identity);
 				if (id && (id.HasClass("CitizenSoldier") || id.HasClass("FastMoving"))) {
 					const cmpPos2 = Engine.QueryInterface(ent, IID_Position);
@@ -4810,6 +4818,8 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 	// Quem o painel marcou como intocável agora (abertura recém-despachada, construtor a
 	// caminho de outra obra). Mesmo campo que o auto-trabalho já recebia.
 	const protectedHouseIds = new Set(((data && data.protectedIds) || []).map(Number));
+	// Filas suas: 378 das entradas do mod nas suas filas em setembro foram de construtor.
+	const houseOrdered = new Set(((data && data.playerOrdered) || []).map(Number));
 
 	for (const ent of allEnts) {
 		const cmpBuilder = Engine.QueryInterface(ent, IID_Builder);
@@ -4836,6 +4846,9 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 		if (protectedHouseIds.has(ent)) continue;
 
 		const cmpUnitAI = Engine.QueryInterface(ent, IID_UnitAI);
+		// Ordem sua em andamento (inclusive fila com shift) não vira construtor de casa.
+		// Mesma regra do auto-trabalho: ocupada com ordem sua, intocável; ociosa, livre.
+		if (houseOrdered.has(ent) && cmpUnitAI && !cmpUnitAI.IsIdle()) continue;
 		const _ord0ah = cmpUnitAI && cmpUnitAI.orderQueue && cmpUnitAI.orderQueue.length > 0 ? cmpUnitAI.orderQueue[0] : null;
 		if (_ord0ah && _ord0ah.type === "Repair") continue; // PROTEGE QUEM ESTÁ CONSTRUINDO
 
@@ -6708,8 +6721,13 @@ GuiInterface.prototype.pudim_GetSmartDropsiteData = function(player, data)
 	const farFoodWorkers = []; // IDs dos workers de frutas longe
 	let builderEnt = null;
 
+	// Ordem sua — inclusive fila com shift — não vira construtor de armazém nem é mandada
+	// para perto do armazém novo. Este laço só olha quem tem ordem (coletando), então toda
+	// unidade sua aqui está ocupada com ela: basta pular.
+	const dropOrdered = new Set(((data && data.playerOrdered) || []).map(Number));
 	for (const ent of allEnts) {
 		if (protectedIds.has(ent)) continue; // recém-despachado — não vira builder nem far-worker
+		if (dropOrdered.has(ent)) continue;
 		const cmpUnitAI = Engine.QueryInterface(ent, IID_UnitAI);
 		if (!cmpUnitAI || !cmpUnitAI.orderQueue || cmpUnitAI.orderQueue.length === 0) continue;
 		const ord = cmpUnitAI.orderQueue[0];

@@ -1797,11 +1797,25 @@ function pudim_GetProtectedBuilderIds() {
  */
 var g_PudimPlayerOrders = {};
 const PUDIM_PLAYER_ORDER_PROTECTION = 120000; // 2 min
+// Unidades com FILA sua (ordem dada com shift). A proteção delas dura até a unidade ficar
+// ociosa — o que, pelo motor, só acontece quando a fila acaba. Os 10 minutos são só a rede
+// de segurança para uma unidade que nunca fique ociosa (coletando para sempre). Ver
+// "FILA COM SHIFT" em session~pudim.js.
+var g_PudimPlayerQueued = {};
+const PUDIM_PLAYER_QUEUE_PROTECTION = 600000; // 10 min
 function pudim_GetPlayerOrderedIds() {
-	const cutoff = Date.now() - PUDIM_PLAYER_ORDER_PROTECTION;
+	const agora = Date.now();
+	const cutoff = agora - PUDIM_PLAYER_ORDER_PROTECTION;
+	const cutoffFila = agora - PUDIM_PLAYER_QUEUE_PROTECTION;
 	const ids = [];
 	for (const id in g_PudimPlayerOrders) {
-		if (g_PudimPlayerOrders[id] < cutoff) { delete g_PudimPlayerOrders[id]; continue; }
+		// Por existência, não por verdadeiro/falso: uma marca no instante 0 é marca.
+		const emFila = g_PudimPlayerQueued[id] !== undefined && g_PudimPlayerQueued[id] >= cutoffFila;
+		if (g_PudimPlayerOrders[id] < cutoff && !emFila) {
+			delete g_PudimPlayerOrders[id];
+			delete g_PudimPlayerQueued[id];
+			continue;
+		}
 		ids.push(+id);
 	}
 	return ids;
@@ -3519,7 +3533,8 @@ function pudim_ProcessAdvancedAI()
 			// na galinha) não pode virar construtor de casa — ver a nota na simulação.
 			const houseData = Engine.GuiInterfaceCall("pudim_GetAutoHouseData", {
 				threshold: g_PudimAutoHouseThreshold,
-				protectedIds: pudim_GetProtectedBuilderIds()
+				protectedIds: pudim_GetProtectedBuilderIds(),
+				playerOrdered: pudim_GetPlayerOrderedIds()
 			});
 			if (houseData && houseData.productionBuildingCount !== undefined)
 				g_PudimLastHouseProdCount = houseData.productionBuildingCount;
@@ -3618,7 +3633,10 @@ function pudim_ProcessAdvancedAI()
 	    _nowDrop - g_PudimLastDropsiteTime > 5000) {
 		g_PudimLastDropsiteTime = _nowDrop;
 		try {
-			const dropsiteData = Engine.GuiInterfaceCall("pudim_GetSmartDropsiteData", { protectedIds: pudim_GetProtectedBuilderIds() });
+			const dropsiteData = Engine.GuiInterfaceCall("pudim_GetSmartDropsiteData", {
+				protectedIds: pudim_GetProtectedBuilderIds(),
+				playerOrdered: pudim_GetPlayerOrderedIds()
+			});
 			const dbg = (dropsiteData && dropsiteData._dbg) ? dropsiteData._dbg : {};
 
 			if (dropsiteData && dropsiteData.action === "build" &&

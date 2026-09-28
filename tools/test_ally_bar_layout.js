@@ -249,5 +249,42 @@ check("e duas colunas cabem na tela de 1707px do jogador",
 check("com o layout largo elas NÃO caberiam — o compacto não é enfeite",
 	2 * LARGA + GAP + 2 * MARGEM > 1707);
 
+// ── MEDIR EM VEZ DE CONTAR LETRA (28/09) ───────────────────────────────────────────────
+// A regua acima (9 px/letra) continua valendo como plano B. Com getPreferredTextSize — que
+// o proprio jogo usa em resizeGUIObjectToCaption — o nick e medido: comeca inteiro e so
+// perde letra enquanto nao couber.
+check("a barra mede o nome com a funcao do jogo, quando ela existe",
+	/typeof nameObj\.getPreferredTextSize === "function"/.test(js) &&
+	/nameObj\.getPreferredTextSize\(\)\.width > largura/.test(js));
+check("e parte do nick INTEIRO, nao do ja cortado",
+	/let n = nickInteiro;/.test(js));
+check("a largura e a do campo do layout em uso (largo ou compacto)",
+	/const L = compacto \? PUDIM_LAYOUT_COMPACTO : PUDIM_LAYOUT_LARGO;\s*\n?\s*const largura = L\.Name\[1\] - L\.Name\[0\];/.test(js));
+check("se a medida falhar, volta ao corte fixo",
+	/nameObj\.caption = montarNome\(nick\);   \/\/ medida falhou: corte fixo/.test(js));
+
+// A regra espelhada, com um objeto de texto falso que mede o texto VISIVEL (sem as tags de
+// cor, como o motor): letra fina vale 5 px, o resto 9.
+function medir(txt) {
+	const visivel = txt.replace(/\[\/?color[^\]]*\]/g, "");
+	let w = 0;
+	for (const c of visivel) w += /[iljt1I.]/.test(c) ? 5 : 9;
+	return w;
+}
+function ajustar(nick, largura, montar) {
+	let n = nick, cap = montar(n), voltas = 0;
+	while (n.length > 3 && medir(cap) > largura && voltas++ < 40) {
+		n = n.slice(0, n.endsWith("~") ? -2 : -1) + "~";
+		cap = montar(n);
+	}
+	return { n: n, w: medir(cap) };
+}
+const montar = n => "T1 " + n + '  [color="100 200 140"]II[/color]';
+const fino = ajustar("illililliltill", 175, montar);
+check("nick de letras finas cabe INTEIRO — a regua de 9 px o cortaria", fino.n === "illililliltill", fino.n);
+const nickGordo = ajustar("WWWWWWWWWWWWWWWWWW", 175, montar);
+check("nick largo e cortado ate caber", nickGordo.w <= 175 && nickGordo.n.endsWith("~"), JSON.stringify(nickGordo));
+check("e nunca vira nada: sobra ao menos o comeco", nickGordo.n.length >= 3);
+
 console.log(fails === 0 ? "\nTODOS OS TESTES PASSARAM" : "\n" + fails + " TESTE(S) FALHARAM");
 process.exit(fails === 0 ? 0 : 1);

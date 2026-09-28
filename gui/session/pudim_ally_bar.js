@@ -489,17 +489,46 @@ function pudim_UpdateAllyBar() {
         // Ver o comentario de larguras em 03_pudim_ally_bar.xml.
         const nickMax = compacto ? PUDIM_NICK_MAX_COMPACTO
                                  : (observando ? PUDIM_NICK_MAX_OBS : PUDIM_NICK_MAX);
+        const nickInteiro = nick;
         if (nick.length > nickMax) nick = nick.slice(0, nickMax - 1) + "~";
         const phaseLabel = PUDIM_PHASE_LABELS[d.phase] || "";
         const phaseColor = PUDIM_PHASE_COLORS[d.phase] || "160 160 160";
+        const montarNome = n => prefix + n + "  [color=\"" + phaseColor + "\"]" + phaseLabel + "[/color]";
 
         if (nameObj) {
             // A linha de total não tem nick nem fase: ela é a soma do bloco, e o rótulo já
             // diz de qual equipe e de quantos jogadores.
             nameObj.caption = d.isTotal
                 ? "[color=\"255 235 150\"]" + d.name + "[/color]"
-                : prefix + nick + "  [color=\"" + phaseColor + "\"]" + phaseLabel + "[/color]";
+                : montarNome(nick);
             nameObj.textcolor = d.isTotal ? "255 235 150 255" : colorStr;
+
+            // ── MEDIR EM VEZ DE CONTAR LETRA ─────────────────────────────────────────────
+            //
+            // O corte por número fixo de letras vinha de uma régua conservadora (9 px por
+            // letra em sans-bold-14), porque medir fonte por captura de tela seria chute. Mas
+            // "W" e "i" contam igual nela, e nick de letras finas era cortado sem precisar.
+            //
+            // O próprio jogo mede: getPreferredTextSize() devolve {width, height} do texto
+            // renderizado (gui/common/functions_utility.js, resizeGUIObjectToCaption — as
+            // tags de cor não contam, só o que aparece). Ideia vista no ModernGUI
+            // (truncateToFit), reescrita. Começa do nick INTEIRO e só tira letra enquanto
+            // não couber no campo. Sem a função, fica o corte fixo de antes.
+            if (!d.isTotal && typeof nameObj.getPreferredTextSize === "function") {
+                const L = compacto ? PUDIM_LAYOUT_COMPACTO : PUDIM_LAYOUT_LARGO;
+                const largura = L.Name[1] - L.Name[0];
+                try {
+                    let n = nickInteiro;
+                    nameObj.caption = montarNome(n);
+                    let voltas = 0;
+                    while (n.length > 3 && nameObj.getPreferredTextSize().width > largura && voltas++ < 40) {
+                        n = n.slice(0, n.endsWith("~") ? -2 : -1) + "~";
+                        nameObj.caption = montarNome(n);
+                    }
+                } catch (e) {
+                    nameObj.caption = montarNome(nick);   // medida falhou: corte fixo
+                }
+            }
         }
         if (popObj) {
             // Mesmo formato da barra superior do jogo: usados/teto-atual (maximo).

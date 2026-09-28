@@ -1952,6 +1952,64 @@ function pudim_ProcessFaseAuto() {
 	pudim_Log("INFO", "RESEARCH", "fase automatica: " + f.tech + " no CC " + f.cc);
 }
 
+// ─── Tributo automático para aliado ───────────────────────────────────────────────────
+//
+// Ideia do ModernGUI (PanelScripts.helpAlliesTribute), reescrita — o repositório deles não
+// tem licença. Desligado por padrão: dar recurso é decisão sua.
+//
+// A regra é conservadora de propósito:
+//   • só o que SOBRA: você sempre fica com PUDIM_TRIBUTO_GUARDA de cada recurso, e o que
+//     está reservado (fase, cerco, cadeia) nem entra na conta;
+//   • só para quem PRECISA: aliado abaixo de PUDIM_TRIBUTO_CARENCIA, o mais necessitado;
+//   • aos poucos: múltiplos de 100, no máximo PUDIM_TRIBUTO_MAX, um envio por ciclo e uma
+//     espera por recurso — ninguém esvazia o banco num clique errado de opção.
+//
+// O comando é o do jogo base: {"type": "tribute", "player", "amounts"} → Commands.js →
+// Player.TributeResource, que exige quantidade inteira e os dois jogadores ativos.
+const PUDIM_TRIBUTO_GUARDA = 1000;
+const PUDIM_TRIBUTO_CARENCIA = 300;
+const PUDIM_TRIBUTO_MAX = 500;
+const PUDIM_TRIBUTO_INTERVALO = 10000;
+const PUDIM_TRIBUTO_ESPERA_RECURSO = 20000;
+var g_PudimTributoAccum = 0;
+var g_PudimTributoUltimo = {};   // recurso -> instante do último envio
+
+function pudim_EscolherTributo(eu, aliados, guardado, agora, ultimo) {
+	for (const r of ["food", "wood", "stone", "metal"]) {
+		if (agora - (ultimo[r] || 0) < PUDIM_TRIBUTO_ESPERA_RECURSO) continue;
+		const livre = Math.floor(((eu.res || {})[r] || 0) - ((guardado || {})[r] || 0));
+		if (livre <= PUDIM_TRIBUTO_GUARDA) continue;
+		let alvo = null;
+		for (const a of aliados) {
+			const v = (a.res || {})[r] || 0;
+			if (v < PUDIM_TRIBUTO_CARENCIA && (!alvo || v < alvo.v)) alvo = { id: a.id, v: v };
+		}
+		if (!alvo) continue;
+		const qtd = Math.min(PUDIM_TRIBUTO_MAX, Math.floor((livre - PUDIM_TRIBUTO_GUARDA) / 100) * 100);
+		if (qtd < 100) continue;
+		return { recurso: r, qtd: qtd, para: alvo.id };
+	}
+	return null;
+}
+
+/** Manda o tributo, quando ligado e quando há sobra. Emite comando. */
+function pudim_ProcessTributo() {
+	if (Engine.ConfigDB_GetValue("user", "pudim.tributo.auto") !== "true") return;
+	let todos;
+	try { todos = Engine.GuiInterfaceCall("pudim_GetAllyStats", {}); } catch (e) { return; }
+	if (!Array.isArray(todos)) return;
+	const eu = todos.find(a => a && a.isSelf);
+	if (!eu) return;
+	const aliados = todos.filter(a => a && !a.isSelf && a.ativo !== false);
+	const agora = Date.now();
+	const t = pudim_EscolherTributo(eu, aliados, g_PudimGuardado.total, agora, g_PudimTributoUltimo);
+	if (!t) return;
+	g_PudimTributoUltimo[t.recurso] = agora;
+	Engine.PostNetworkCommand({ "type": "tribute", "player": t.para,
+	                           "amounts": { [t.recurso]: t.qtd } });
+	pudim_Log("INFO", "TRIBUTO", t.qtd + " de " + t.recurso + " para o jogador " + t.para);
+}
+
 // Anti-repetição por tecnologia: a pesquisa só aparece na simulação um ou dois turnos
 // depois, e um segundo pedido igual seria recusado pelo motor com mensagem na tela.
 var g_PudimCadeiaMandadaEm = {};
@@ -2546,6 +2604,11 @@ function pudim_Tick(dt)
 		try { pudim_Medir("AtualizarReserva", pudim_AtualizarReserva); } catch (e) {}
 		try { pudim_ProcessFaseAuto(); } catch (e) {}
 		try { pudim_ProcessCadeias(); } catch (e) {}
+	}
+	g_PudimTributoAccum += dt;
+	if (g_PudimTributoAccum >= PUDIM_TRIBUTO_INTERVALO) {
+		g_PudimTributoAccum = 0;
+		try { pudim_ProcessTributo(); } catch (e) {}
 	}
 
 	// Balanceamento inicial de workers: a cada 1s até concluído

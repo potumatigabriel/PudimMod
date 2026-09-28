@@ -100,6 +100,14 @@
 			},
 			{
 				"type": "boolean",
+				"config": "pudim.tributo.auto",
+				"label": "[color=\"120 220 255\"]Economia:[/color] Ajudar aliados com o que sobra (tributo)",
+				"tooltip": "Quando você tem mais de 1000 de um recurso e um aliado está com menos de 300 dele, o mod manda uma parte da sobra para o mais necessitado: múltiplos de 100, no máximo 500 por vez, um envio a cada 10 segundos e no máximo um por recurso a cada 20. Você sempre fica com 1000 de cada, e o que estiver reservado (fase, arma de cerco, cadeia de pesquisa) nunca é enviado. Desligado por padrão.",
+				"label_en": "[color=\"120 220 255\"]Economy:[/color] Help allies with surplus (tribute)",
+				"tooltip_en": "When you have more than 1000 of a resource and an ally has less than 300 of it, the mod sends part of your surplus to the neediest ally: multiples of 100, at most 500 at a time, one tribute every 10 seconds and at most one per resource every 20. You always keep 1000 of each, and anything reserved (phase, siege weapon, research chain) is never sent. Off by default."
+			},
+			{
+				"type": "boolean",
 				"config": "pudim.autowork.enabled",
 				"label": "[color=\"120 220 255\"]Economia:[/color] Auto-Trabalho ativo ao iniciar a partida",
 				"tooltip": "Começa a partida já enviando cidadão ocioso para coletar. Se desligar, o Auto-Trabalho continua existindo no painel; ele só não vem ligado sozinho.",

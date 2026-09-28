@@ -130,7 +130,11 @@ const VANILLA = new Set(["attack", "autoqueue-on", "autoqueue-off", "barter", "c
 	"construct-wall",
 	"delete-entities", "garrison", "gather", "gather-near-position", "repair", "research",
 	"stop", "stop-production", "train", "unload", "walk", "returnresource", "formation",
-	"promote", "set-rallypoint", "unload-all"]);
+	"promote", "set-rallypoint", "unload-all",
+	// tribute: tratado em simulation/helpers/Commands.js do jogo BASE
+	// ("tribute": function(player, cmd, data) → cmpPlayer.TributeResource), igual em todo
+	// cliente. Entrou com o tributo automático, em 28/09.
+	"tribute"]);
 const guiFiles = listarJs(path.join(RAIZ, "gui"));
 const tiposUsados = new Set();
 for (const f of guiFiles) {

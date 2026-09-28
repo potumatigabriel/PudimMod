@@ -3648,6 +3648,9 @@ GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
                 // e todos os nomes da barra ficam iguais.
                 "color": cmpAlly.GetColor ? cmpAlly.GetColor() : null,
                 "isSelf": i === player,
+                // Derrotado não recebe tributo (o motor recusa em Player.TributeResource);
+                // o tributo automático pula direto, sem gastar a vez.
+                "ativo": cmpAlly.IsActive ? cmpAlly.IsActive() : true,
                 "popCount": cmpAlly.GetPopulationCount(),
                 "popLimit": cmpAlly.GetPopulationLimit(),
                 "popMax": cmpAlly.GetMaxPopulation(),

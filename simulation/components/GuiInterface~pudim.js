@@ -3894,6 +3894,93 @@ GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
     }
     return allies;
 };
+// ── REFORÇO NA CASA QUANDO A POPULAÇÃO APERTA (28/09) ──────────────────────────────────
+//
+// Pedido: "se tiver risco de o limite populacional por falta de casas atrapalhar fazer mais
+// unidades, envie mais construtores pra agilizar a construção". O painel diz quando está
+// apertado (lote parado por população, ou 1 vaga ou menos); aqui se escolhe a casa em obra
+// MAIS ADIANTADA — a que libera vaga primeiro — e quem vai ajudar, até somar
+// PUDIM_CASA_REFORCO_MAX construtores nela. Só lê: quem manda a ordem é o painel.
+//
+// Ajudante: sabe erguer casa, está a até PUDIM_CASA_REFORCO_RAIO da obra, não está com
+// ordem sua em andamento, não está construindo outra coisa, não está protegido. Os MAIS
+// PERTO primeiro (casa sobe rápido). `volta` é onde ele estava colhendo, para o painel
+// enfileirar o retorno assim que a casa subir.
+const PUDIM_CASA_REFORCO_MAX = 5;
+const PUDIM_CASA_REFORCO_RAIO = 80;
+GuiInterface.prototype.pudim_GetReforcoCasa = function(player, data) {
+	const cmpRangeManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_RangeManager);
+	const cmpPlayer = QueryPlayerIDInterface(player, IID_Player);
+	if (!cmpPlayer) return null;
+	const ents = cmpRangeManager.GetEntitiesByPlayer(player) || [];
+	// Apertado = 1 vaga ou menos, OU algum lote parado esperando população (neededSlots,
+	// Trainer.Item.GetBasicInfo) — com a auto-fila ligada ou não, lote seu ou do mod.
+	if (cmpPlayer.GetPopulationLimit() >= cmpPlayer.GetMaxPopulation()) return null;
+	let apertado = cmpPlayer.GetPopulationLimit() - cmpPlayer.GetPopulationCount() <= 1;
+	for (const ent of ents) {
+		if (apertado) break;
+		const pq = Engine.QueryInterface(ent, IID_ProductionQueue);
+		const fila = pq && pq.GetQueue();
+		if (fila && fila.length && (fila[0].neededSlots || 0) > 0) apertado = true;
+	}
+	if (!apertado) return null;
+	let alvo = null;
+	for (const ent of ents) {
+		const id = Engine.QueryInterface(ent, IID_Identity);
+		const cf = Engine.QueryInterface(ent, IID_Foundation);
+		if (!id || !cf || !id.HasClass("House")) continue;
+		const p = Engine.QueryInterface(ent, IID_Position);
+		if (!p || !p.IsInWorld()) continue;
+		const prog = cf.GetBuildProgress();
+		if (!alvo || prog > alvo.prog) {
+			const q = p.GetPosition2D();
+			alvo = { "ent": ent, "prog": prog, "nb": cf.GetNumBuilders(), "x": q.x, "z": q.y };
+		}
+	}
+	if (!alvo) return null;
+	const falta = PUDIM_CASA_REFORCO_MAX - alvo.nb;
+	const out = { "alvo": alvo.ent, "progresso": Math.round(alvo.prog * 100), "construtores": alvo.nb, "ajudantes": [] };
+	if (falta <= 0) return out;
+	const protegidos = new Set(((data && data.protectedIds) || []).map(Number));
+	const doJogador = new Set(((data && data.playerOrdered) || []).map(Number));
+	const cand = [];
+	for (const ent of ents) {
+		if (protegidos.has(ent)) continue;
+		const cmpB = Engine.QueryInterface(ent, IID_Builder);
+		if (!cmpB) continue;
+		let fazCasa = false;
+		for (const tpl of cmpB.GetEntitiesList())
+			if (tpl.indexOf("house") !== -1 && tpl.indexOf("storehouse") === -1 && tpl.indexOf("farmhouse") === -1) { fazCasa = true; break; }
+		if (!fazCasa) continue;
+		const ai = Engine.QueryInterface(ent, IID_UnitAI);
+		if (!ai) continue;
+		const ocioso = ai.IsIdle();
+		if (doJogador.has(ent) && !ocioso) continue;
+		const o = ai.orderQueue && ai.orderQueue[0];
+		if (o && o.type !== "Gather" && o.type !== "GatherNearPosition") continue;   // construindo, andando, lutando
+		const p = Engine.QueryInterface(ent, IID_Position);
+		if (!p || !p.IsInWorld()) continue;
+		const q = p.GetPosition2D();
+		const dx = q.x - alvo.x, dz = q.y - alvo.z;
+		const d2 = dx * dx + dz * dz;
+		if (d2 > PUDIM_CASA_REFORCO_RAIO * PUDIM_CASA_REFORCO_RAIO) continue;
+		// De volta para ONDE ESTAVA: o mesmo alvo, ou a mesma posição e tipo de recurso.
+		let volta = null;
+		if (o && o.type === "Gather" && o.data && o.data.target)
+			volta = { "alvo": o.data.target };
+		else if (o && o.type === "GatherNearPosition" && o.data && typeof o.data.x === "number" && o.data.type)
+			volta = { "x": o.data.x, "z": o.data.z, "tipo": o.data.type };
+		cand.push({ "id": ent, "d2": d2, "volta": volta });
+	}
+	// Só distância. Pedido de 28/09: "como casa é rápido, pega os construtores pra ajudar
+	// mais perto que tiver, e depois devolve eles pra onde estavam" — o ajudante perto
+	// chega logo, e a volta em fila devolve cada um ao que fazia.
+	cand.sort((a, b) => a.d2 - b.d2);
+	for (const c of cand.slice(0, falta))
+		out.ajudantes.push({ "id": c.id, "volta": c.volta });
+	return out;
+};
+
 // ── QUARTÉIS DO JOGADOR, CONTANDO FUNDAÇÃO (barra de metas) ──────────────────────────────
 //
 // A referência das metas é o instante em que o quartel foi POSICIONADO (o comando construct
@@ -5343,9 +5430,17 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 		const db = (b.x - builderCentroid.x) ** 2 + (b.y - builderCentroid.z) ** 2;
 		return da - db;
 	});
+	//
+	// A JANELA CAIU DE 100 PARA 40 (28/09). Pedido: "sempre fazer casas perto do construtor
+	// que for selecionado, pra que ele não perca tempo andando pelo mapa". Com 100, a casa
+	// encostava numa vizinha a até 100 do construtor — e é daí que saíam os "and=95" e
+	// "and=96" do log (ele andou 95). 40 são ~4 s a pé (9 m/s): ainda agrupa quando há casa
+	// perto; quando não há, a casa nasce ao lado dele (logo abaixo). As travas de rota de
+	// coleta, bolsão e cinturão da fazenda continuam valendo.
+	const PUDIM_CASA_PERTO_CONSTRUTOR = 40;
 	for (const house of sortedHouses) {
 		const hdx = house.x - builderCentroid.x, hdz = house.y - builderCentroid.z;
-		if (hdx*hdx + hdz*hdz > 100*100) break; // lista ordenada: daqui pra frente só piora
+		if (hdx*hdx + hdz*hdz > PUDIM_CASA_PERTO_CONSTRUTOR * PUDIM_CASA_PERTO_CONSTRUTOR) break; // lista ordenada: daqui pra frente só piora
 		// Offset 20 units para evitar sobreposição (casa gaul ~20 world units de footprint)
 		for (let i = 0; i < PUDIM_CASA_ANEL_DIRECOES; i++) {
 			const angle = (i * 2 * Math.PI) / PUDIM_CASA_ANEL_DIRECOES;
@@ -8362,6 +8457,7 @@ GuiInterface.prototype.pudim_GetDropsiteFoundationData = function(player, data)
 var pudim_exposedFunctions = {
   	"pudim_GetAllyStats": 1,
   	"pudim_ContarQuarteis": 1,
+  	"pudim_GetReforcoCasa": 1,
   	"pudim_CriarFantasma": 1,
   	"pudim_ApagarFantasma": 1,
  	"pudim_GetAutoHouseData": 1,

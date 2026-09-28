@@ -132,9 +132,11 @@ check("e sem nunca encher, nenhum disparo — o gatilho e da borda, nao do estad
 // ── O saldo: cada lote semeado desconta as vagas ───────────────────────────────────────
 check("as vagas viraram saldo, descontado a cada lote",
 	/const gastaVagas = function\(tpl, n\)/.test(execP) &&
-	/vagasPop = Math\.max\(0, vagasPop - custo \* n\);/.test(execP));
+	/vagasPop = Math\.max\(0, vagasPop - pudim_CustoPopulacao\(tpl\) \* n\);/.test(execP));
+// Desde 28/09 a conta do custo mora em pudim_CustoPopulacao, que o lote "parado por
+// população" também usa.
 check("pelo custo de populacao do template, nao por 1 fixo",
-	/td\.cost && td\.cost\.population > 0\) custo = td\.cost\.population;/.test(execP));
+	/function pudim_CustoPopulacao\(tpl\)[\s\S]{0,200}if \(td && td\.cost && td\.cost\.population > 0\) return td\.cost\.population;/.test(execP));
 check("e os TRES caminhos que semeiam descontam",
 	(execP.match(/gastaVagas\((tplDesejado, lote|tpl, desiredCount|template, affordable)\);/g) || []).length === 3,
 	(execP.match(/gastaVagas\(/g) || []).length - 1 + " chamada(s)");

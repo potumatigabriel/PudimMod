@@ -1684,6 +1684,7 @@ const PUDIM_PRIORIDADE = {
 	"pudim_ProcessAdvancedAI:walk": PUDIM_PRIO_DEFESA,
 	"pudim_ProcessAdvancedAI:garrison": PUDIM_PRIO_DEFESA,
 	"pudim_ProcessAdvancedAI": PUDIM_PRIO_OBRA,
+	"pudim_ProcessReforcoCasa": PUDIM_PRIO_OBRA,
 	"pudim_ProcessDropsiteFoundations:repair": PUDIM_PRIO_OBRA,
 	"pudim_ProcessFarms:construct": PUDIM_PRIO_OBRA,
 	"pudim_ProcessFarms:repair": PUDIM_PRIO_OBRA,
@@ -1997,6 +1998,52 @@ function pudim_EscolherTributo(eu, aliados, guardado, agora, ultimo) {
 		return { recurso: r, qtd: qtd, para: alvo.id };
 	}
 	return null;
+}
+
+// ─── Reforço na casa quando a população aperta (28/09) ─────────────────────────────────
+//
+// Pedido: "se tiver risco de o limite populacional por falta de casas atrapalhar fazer mais
+// unidades, envie mais construtores pra agilizar a construção". Quem decide se está
+// apertado e quem ajuda é a simulação (pudim_GetReforcoCasa); aqui sai a ordem: construir
+// a casa e, EM FILA, voltar ao recurso que estava colhendo — assim ninguém fica perdido
+// quando a casa sobe, e o auto-trabalho não precisa redistribuir ninguém.
+//
+// A mesma obra só é reforçada de novo depois de PUDIM_REFORCO_ESPERA: GetNumBuilders só
+// conta quem já chegou, e sem a espera o mod mandaria mais gente a cada 3 s para a mesma
+// casa enquanto os primeiros ainda caminham.
+const PUDIM_REFORCO_INTERVALO = 3000;
+const PUDIM_REFORCO_ESPERA = 15000;
+var g_PudimReforcoAccum = 0;
+var g_PudimReforcoFeito = {};   // fundação → instante do último reforço
+
+function pudim_ProcessReforcoCasa() {
+	if (g_PudimAutoHouseThreshold <= 0 || pudim_ObrasPausadas()) return;
+	let r = null;
+	try {
+		r = Engine.GuiInterfaceCall("pudim_GetReforcoCasa", {
+			"protectedIds": pudim_GetProtectedBuilderIds(),
+			"playerOrdered": pudim_GetPlayerOrderedIds()
+		});
+	} catch (e) { return; }
+	if (!r || !r.ajudantes || !r.ajudantes.length) return;
+	const agora = Date.now();
+	if (agora - (g_PudimReforcoFeito[r.alvo] || 0) < PUDIM_REFORCO_ESPERA) return;
+	g_PudimReforcoFeito[r.alvo] = agora;
+	for (const a of r.ajudantes) {
+		const foi = pudim_Ordenar({ "type": "repair", "entities": [a.id], "target": r.alvo,
+			"autocontinue": false, "queued": false }, "pudim_ProcessReforcoCasa");
+		// Volta em fila para onde estava (pedido: "depois devolve eles pra onde estavam").
+		if (foi && a.volta && a.volta.alvo)
+			pudim_Ordenar({ "type": "gather", "entities": [a.id], "target": a.volta.alvo, "queued": true },
+				"pudim_ProcessReforcoCasa");
+		else if (foi && a.volta && a.volta.tipo)
+			pudim_Ordenar({ "type": "gather-near-position", "entities": [a.id],
+				"resourceType": a.volta.tipo, "resourceTemplate": "",
+				"x": a.volta.x, "z": a.volta.z, "queued": true }, "pudim_ProcessReforcoCasa");
+		pudim_ProtectBuilder(a.id, agora + PUDIM_REFORCO_ESPERA);
+	}
+	pudim_Log("INFO", "CASAS", "populacao apertada: +" + r.ajudantes.length + " construtor(es) na casa " +
+		r.alvo + " (" + r.progresso + "%, tinha " + r.construtores + ")");
 }
 
 // ─── Mercado automático ──────────────────────────────────────────────────────────────
@@ -3003,6 +3050,11 @@ function pudim_Tick(dt)
 		g_PudimTributoAccum = 0;
 		try { pudim_ProcessTributo(); } catch (e) {}
 	}
+	g_PudimReforcoAccum += dt;
+	if (g_PudimReforcoAccum >= PUDIM_REFORCO_INTERVALO) {
+		g_PudimReforcoAccum = 0;
+		try { pudim_Medir("ProcessReforcoCasa", pudim_ProcessReforcoCasa); } catch (e) {}
+	}
 	g_PudimMercadoAccum += dt;
 	if (g_PudimMercadoAccum >= PUDIM_MERCADO_INTERVALO) {
 		g_PudimMercadoAccum = 0;
@@ -3291,12 +3343,7 @@ function pudim_ProcessAutoQueue()
 		let vagasPop = Math.max(0, (aqData.popLimit || 0) - (aqData.popCount || 0));
 		const popCheio = vagasPop <= 0;
 		const gastaVagas = function(tpl, n) {
-			let custo = 1;
-			try {
-				const td = GetTemplateData(tpl);
-				if (td && td.cost && td.cost.population > 0) custo = td.cost.population;
-			} catch (e) {}
-			vagasPop = Math.max(0, vagasPop - custo * n);
+			vagasPop = Math.max(0, vagasPop - pudim_CustoPopulacao(tpl) * n);
 		};
 		// ── E O DINHEIRO TAMBÉM É SALDO ─────────────────────────────────────────────────
 		//
@@ -3612,6 +3659,37 @@ function pudim_ProcessAutoQueue()
 				q0.unitTemplate === g_PudimQueueSeededTpl[b.ent] &&
 				(q0.progress || 0) > 0 && typeof q0.timeRemaining === "number" &&
 				q0.timeRemaining <= PUDIM_REPOR_ANTES_MS && !(q0.neededSlots > 0));
+
+			// ── A FILA NUNCA FICA PARADA POR FALTA DE CASA (28/09) ─────────────────────────
+			//
+			// Pedido (print 24/25, lote de 2 e de 3 na fila do CC): "nunca deixe que a fila de
+			// unidades fique parada; se só tiver espaço pra 1 unidade, só faça 1; depois,
+			// quando tiver mais casas, volte ao normal".
+			//
+			// O motor reserva a população do lote INTEIRO quando ele começa; sem vaga para
+			// todos, o lote espera, com neededSlots > 0 (Trainer.js, GetBasicInfo:
+			// "neededSlots": this.missingPopSpace). O mod sabia AUMENTAR lote degradado (mais
+			// abaixo), mas não o contrário. Agora: primeiro lote da fila parado por população,
+			// ainda sem progresso, reconhecidamente do mod, e com pelo menos 1 vaga — cancela
+			// (sem progresso o motor devolve o recurso) e põe um lote do tamanho das vagas.
+			// Quando a casa subir, a regra do "lote degradado" logo abaixo devolve o tamanho.
+			if (!b.queueEmpty && b.trainingQueue && b.trainingQueue.length >= 1) {
+				const cab = b.trainingQueue[0];
+				const doMod = !!(cab.unitTemplate && cab.unitTemplate === g_PudimQueueSeededTpl[b.ent]);
+				const custoPop = pudim_CustoPopulacao(cab.unitTemplate);
+				const cabem = custoPop > 0 ? Math.floor(vagasPop / custoPop) : 0;
+				if (doMod && (cab.neededSlots || 0) > 0 && (cab.progress || 0) <= 0 &&
+				    cab.id !== undefined && cabem >= 1 && cabem < (cab.count || 1)) {
+					Engine.PostNetworkCommand({ "type": "stop-production", "entity": b.ent, "id": cab.id });
+					Engine.PostNetworkCommand({ "type": "train", "entities": [b.ent],
+						"template": cab.unitTemplate, "count": cabem });
+					gastaVagas(cab.unitTemplate, cabem);
+					g_PudimQueueSeededAt[b.ent] = nowQueue;
+					pudim_Log("INFO", "QUEUE", "edifício " + b.ent + " parado por população: lote x" +
+						(cab.count || 1) + " trocado por x" + cabem + " (as vagas que há)");
+					continue;
+				}
+			}
 
 			if (!b.queueEmpty && !reporAntes) {
 				// REGRA: a auto-fila mantém NO MÁXIMO UM lote. Um lote degradado por escassez
@@ -7017,6 +7095,16 @@ function pudim_QuantosTreinam(template, buildings)
  * O ganho que isso persegue e real: GetBatchTime(n) = n^0.7, entao o tempo por unidade cai
  * com n^-0.3 — lote de 5 sai 38% mais rapido por unidade, lote de 10, 50%.
  */
+/** Quantas vagas de população UMA unidade deste template ocupa (cost.population; 1 se faltar). */
+function pudim_CustoPopulacao(tpl)
+{
+	try {
+		const td = GetTemplateData(tpl);
+		if (td && td.cost && td.cost.population > 0) return td.cost.population;
+	} catch (e) {}
+	return 1;
+}
+
 function pudim_LoteIdeal(template, res, buildings)
 {
 	if (!template) return 1;

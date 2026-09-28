@@ -6644,10 +6644,41 @@ GuiInterface.prototype.pudim_GetProactiveStorehouseData = function(player, data)
 	return { "builderId": builderEnt, "template": template, "candidatePositions": candidates, "resource": "wood", "workersToMove": [] };
 };
 
-// Fruta a até esta distância (do centro das frutas ao centro do ponto de entrega) de um
-// celeiro ou CC não ganha celeiro novo: a caminhada até o que já existe é curta. 50 era o
-// número que o caminho proativo já usava; o do armazém inteligente passou a usar o mesmo.
-const PUDIM_FRUTA_PERTO_DE_ENTREGA = 50;
+// Fruta a até esta CAMINHADA de um celeiro ou CC não ganha celeiro novo. A distância é
+// do centro das frutas até a BORDA do ponto de entrega (é lá que a aldeã entrega), não até
+// o centro dele.
+//
+// Pergunta de 28/09: "50 não é muito longe? os trabalhadores não vão gastar muito tempo
+// andando pra entregar recursos?". Era. A conta com os números da A28
+// (template_unit_support_female_citizen.xml: carrega 10 de comida, fruta a 1/s; cesto de
+// vime x1,5; template_unit.xml: anda a 9 m/s; CC com 30 de largura):
+//
+//   50 do centro das frutas ao centro do CC = ~35 m até a borda
+//   ida e volta 70 m / 9 m/s = 7,8 s andando para cada 10 de comida
+//   colhe 10 s (6,7 s com cesto) → aproveita 56% do tempo (46% com cesto)
+//
+// Com celeiro colado nas frutas a ida e volta cai para ~15 m (1,7 s) e o aproveitamento
+// sobe para 80-85%. O celeiro custa 100 de madeira e 45 s de obra; com 5 aldeãs ele se
+// paga em 1 a 2 minutos.
+//
+// O limite é a caminhada POR TRECHO que ainda aproveita ~80% sem celeiro. Aproveitamento =
+// colher / (colher + ida e volta): 80% pede ida e volta de até 2,5 s sem cesto (11,25 m por
+// trecho) e 1,67 s com cesto (7,5 m), que o mod pesquisa cedo. 8 m dá 85% sem cesto e 79%
+// com. (A primeira versão desta regra usava 15 m dizendo "acima de 80%"; a conta, que agora
+// fica em tools/test_celeiro_perto.js, deu 75% e 67%.)
+const PUDIM_FRUTA_PERTO_DE_ENTREGA = 8;
+
+/** Meia largura da obstrução de um ponto de entrega, do template (como ObstructionSnap.js lê). */
+function pudim_MeiaLarguraEntrega(ent, cmpIdent) {
+	try {
+		const cmpTM = Engine.QueryInterface(SYSTEM_ENTITY, IID_TemplateManager);
+		const t = cmpTM.GetTemplate(cmpTM.GetCurrentTemplateName(ent));
+		const w = t && t.Obstruction && t.Obstruction.Static && +t.Obstruction.Static["@width"];
+		const d = t && t.Obstruction && t.Obstruction.Static && +t.Obstruction.Static["@depth"];
+		if (w > 0) return Math.min(w, d > 0 ? d : w) / 2;
+	} catch (e) {}
+	return (cmpIdent && cmpIdent.HasClass("CivCentre")) ? 15 : 8;
+}
 
 // ── Farmstead proativo: constrói farmstead perto de fruta ANTES dos workers chegarem ──
 // Chamado pelo panel quando pudim_GetIdleWorkersAndBestResource retorna suggestFarmstead.
@@ -6702,7 +6733,7 @@ GuiInterface.prototype.pudim_GetProactiveFarmsteadData = function(player, data)
 	}
 
 	// Abortar se já há ponto de entrega de comida (celeiro, CC) perto desta fruta — a mesma
-	// regra do armazém inteligente, PUDIM_FRUTA_PERTO_DE_ENTREGA.
+	// regra do armazém inteligente: caminhada até a BORDA ≤ PUDIM_FRUTA_PERTO_DE_ENTREGA.
 	for (const ent of allEnts) {
 		const ci = Engine.QueryInterface(ent, IID_Identity);
 		if (!ci) continue;
@@ -6711,7 +6742,7 @@ GuiInterface.prototype.pudim_GetProactiveFarmsteadData = function(player, data)
 		if (!p || !p.IsInWorld()) continue;
 		const pos = p.GetPosition2D();
 		const dx = pos.x - nearX, dz = pos.y - nearZ;
-		if (dx*dx + dz*dz <= PUDIM_FRUTA_PERTO_DE_ENTREGA * PUDIM_FRUTA_PERTO_DE_ENTREGA) return null;
+		if (Math.sqrt(dx*dx + dz*dz) - pudim_MeiaLarguraEntrega(ent, ci) <= PUDIM_FRUTA_PERTO_DE_ENTREGA) return null;
 	}
 
 	// Encontrar builder civil (não-soldado, não-cavalaria)
@@ -6856,7 +6887,8 @@ GuiInterface.prototype.pudim_GetSmartDropsiteData = function(player, data)
 			const cmpPos = Engine.QueryInterface(ent, IID_Position);
 			if (cmpPos && cmpPos.IsInWorld()) {
 				const p = cmpPos.GetPosition2D();
-				dropsites.push({ x: p.x, y: p.y, isCC, isStorehouse, isFarmstead });
+				dropsites.push({ x: p.x, y: p.y, isCC, isStorehouse, isFarmstead,
+					meia: pudim_MeiaLarguraEntrega(ent, cmpIdent) });
 			}
 		}
 		if (isCC) {
@@ -6913,7 +6945,19 @@ GuiInterface.prototype.pudim_GetSmartDropsiteData = function(player, data)
 			const ddx = ds.x - rp.x, ddz = ds.y - rp.y;
 			minDsSq = Math.min(minDsSq, ddx*ddx + ddz*ddz);
 		}
-		if (minDsSq <= 50*50) continue; // Já tem dropsite a ≤ 50m — workers próximos não oscilam
+		if (rtype && rtype.generic === "food" && rtype.specific === "fruit") {
+			// Fruta: só conta ponto que RECEBE comida (CC, celeiro), e pela caminhada até a
+			// borda — a mesma regra de PUDIM_FRUTA_PERTO_DE_ENTREGA. Com os 50 do centro de
+			// qualquer dropsite, quem colhia a 25 m da borda do CC (ou ao lado de um depósito
+			// de madeira, que nem aceita comida) nunca contava como longe.
+			let entrega = Infinity;
+			for (const ds of dropsites) {
+				if (!ds.isCC && !ds.isFarmstead) continue;
+				const ddx = ds.x - rp.x, ddz = ds.y - rp.y;
+				entrega = Math.min(entrega, Math.sqrt(ddx*ddx + ddz*ddz) - (ds.meia || 0));
+			}
+			if (entrega <= PUDIM_FRUTA_PERTO_DE_ENTREGA) continue;
+		} else if (minDsSq <= 50*50) continue; // Já tem dropsite a ≤ 50m — workers próximos não oscilam
 
 		const cmpEntId = Engine.QueryInterface(ent, IID_Identity);
 		const isCavalry = !!(cmpEntId && cmpEntId.HasClass("FastMoving"));
@@ -7208,7 +7252,8 @@ GuiInterface.prototype.pudim_GetSmartDropsiteData = function(player, data)
 		for (const ds of dropsites) {
 			if (!ds.isCC && !ds.isFarmstead) continue;
 			const ddx = ds.x - anchorX, ddz = ds.y - anchorZ;
-			entregaComida = Math.min(entregaComida, Math.sqrt(ddx*ddx + ddz*ddz));
+			// Até a BORDA: é lá que a aldeã entrega (ver PUDIM_FRUTA_PERTO_DE_ENTREGA).
+			entregaComida = Math.min(entregaComida, Math.sqrt(ddx*ddx + ddz*ddz) - (ds.meia || 0));
 		}
 		result._dbg.entregaComida = Math.round(entregaComida);
 		if (entregaComida <= PUDIM_FRUTA_PERTO_DE_ENTREGA) {

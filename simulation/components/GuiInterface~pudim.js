@@ -4738,10 +4738,22 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 	// folga de segurança dele; descontar a fila inteira por cima disso é contar a mesma
 	// reserva duas vezes. Com o teto, a casa só pode sair quando a folga REAL já caiu a
 	// 2x a margem — com 3, folga 6 — e a de 11 do início nunca chega lá.
-	const trainingUsado = Math.min(trainingCount, threshold);
-	const projectedHeadroom = rawHeadroom - trainingUsado;
-	if (projectedHeadroom > threshold) return { _skip: "pop+" + rawHeadroom + "|trn=" + trainingCount +
-		"(usa " + trainingUsado + ")>" + threshold, stuckGhosts: [] };
+	//
+	// ── E O TREINO JÁ ESTÁ DENTRO DA POPULAÇÃO (28/09) ──────────────────────────────────
+	//
+	// Relato de 28/09 (print): "está programado pra só fazer casa quando faltar 3 de população
+	// e mesmo assim fez casa mesmo tendo 6 de população disponível" — 24/30, lote de 3 em treino.
+	//
+	// A projeção acima contava DUAS vezes. Conferido em simulation/components/Player.js da A28:
+	// TryReservePopulationSlots faz `this.popUsed += num` quando o lote COMEÇA, e
+	// GetPopulationCount devolve `this.popUsed`. Lote com progresso já está nos 24 do topo; o
+	// laço acima conta justamente esses (progress > 0) e descontava de novo: 6 − 3 = 3 ≤ 3.
+	// No log daquela partida: "skip=pop+8|trn=3(usa 3)>3" e, 4 s depois, casa com folga 6.
+	//
+	// A folga que vale é a REAL, a mesma conta da barra do jogo (limite − população). O treino
+	// fica só no log, para diagnóstico.
+	if (rawHeadroom > threshold) return { _skip: "pop+" + rawHeadroom + "|trn=" + trainingCount +
+		"(ja na pop)>" + threshold, stuckGhosts: [] };
 
 	let civ = "gaul";
 	let ccPosList = [];
@@ -4893,8 +4905,8 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 	const maxParallelHouses = Math.max(1, productionBuildingCount);
 	if (houseFoundationCount >= maxParallelHouses)
 		return { _skip: "max_parallel:" + maxParallelHouses + " fnd=" + houseFoundationCount, stuckGhosts: stuckGhosts };
-	// Se uma casa está sendo construída e o headroom projetado ainda está OK, aguarda
-	if (isBuildingHouseActive && projectedHeadroom > Math.floor(threshold / 2)) return { _skip: "huc:active", stuckGhosts: stuckGhosts };
+	// Se uma casa está sendo construída e a folga real ainda está OK, aguarda
+	if (isBuildingHouseActive && rawHeadroom > Math.floor(threshold / 2)) return { _skip: "huc:active", stuckGhosts: stuckGhosts };
 	if (ccPosList.length === 0) return { _skip: "noCC", stuckGhosts: stuckGhosts };
 
 	const ccPos = ccPosList[0];

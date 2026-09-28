@@ -197,7 +197,11 @@ check("o mod realmente envia comandos (o teste acima nao passou por vazio)",
 // um objeto NOVO a partir de this.tradingGoods — lê, não escreve. É o que a tela de comércio
 // do jogo chama (gui/session/trade/TradeButtonManager.js).
 const SEGUROS = new Set(["GetNeededResources", "SetBuildingPlacementPreview",
-	"SetWallPlacementPreview", "AreRequirementsMet", "GetTradingGoods"]);
+	"SetWallPlacementPreview", "AreRequirementsMet", "GetTradingGoods",
+	// CheckTechnologyRequirements (28/09, pesquisa na espera): GuiInterface.js devolve
+	// cmpTechnologyManager.CanResearch(data.tech) — só lê. É o que o botão de pesquisa do
+	// jogo chama (selection_panels.js).
+	"CheckTechnologyRequirements"]);
 const chamadas = new Set();
 for (const f of guiFiles) {
 	const src = semComentarios(fs.readFileSync(f, "utf8"));

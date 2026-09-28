@@ -1936,6 +1936,9 @@ function pudim_AtualizarReserva() {
 	// Obra na espera: o custo dela fica fora do alcance da auto-fila até ela sair.
 	for (const o of g_PudimObrasEspera)
 		itens.push({ tipo: "obra", nome: pudim_NomeDaObra(o.template), custo: o.custo });
+	// Pesquisa na espera: idem.
+	for (const p of g_PudimPesquisasEspera)
+		itens.push({ tipo: "pesquisa", nome: p.nome, custo: p.custo });
 	const total = {};
 	for (const it of itens)
 		for (const r in it.custo) total[r] = (total[r] || 0) + it.custo[r];
@@ -2289,6 +2292,12 @@ function pudim_TirarObra(i, motivo) {
 /** Clique direito no botão de treino/reserva. */
 function pudim_CancelarObrasEspera() {
 	while (g_PudimObrasEspera.length) pudim_TirarObra(g_PudimObrasEspera.length - 1, "você cancelou");
+	// E as pesquisas na espera, pelo mesmo clique.
+	if (g_PudimPesquisasEspera.length) {
+		pudim_Log("INFO", "RESEARCH", "você cancelou " + g_PudimPesquisasEspera.length + " pesquisa(s) na espera");
+		g_PudimPesquisasEspera = [];
+		g_PudimReservaAccum = PUDIM_RESERVA_INTERVALO;
+	}
 }
 
 /** Constrói a primeira obra da espera quando der. Emite comando: roda abaixo da trava de espectador. */
@@ -2330,6 +2339,105 @@ function pudim_ProcessObrasEspera() {
 	}
 	pudim_Log("INFO", "OBRA", "recurso juntou: construindo " + pudim_NomeDaObra(o.template) +
 		" com " + vivos.length + " construtor(es)");
+}
+
+// ─── Pesquisa na espera de recurso (28/09) ─────────────────────────────────────────────
+//
+// Pedido (print da Cesta com "Recursos insuficientes"): "igual o posicionar prédio sem ter
+// recursos, tem que ter na fila fazer upgrade sem ter recursos... vc clica ele já fica em uma
+// fila fantasma, tendo o recurso, o sistema faz ele".
+//
+// Mesmo desenho da obra na espera, conferido no jogo base:
+//   • o botão sai desligado sem recurso (g_SelectionPanels.Research.setupButton:
+//     `else if (neededResources) enabled = false`); religa quando é o ÚNICO bloqueio —
+//     requisito (CheckTechnologyRequirements → TechnologyManager.CanResearch) e "em melhoria"
+//     continuam bloqueando;
+//   • o clique chama addResearchToQueue(entity, tech) (selection_panels_helpers.js); sem
+//     recurso, a pesquisa fica aqui, o custo entra na RESERVA, e sai o mesmo comando
+//     {"type": "research", ...} quando juntar;
+//   • o custo é o do template × researcher.techCostMultiplier do prédio, a conta do botão.
+// Cancelar: o mesmo clique direito no botão de treino que cancela as obras. Desiste sozinha
+// depois de PUDIM_PESQUISA_ESPERA_MAX, ou se o prédio sumir.
+const PUDIM_PESQUISA_ESPERA_MAX = 300000;
+var g_PudimPesquisasEspera = [];   // { ent, tech, custo, nome, desde }
+
+function pudim_CustoDaPesquisa(ent, tech) {
+	const custo = {};
+	try {
+		const st = GetEntityState(ent);
+		const civ = GetSimState().players[Engine.GetPlayerID()].civ;
+		const td = GetTechnologyData(tech, civ);
+		const mult = (st && st.researcher && st.researcher.techCostMultiplier) || {};
+		if (td && td.cost) for (const r of ["food", "wood", "stone", "metal"])
+			if (td.cost[r] > 0) custo[r] = td.cost[r] * (mult[r] !== undefined ? mult[r] : 1);
+	} catch (e) {}
+	return custo;
+}
+
+function pudim_NomeDaPesquisa(tech) {
+	try {
+		const td = GetTechnologyData(tech, GetSimState().players[Engine.GetPlayerID()].civ);
+		if (td && td.name) return td.name.specific || td.name.generic || tech;
+	} catch (e) {}
+	return tech;
+}
+
+/** Chamado pelo gancho de addResearchToQueue. true = ficou na espera (o original não roda). */
+function pudim_TalvezEsperarPesquisa(ent, tech) {
+	if (!pudim_ObraLigada() || pudim_Assistindo() || typeof tech !== "string") return false;
+	const custo = pudim_CustoDaPesquisa(ent, tech);
+	const falta = pudim_FaltaParaObra(custo);
+	if (!falta) return false;
+	if (g_PudimPesquisasEspera.some(p => p.tech === tech)) return true;   // já esperando: não duplica
+	const nome = pudim_NomeDaPesquisa(tech);
+	g_PudimPesquisasEspera.push({ "ent": ent, "tech": tech, "custo": custo, "nome": nome, "desde": Date.now() });
+	const msg = "Pesquisa na espera: " + nome + " — faltam " + pudim_CustoCurto(falta);
+	pudim_Log("INFO", "RESEARCH", msg);
+	try { Engine.GuiInterfaceCall("pudim_PushNotification", { "message": msg }); } catch (e) {}
+	g_PudimReservaAccum = PUDIM_RESERVA_INTERVALO;
+	return true;
+}
+
+/**
+ * Gancho de g_SelectionPanels.Research.setupButton: religa os botões (um, ou os dois de um
+ * par) cujo único bloqueio é recurso. As posições são as do próprio setupButton: o de baixo
+ * em i + rowLength, o de cima em i.
+ */
+function pudim_LiberarPesquisaSemRecurso(data) {
+	if (!data || !data.item || !data.item.tech || data.item.isUpgrading || !pudim_ObraLigada() || pudim_Assistindo()) return;
+	if (typeof controlsPlayer === "function" && !controlsPlayer(data.player)) return;
+	const techs = data.item.tech.pair ? [data.item.tech.bottom, data.item.tech.top] : [data.item.tech];
+	let pos = data.i + data.rowLength;
+	for (const tech of techs) {
+		const botao = Engine.TryGetGUIObjectByName("unitResearchButton[" + pos + "]");
+		pos -= data.rowLength;
+		if (!botao || botao.enabled || botao.hidden) continue;
+		if (!Engine.GuiInterfaceCall("CheckTechnologyRequirements", { "tech": tech, "player": data.player })) continue;
+		botao.enabled = true;
+		botao.tooltip += "\n[color=\"150 220 255\"]Sem recurso agora: clique mesmo assim e o PudimMod pesquisa quando juntar.[/color]";
+	}
+}
+
+/** Pesquisa a primeira da espera quando der. Emite comando: roda abaixo da trava de espectador. */
+function pudim_ProcessPesquisasEspera() {
+	if (!g_PudimPesquisasEspera.length) return;
+	const p = g_PudimPesquisasEspera[0];
+	const tirar = motivo => {
+		g_PudimPesquisasEspera.shift();
+		g_PudimReservaAccum = PUDIM_RESERVA_INTERVALO;
+		if (motivo) {
+			const msg = "Pesquisa cancelada: " + p.nome + " (" + motivo + ")";
+			pudim_Log("INFO", "RESEARCH", msg);
+			try { Engine.GuiInterfaceCall("pudim_PushNotification", { "message": msg }); } catch (e) {}
+		}
+	};
+	if (Date.now() - p.desde > PUDIM_PESQUISA_ESPERA_MAX) { tirar("5 minutos sem juntar o recurso"); return; }
+	const st = GetEntityState(p.ent);
+	if (!st || st.player !== Engine.GetPlayerID()) { tirar("o prédio não existe mais"); return; }
+	if (pudim_FaltaParaObra(p.custo)) return;
+	tirar(null);
+	Engine.PostNetworkCommand({ "type": "research", "entity": p.ent, "template": p.tech, "pushFront": false });
+	pudim_Log("INFO", "RESEARCH", "recurso juntou: pesquisando " + p.nome);
 }
 
 // ─── Divisão de mercadorias do comércio, lembrada entre partidas ────────────────────────
@@ -2504,9 +2612,9 @@ function pudim_AtualizarBotaoPausa() {
 	for (const it of outros)
 		dica += "\nReservado para " + it.nome + ": " + pudim_CustoCurto(it.custo) +
 			(it.pronto ? " (pronto)" : "");
-	if (g_PudimObrasEspera.length)
+	if (g_PudimObrasEspera.length || g_PudimPesquisasEspera.length)
 		dica += "\n[color=\"150 220 255\"]Clique direito: cancelar " + g_PudimObrasEspera.length +
-			" obra(s) na espera de recurso.[/color]";
+			" obra(s) e " + g_PudimPesquisasEspera.length + " pesquisa(s) na espera de recurso.[/color]";
 	if (btn) try {
 		btn.tooltip = dica; btn.tooltip_style = "sessionToolTipBold";
 		btn.onPressRight = pudim_CancelarObrasEspera;
@@ -3064,6 +3172,7 @@ function pudim_Tick(dt)
 	if (g_PudimObraEsperaAccum >= PUDIM_OBRA_INTERVALO) {
 		g_PudimObraEsperaAccum = 0;
 		try { pudim_Medir("ProcessObrasEspera", pudim_ProcessObrasEspera); } catch (e) {}
+		try { pudim_Medir("ProcessPesquisasEspera", pudim_ProcessPesquisasEspera); } catch (e) {}
 	}
 	g_PudimMercadoriasAccum += dt;
 	if (g_PudimMercadoriasAccum >= PUDIM_MERCADORIAS_INTERVALO) {

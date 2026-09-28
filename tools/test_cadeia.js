@@ -145,8 +145,10 @@ check("tecnologia oferecida dentro de um par tambem conta", r.cadeia.length === 
 check("a sua pesquisa e registrada pelo gancho de addResearchToQueue",
 	/pudim_patchApplyN\("addResearchToQueue", function\(target, that, args\)/.test(sess) &&
 	/g_PudimCadeias\[tech\] = Date\.now\(\);/.test(sess));
-check("e o gancho sempre chama a funcao original — a sua pesquisa sai do mesmo jeito",
-	/g_PudimCadeias\[tech\] = Date\.now\(\);[\s\S]{0,60}return target\.apply\(that, args\);/.test(sess));
+// Desde 28/09 há uma exceção: sem recurso, a pesquisa vai para a espera (pesquisa na espera,
+// tools/test_pesquisa_espera.js) e sai quando juntar. Com recurso, sai do mesmo jeito.
+check("e o gancho chama a funcao original — só não quando a pesquisa ficou na espera",
+	/g_PudimCadeias\[tech\] = Date\.now\(\);[\s\S]{0,200}if \(pudim_TalvezEsperarPesquisa\(args\[0\], args\[1\]\)\) return;[\s\S]{0,20}return target\.apply\(that, args\);/.test(sess));
 check("a opcao existe no menu e vem LIGADA (so age sobre o que voce comecou)",
 	opts[0].options.some(o => o.config === "pudim.pesquisa.cadeia") &&
 	/ConfigDB_GetValue\("user", "pudim\.pesquisa\.cadeia"\) !== "false"/.test(sess));

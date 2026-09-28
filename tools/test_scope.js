@@ -43,6 +43,8 @@ const GLOBAIS = new Set([
 	// gui/session/input.js, g_AutoFormation em gui/session/AutoFormation.js (usado por
 	// tryPlaceBuilding), g_SelectionPanels em gui/session/selection_panels.js.
 	"placementSupport", "g_AutoFormation", "g_SelectionPanels",
+	// Pesquisa na espera: GetTechnologyData em gui/session/session.js da A28.
+	"GetTechnologyData",
 	// Barra de metas: g_InitAttributes e const de gui/session/session.js (A28), com
 	// settings.StartingResources/CheatsEnabled/Nomad — as mesmas chaves do mapSettings do replay.
 	"g_InitAttributes"

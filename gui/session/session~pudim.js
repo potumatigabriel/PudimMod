@@ -167,8 +167,18 @@ pudim_patchApplyN("addResearchToQueue", function(target, that, args)
 		    Engine.ConfigDB_GetValue("user", "pudim.pesquisa.cadeia") !== "false")
 			g_PudimCadeias[tech] = Date.now();
 	} catch (e) {}
+	// Sem recurso: a pesquisa fica na espera (pudim_panel.js) e sai quando juntar.
+	try { if (pudim_TalvezEsperarPesquisa(args[0], args[1])) return; } catch (e) {}
 	return target.apply(that, args);
 });
+// O botão de pesquisa nasce desligado sem recurso; religar quando esse for o único motivo.
+if (typeof g_SelectionPanels !== "undefined" && g_SelectionPanels.Research)
+	pudim_patchApplyN(g_SelectionPanels.Research, "setupButton", function(target, that, args)
+	{
+		const r = target.apply(that, args);
+		if (r) try { pudim_LiberarPesquisaSemRecurso(args[0]); } catch (e) {}
+		return r;
+	});
 
 pudim_patchApplyN("tryPlaceBuilding", function(target, that, args)
 {

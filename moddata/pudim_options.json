@@ -92,6 +92,14 @@
 			},
 			{
 				"type": "boolean",
+				"config": "pudim.pesquisa.cadeia",
+				"label": "[color=\"120 220 255\"]Economia:[/color] Continuar a cadeia das pesquisas que eu fizer",
+				"tooltip": "Quando você pesquisa uma melhoria que tem continuação (machado de ferro → mais forte → afiado), o mod pesquisa os próximos passos sozinho, assim que o requisito e o recurso permitirem, e guarda o dinheiro do próximo passo enquanto espera. Só age sobre cadeias que VOCÊ começou.",
+				"label_en": "[color=\"120 220 255\"]Economy:[/color] Continue the chain of my researches",
+				"tooltip_en": "When you research an upgrade that has a follow-up (iron axe → stronger → sharp), the mod researches the next steps on its own as soon as requirements and resources allow, and saves the money for the next step while waiting. It only acts on chains YOU started."
+			},
+			{
+				"type": "boolean",
 				"config": "pudim.autowork.enabled",
 				"label": "[color=\"120 220 255\"]Economia:[/color] Auto-Trabalho ativo ao iniciar a partida",
 				"tooltip": "Começa a partida já enviando cidadão ocioso para coletar. Se desligar, o Auto-Trabalho continua existindo no painel; ele só não vem ligado sozinho.",

@@ -7352,6 +7352,58 @@ GuiInterface.prototype.pudim_GetPlanoReserva = function(player, data)
 			result.fase = { "cc": melhor.ent, "tech": melhor.tech, "custo": custo, "pronto": cabe(custo) };
 		}
 	}
+
+	// ── As cadeias que VOCÊ começou ─────────────────────────────────────────────────────
+	//
+	// Ideia do ModernGUI ("mass production": pesquisar a cadeia inteira de uma tecnologia),
+	// reescrita. A cadeia está na própria tecnologia: `supersedes` aponta para a anterior
+	// (strongeraxes.supersedes = ironaxes). O mapa "anterior → sucessoras" sai de
+	// TechnologyTemplates.GetAll(), que é dado estático — o mesmo em todo cliente.
+	//
+	// Para cada cadeia: anda até o primeiro passo NÃO pesquisado. Se ele está em andamento,
+	// espera. Se CanResearch diz que pode, é candidato. Se não pode (falta fase, falta
+	// edifício), espera sem reservar nada — guardar para o que ainda não existe pararia a
+	// economia. Sem sucessora, a cadeia acabou e o painel a esquece.
+	const cadeias = (data && Array.isArray(data.cadeias)) ? data.cadeias : [];
+	if (cadeias.length) {
+		const sucessoras = {};
+		let todas = {};
+		try { todas = TechnologyTemplates.GetAll() || {}; } catch (e) {}
+		for (const nome in todas) {
+			const ant = todas[nome] && todas[nome].supersedes;
+			if (ant) (sucessoras[ant] = sucessoras[ant] || []).push(nome);
+		}
+		const pesquisada = t => cmpTechMgr.IsTechnologyResearched(t);
+		const emAndamento = t => (typeof cmpTechMgr.IsInProgress === "function" && cmpTechMgr.IsInProgress(t)) ||
+			(typeof cmpTechMgr.IsTechnologyQueued === "function" && cmpTechMgr.IsTechnologyQueued(t));
+		// Quem oferece cada tecnologia agora, com o tempo de fila de cada um.
+		const oferta = {};
+		for (const ent of cmpRangeManager.GetEntitiesByPlayer(player)) {
+			if (Engine.QueryInterface(ent, IID_Foundation)) continue;
+			if (!Engine.QueryInterface(ent, IID_Researcher)) continue;
+			for (const t of techsDe(ent)) {
+				const tf = tempoFila(ent);
+				if (!oferta[t] || tf < oferta[t].t) oferta[t] = { ent: ent, t: tf };
+			}
+		}
+		result.acabou = [];
+		for (const raiz of cadeias) {
+			let ponta = raiz, guarda = 0;
+			// Anda pela cadeia enquanto o passo já estiver pesquisado.
+			while (pesquisada(ponta) && guarda++ < 10) {
+				const prox = (sucessoras[ponta] || []).find(s => oferta[s] || emAndamento(s) || pesquisada(s));
+				if (!prox) { ponta = null; break; }
+				ponta = prox;
+			}
+			if (!ponta) { result.acabou.push(raiz); continue; }   // fim da cadeia
+			if (pesquisada(ponta) || emAndamento(ponta)) continue;
+			if (typeof cmpTechMgr.CanResearch !== "function" || !cmpTechMgr.CanResearch(ponta)) continue;
+			const onde = oferta[ponta];
+			if (!onde) continue;
+			const custo = custoNo(onde.ent, ponta);
+			result.cadeia.push({ "raiz": raiz, "tech": ponta, "ent": onde.ent, "custo": custo, "pronto": cabe(custo) });
+		}
+	}
 	return result;
 };
 
@@ -7567,6 +7619,7 @@ GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 	// O que o jogador mandou guardar (próxima fase, arma de cerco) não é dinheiro livre para
 	// a auto-pesquisa. Ver pudim_GetPlanoReserva.
 	const reservaP = (data && data.reserva) || {};
+	const reservadasP = new Set((data && Array.isArray(data.reservadas)) ? data.reservadas : []);
 	for (const r in reservaP) saldoPesquisa[r] = (saldoPesquisa[r] || 0) - (reservaP[r] || 0);
 
 	for (const ent of allEnts) {
@@ -7640,6 +7693,7 @@ GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 				if (!tech || typeof tech !== "string") continue;
 				if (alreadyQueued.has(tech)) continue;
 				if (blacklist.has(tech)) continue;
+				if (reservadasP.has(tech)) continue;   // fase ou passo de cadeia: já tem dono
 				if (cmpTechMgr.IsTechnologyResearched(tech)) continue;
 				// Verificar se está em andamento (checks separados: else if era bug)
 				if (typeof cmpTechMgr.IsInProgress === "function" && cmpTechMgr.IsInProgress(tech)) continue;

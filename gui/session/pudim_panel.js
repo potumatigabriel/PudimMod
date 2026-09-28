@@ -1910,6 +1910,12 @@ function pudim_AtualizarReserva() {
 	if (plano && plano.cadeia)
 		for (const c of plano.cadeia)
 			itens.push({ tipo: "cadeia", nome: c.tech, custo: c.custo, pronto: c.pronto, alvo: c.ent });
+	// Cadeia sem próximo passo: terminou. Esquecer, senão ela seria consultada para sempre.
+	if (plano && plano.acabou)
+		for (const t of plano.acabou) {
+			delete g_PudimCadeias[t];
+			pudim_Log("INFO", "RESEARCH", "cadeia de " + t + " completa");
+		}
 	if (g_PudimModoTreino === PUDIM_MODO_CERCO) {
 		const tpl = pudim_CercoDisponivel();
 		if (tpl) {
@@ -1944,6 +1950,25 @@ function pudim_ProcessFaseAuto() {
 	Engine.PostNetworkCommand({ "type": "research", "entity": f.cc, "template": f.tech,
 	                           "pushFront": true });
 	pudim_Log("INFO", "RESEARCH", "fase automatica: " + f.tech + " no CC " + f.cc);
+}
+
+// Anti-repetição por tecnologia: a pesquisa só aparece na simulação um ou dois turnos
+// depois, e um segundo pedido igual seria recusado pelo motor com mensagem na tela.
+var g_PudimCadeiaMandadaEm = {};
+
+/** Manda o próximo passo das cadeias que você começou, quando dá. Emite comando. */
+function pudim_ProcessCadeias() {
+	const agora = Date.now();
+	for (const it of g_PudimGuardado.itens) {
+		if (it.tipo !== "cadeia" || !it.pronto || !it.alvo) continue;
+		if (agora - (g_PudimCadeiaMandadaEm[it.nome] || 0) < 8000) continue;
+		g_PudimCadeiaMandadaEm[it.nome] = agora;
+		// Sem pushFront: pesquisa de cadeia não é urgente, entra atrás do que já está no
+		// edifício — ao contrário da fase, que vale adiantar.
+		Engine.PostNetworkCommand({ "type": "research", "entity": it.alvo, "template": it.nome,
+		                           "pushFront": false });
+		pudim_Log("INFO", "RESEARCH", "cadeia: " + it.nome + " no edificio " + it.alvo);
+	}
 }
 
 function pudim_TogglePauseTrain() {
@@ -2520,6 +2545,7 @@ function pudim_Tick(dt)
 		g_PudimReservaAccum = 0;
 		try { pudim_Medir("AtualizarReserva", pudim_AtualizarReserva); } catch (e) {}
 		try { pudim_ProcessFaseAuto(); } catch (e) {}
+		try { pudim_ProcessCadeias(); } catch (e) {}
 	}
 
 	// Balanceamento inicial de workers: a cada 1s até concluído
@@ -3372,6 +3398,9 @@ function pudim_ProcessAutoResearch()
 			blacklist: blacklistAtiva,
 			// O que está guardado (fase, cerco, cadeia) não é dinheiro para pesquisa de score.
 			reserva: g_PudimGuardado.total,
+			// E o que está reservado não é escolhido de novo por pontuação: a fase e o passo
+			// da cadeia têm dono. Dois pedidos da mesma pesquisa = erro do motor na tela.
+			reservadas: g_PudimGuardado.itens.map(i => i.nome),
 			sentTechs: sentKeys,
 			// Prioridades de coleta: recurso com peso > 0 e recurso que voce quer, entao a
 			// tech que acelera a coleta dele deixa de esperar a Fase 2.

@@ -153,6 +153,23 @@ pudim_patchApplyN("handleUnitAction", function(target, that, args)
 // prédio sai de tryPlaceBuilding, e uma muralha de tryPlaceWall, e as duas mandam o comando
 // direto (conferido em gui/session/input.js do motor). "Construir e, com shift, coletar" —
 // a fila mais atingida — começava sem registro nenhum.
+// ── PESQUISA EM CADEIA ───────────────────────────────────────────────────────────────
+//
+// A sua pesquisa sai de addResearchToQueue(entity, tech), em
+// gui/session/selection_panels_helpers.js do motor. Registrar aqui é o que permite ao mod
+// continuar a cadeia que VOCÊ começou (machado de ferro → mais forte → afiado). Só cadeias
+// suas: o mod nunca começa uma cadeia por conta própria por este caminho.
+pudim_patchApplyN("addResearchToQueue", function(target, that, args)
+{
+	try {
+		const tech = args && args[1];
+		if (typeof tech === "string" &&
+		    Engine.ConfigDB_GetValue("user", "pudim.pesquisa.cadeia") !== "false")
+			g_PudimCadeias[tech] = Date.now();
+	} catch (e) {}
+	return target.apply(that, args);
+});
+
 pudim_patchApplyN("tryPlaceBuilding", function(target, that, args)
 {
 	try { pudim_MarcarOrdemDoJogador(); } catch (e) {}

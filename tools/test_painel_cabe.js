@@ -271,7 +271,13 @@ check("a chave de debug é a que o painel realmente lê",
 
 // Cada chave declarada nas opções tem de ser lida em algum lugar, senão o jogador mexe num
 // controle que não faz nada.
-const semUso = lista.filter(o => panel.indexOf('"' + o.config + '"') < 0);
+// "Em algum lugar" = qualquer arquivo de sessão do mod: a da pesquisa em cadeia é lida no
+// gancho de addResearchToQueue, em session~pudim.js, e não no painel.
+const sessaoMod = ["session~pudim.js", "pudim_ally_bar.js"].map(f => {
+	try { return fs.readFileSync(path.join(base, "gui", "session", f), "utf8"); } catch (e) { return ""; }
+}).join("\n");
+const semUso = lista.filter(o =>
+	panel.indexOf('"' + o.config + '"') < 0 && sessaoMod.indexOf('"' + o.config + '"') < 0);
 check("nenhuma opção aponta para uma chave que ninguém lê",
 	semUso.length === 0, semUso.map(o => o.config).join(", "));
 

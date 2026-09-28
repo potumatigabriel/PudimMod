@@ -138,7 +138,8 @@ check("entrada invalida nao vira contagem", classe(null) === null && classe(42) 
 check("a simulacao envia os dois numeros por jogador",
 	/"upgEco": 0, "upgMil": 0,/.test(execS));
 check("e os conta a partir de GetResearchedTechs",
-	/for \(const tech of cmpTechAlly\.GetResearchedTechs\(\)\)/.test(execS) &&
+	/const feitas = cmpTechAlly\.GetResearchedTechs\(\);/.test(execS) &&
+	/for \(const tech of feitas\)/.test(execS) &&
 	/IID_TechnologyManager/.test(execS));
 check("com guarda, porque nem todo jogador tem o componente",
 	/if \(cmpTechAlly && cmpTechAlly\.GetResearchedTechs\)/.test(execS));

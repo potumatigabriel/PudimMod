@@ -68,8 +68,10 @@ check("e a procedência disso está escrita, com quem foi conferido",
 
 // Observando não há "meus inimigos": a varredura de quem está sob ataque passa a olhar
 // todos, senão nenhum jogador apareceria como atacado na tela de quem assiste.
+// Desde 28/09 a varredura e UMA passada por todos os jogadores, observando ou nao (ver
+// tools/test_ally_stats_passada.js, que compara com a versao antiga).
 check("a varredura de ataques cobre todos os jogadores no modo observador",
-	/if \(observando\) \{\s*\n\s*globalEnemies = \[\];\s*\n\s*for \(let p = 1; p < cmpPlayerManager\.GetNumPlayers\(\); \+\+p\) globalEnemies\.push\(p\);/.test(execS));
+	/for \(let p = 1; p < numPlayers; \+\+p\) \{\s*\n\s*const g = gatherersBy\[p\]/.test(execS));
 
 // ── O painel ───────────────────────────────────────────────────────────────────────────
 check("usa a global do jogo, não um estado próprio",

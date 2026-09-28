@@ -3556,6 +3556,10 @@ function pudim_ClasseDaTecnologia(tech) {
 		if (tech.indexOf(p) === 0) return "eco";
 	return "mil";
 }
+// jogador → { n: quantas pesquisas feitas, eco, mil }. Variável do script, não do componente:
+// não entra no estado serializado (a checagem de sincronia do multiplayer compara só o
+// estado dos componentes), e cada partida carrega o script de novo, zerando o cache.
+const g_PudimUpgCache = new Map();
 
 GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
     let cmpPlayerManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_PlayerManager);
@@ -3584,48 +3588,70 @@ GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
     let allies = [];
     let cmpDiplomacy = QueryPlayerIDInterface(player, IID_Diplomacy);
 
-    // ── Quem está sendo atacado: UMA varredura das entidades inimigas ────────────────
-    // Esta varredura ficava DENTRO do laço de aliados: num 4v4 ela rodava 16 vezes por
-    // segundo (4 aliados × 4 inimigos), percorrendo todas as entidades de cada inimigo.
-    // Agora é uma passada só, montando dono-atacado → posições atingidas, e cada aliado
-    // apenas consulta o mapa. O resultado é o mesmo com uma fração do custo.
-    const attackedByOwner = {};
-    {
-        // Observando, não há "meus inimigos": qualquer ataque de qualquer um interessa, então
-        // a varredura passa por todos os jogadores. O mapa é montado por dono do ALVO, então
-        // o resto da conta continua igual — só a fonte da lista muda.
-        let globalEnemies;
-        if (observando) {
-            globalEnemies = [];
-            for (let p = 1; p < cmpPlayerManager.GetNumPlayers(); ++p) globalEnemies.push(p);
-        } else {
-            globalEnemies = cmpDiplomacy ? (cmpDiplomacy.GetEnemies() || []) : [];
+    // ── UMA varredura de entidades para a barra inteira ──────────────────────────────
+    //
+    // Antes eram duas: uma pelos inimigos (quem está atacando o quê) e outra por aliado,
+    // que além das ordens perguntava seis classes a CADA entidade, edifícios inclusive.
+    // A barra atualiza a cada segundo, então num 4v4 de 200 de população eram milhares de
+    // consultas por segundo só para contar tipo de unidade.
+    //
+    // As contagens por tipo agora saem prontas do motor (GetClassCounts, mais abaixo). Esta
+    // passada ficou só com o que depende da ORDEM de cada unidade — coletor e combate — e
+    // olha cada entidade uma vez só:
+    //   • coletor: ordem Gather, por recurso (a mesma conta de antes; RETURNINGRESOURCE é
+    //     subestado do GATHER no UnitAI, então quem leva ao armazém continua contado);
+    //   • combate: ordem Attack/WalkAndFight com alvo VIVO de um INIMIGO do atacante. Vale
+    //     para os dois lados: o atacante entra em combatPointsBy[dono], o alvo em
+    //     attackedByOwner[dono do alvo] (quem só apanha também está em combate).
+    // Gaia (dono 0) nunca é inimigo: caçar galinha é Attack, mas não é batalha.
+    const numPlayers = cmpPlayerManager.GetNumPlayers();
+    const inimigosCache = {};
+    const inimigosDe = (p) => {
+        if (!(p in inimigosCache)) {
+            const d = QueryPlayerIDInterface(p, IID_Diplomacy);
+            inimigosCache[p] = d ? (d.GetEnemies() || []) : [];
         }
-        for (const ep of globalEnemies) {
-            const eEnts = cmpRangeManager.GetEntitiesByPlayer(ep) || [];
-            for (const eE of eEnts) {
-                const eAI = Engine.QueryInterface(eE, IID_UnitAI);
-                if (!eAI || !eAI.orderQueue || !eAI.orderQueue.length) continue;
-                const eOrd = eAI.orderQueue[0];
-                if (eOrd.type !== "Attack" && eOrd.type !== "WalkAndFight") continue;
-                const tgt = eOrd.data && eOrd.data.target;
-                if (!tgt) continue;
-                const tOwn = Engine.QueryInterface(tgt, IID_Ownership);
-                if (!tOwn) continue;
-                const owner = tOwn.GetOwner();
-                if (owner <= 0) continue;
-                const tHp = Engine.QueryInterface(tgt, IID_Health);
-                if (!tHp || tHp.GetHitpoints() <= 0) continue;
-                const tp = Engine.QueryInterface(tgt, IID_Position);
-                if (!tp || !tp.IsInWorld()) continue;
+        return inimigosCache[p];
+    };
+    const attackedByOwner = {};
+    const combatPointsBy = {};
+    const gatherersBy = {};
+    for (let p = 1; p < numPlayers; ++p) {
+        const g = gatherersBy[p] = { "food": 0, "wood": 0, "stone": 0, "metal": 0 };
+        const ents = cmpRangeManager.GetEntitiesByPlayer(p) || [];
+        for (const ent of ents) {
+            const ai = Engine.QueryInterface(ent, IID_UnitAI);
+            if (!ai || !ai.orderQueue || !ai.orderQueue.length) continue;
+            const ord = ai.orderQueue[0];
+            if (ord.type === "Gather") {
+                const resType = ord.data && ord.data.type && ord.data.type.generic;
+                if (resType && g[resType] !== undefined) g[resType]++;
+                continue;
+            }
+            if (ord.type !== "Attack" && ord.type !== "WalkAndFight") continue;
+            const tgt = ord.data && ord.data.target;
+            if (!tgt) continue;
+            const tOwn = Engine.QueryInterface(tgt, IID_Ownership);
+            if (!tOwn) continue;
+            const owner = tOwn.GetOwner();
+            if (owner <= 0 || inimigosDe(p).indexOf(owner) === -1) continue;
+            const tHp = Engine.QueryInterface(tgt, IID_Health);
+            if (!tHp || tHp.GetHitpoints() <= 0) continue;
+            const cp = Engine.QueryInterface(ent, IID_Position);
+            if (cp && cp.IsInWorld()) {
+                const cpp = cp.GetPosition2D();
+                // formato {x, z}: é o que triggerFlareAction espera
+                (combatPointsBy[p] = combatPointsBy[p] || []).push({ x: cpp.x, z: cpp.y });
+            }
+            const tp = Engine.QueryInterface(tgt, IID_Position);
+            if (tp && tp.IsInWorld()) {
                 const tpp = tp.GetPosition2D();
-                if (!attackedByOwner[owner]) attackedByOwner[owner] = [];
-                attackedByOwner[owner].push({ x: tpp.x, z: tpp.y });
+                (attackedByOwner[owner] = attackedByOwner[owner] || []).push({ x: tpp.x, z: tpp.y });
             }
         }
     }
 
-    for (let i = 1; i < cmpPlayerManager.GetNumPlayers(); ++i) {
+    for (let i = 1; i < numPlayers; ++i) {
         let cmpAlly = QueryPlayerIDInterface(i, IID_Player);
         const entra = observando
             ? !!cmpAlly
@@ -3675,15 +3701,51 @@ GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
             // GetResearchedTechs() devolve um Set e está conferido no disco: o autociv usa
             // `cmpTechnologyManager?.GetResearchedTechs().size` em
             // simulation/components/GuiInterface~autociv.js. Não é API suposta.
+            //
+            // Pesquisa não se desfaz: o Set só cresce. Então o TAMANHO dele diz se algo mudou,
+            // e a classificação só é refeita quando cresceu — em vez de a cada segundo.
             const cmpTechAlly = QueryPlayerIDInterface(i, IID_TechnologyManager);
             if (cmpTechAlly && cmpTechAlly.GetResearchedTechs) {
                 try {
-                    for (const tech of cmpTechAlly.GetResearchedTechs()) {
-                        const c = pudim_ClasseDaTecnologia(tech);
-                        if (c === "eco") stats.upgEco++;
-                        else if (c === "mil") stats.upgMil++;
+                    const feitas = cmpTechAlly.GetResearchedTechs();
+                    let c = g_PudimUpgCache.get(i);
+                    if (!c || c.n !== feitas.size) {
+                        c = { "n": feitas.size, "eco": 0, "mil": 0 };
+                        for (const tech of feitas) {
+                            const cl = pudim_ClasseDaTecnologia(tech);
+                            if (cl === "eco") c.eco++;
+                            else if (cl === "mil") c.mil++;
+                        }
+                        g_PudimUpgCache.set(i, c);
                     }
+                    stats.upgEco = c.eco;
+                    stats.upgMil = c.mil;
                 } catch (e) {}
+            }
+
+            // ── Contagem por tipo de unidade: pronta no motor ────────────────────────────
+            //
+            // TechnologyManager mantém classCounts (classe → quantas entidades) e
+            // typeCountsByClass (classe → template → quantas), atualizados a cada troca de
+            // dono (OnGlobalOwnershipChanged), sem contar fundação. Conferido em
+            // simulation/components/TechnologyManager.js da A28; o autociv e o ModernGUI
+            // usam GetClassCounts na barra deles. As classes vêm de GetClassesList, a mesma
+            // lista que o HasClass de antes consultava.
+            //
+            // "infantry" é cidadão-soldado que NÃO é FastMoving. Isso não é uma classe, mas
+            // sai exato cruzando os templates: o que está em CitizenSoldier e não em
+            // FastMoving.
+            if (cmpTechAlly && cmpTechAlly.GetClassCounts) {
+                const cc = cmpTechAlly.GetClassCounts() || {};
+                stats.support  = cc.Support    || 0;
+                stats.cavalry  = cc.FastMoving || 0;
+                stats.ranged   = cc.Ranged     || 0;
+                stats.siege    = cc.Siege      || 0;
+                stats.champion = cc.Champion   || 0;
+                const porTipo = cmpTechAlly.GetTypeCountsByClass ? (cmpTechAlly.GetTypeCountsByClass() || {}) : {};
+                const cs = porTipo.CitizenSoldier || {}, fm = porTipo.FastMoving || {};
+                for (const tpl in cs)
+                    if (!(tpl in fm)) stats.infantry += cs[tpl];
             }
             
             const cmpStatisticsTracker = QueryPlayerIDInterface(i, IID_StatisticsTracker);
@@ -3713,68 +3775,16 @@ GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
                 }
             }
             
-            // Inimigos REAIS deste jogador. Usado para não confundir caça com batalha:
-            // atacar galinha/veado é ordem "Attack" contra Gaia (owner 0), não combate.
-            const cmpAllyDiplo = QueryPlayerIDInterface(i, IID_Diplomacy);
-            const allyEnemies = cmpAllyDiplo ? (cmpAllyDiplo.GetEnemies() || []) : [];
-            const isRealEnemy = (owner) => owner > 0 && allyEnemies.indexOf(owner) !== -1;
+            // Coletores e pontos de combate deste jogador: saem da passada única lá em cima.
+            const g = gatherersBy[i] || {};
+            for (const r of ["food", "wood", "stone", "metal"]) stats.gatherers[r] = g[r] || 0;
             // Pontos de contato de combate — o flare vai no centro do maior aglomerado,
             // não na primeira unidade que aparecer na iteração (ordem arbitrária).
-            const combatPoints = [];
-
-            const ents = cmpRangeManager.GetEntitiesByPlayer(i);
-            if (ents) {
-                for (let ent of ents) {
-                    const cmpIdentity = Engine.QueryInterface(ent, IID_Identity);
-                    if (!cmpIdentity) continue;
-                    
-                    if (cmpIdentity.HasClass("Support")) stats.support++;
-                    if (cmpIdentity.HasClass("CitizenSoldier") && !cmpIdentity.HasClass("FastMoving")) stats.infantry++;
-                    if (cmpIdentity.HasClass("FastMoving")) stats.cavalry++;
-                    if (cmpIdentity.HasClass("Ranged")) stats.ranged++;
-                    if (cmpIdentity.HasClass("Siege")) stats.siege++;
-                    if (cmpIdentity.HasClass("Champion")) stats.champion++;
-                    
-                    const cmpUnitAI = Engine.QueryInterface(ent, IID_UnitAI);
-                    const _ord0es = cmpUnitAI && cmpUnitAI.orderQueue && cmpUnitAI.orderQueue.length > 0 ? cmpUnitAI.orderQueue[0] : null;
-                    if (_ord0es && _ord0es.type === "Gather") {
-                        if (_ord0es.data && _ord0es.data.type) {
-                            const resType = _ord0es.data.type.generic;
-                            if (stats.gatherers[resType] !== undefined) {
-                                stats.gatherers[resType]++;
-                            }
-                        }
-                    }
-                    
-                    // Combate: unidade com ordem Attack/WalkAndFight cujo alvo esteja vivo.
-                    // Serve para o pisca-pisca da barra de aliados e para o flare automático.
-                    // Guardamos também a posição para o flare cair no local certo.
-                    if (_ord0es && (_ord0es.type === "Attack" || _ord0es.type === "WalkAndFight")) {
-                        const tgt = _ord0es.data && _ord0es.data.target;
-                        if (tgt) {
-                            // Só conta como combate se o alvo pertence a um jogador INIMIGO.
-                            // Gaia (owner 0) = caça/animais: nunca é batalha.
-                            const tOwnC = Engine.QueryInterface(tgt, IID_Ownership);
-                            if (tOwnC && isRealEnemy(tOwnC.GetOwner())) {
-                                const tgtHp = Engine.QueryInterface(tgt, IID_Health);
-                                if (tgtHp && tgtHp.GetHitpoints() > 0) {
-                                    const cp = Engine.QueryInterface(ent, IID_Position);
-                                    if (cp && cp.IsInWorld()) {
-                                        const cpp = cp.GetPosition2D();
-                                        // formato {x, z}: é o que triggerFlareAction espera
-                                        combatPoints.push({ x: cpp.x, z: cpp.y });
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            const combatPoints = (combatPointsBy[i] || []).slice();
 
             // Também conta como combate estar SOFRENDO ataque: inimigo com ordem de ataque
             // mirando uma unidade/estrutura deste jogador (pega quem está só apanhando).
             // Posição dos NOSSOS alvos atacados: é lá que o reforço precisa chegar.
-            // Vem do mapa montado numa passada única antes deste laço.
             if (combatPoints.length === 0 && attackedByOwner[i])
                 for (const p of attackedByOwner[i])
                     combatPoints.push(p);

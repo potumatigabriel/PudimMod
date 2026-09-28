@@ -2655,6 +2655,26 @@ function pudim_ProcessAutoQueue()
 			} catch (e) {}
 			vagasPop = Math.max(0, vagasPop - custo * n);
 		};
+		// ── E O DINHEIRO TAMBÉM É SALDO ─────────────────────────────────────────────────
+		//
+		// `res` era lido uma vez e nunca descontado. Com sete edifícios e dinheiro para três
+		// lotes, CADA edifício calculava o que podia pagar contra o estoque cheio e mandava o
+		// seu. O motor desconta o recurso quando o lote entra na fila (Trainer.Item.Queue →
+		// TrySubtractResources), então os primeiros passavam e os outros eram RECUSADOS em
+		// silêncio — e o mod ainda os marcava como semeados e esperava 7s para tentar de
+		// novo. Log 20260927-174017, aos 95,2s: sete edifícios semeados no mesmo instante com
+		// `paga=1`.
+		//
+		// A técnica é a do ModernGUI (PanelScripts.trainUnits: "Simulate resource
+		// consumption this tick"): descontar o custo de cada lote antes de decidir o próximo
+		// edifício. Reescrita aqui, não copiada — o repositório deles não tem licença.
+		const gastaRecurso = function(tpl, n) {
+			let td = null;
+			try { td = GetTemplateData(tpl); } catch (e) {}
+			if (!td || !td.cost) return;
+			for (const rk of ["food", "wood", "stone", "metal"])
+				if (td.cost[rk] > 0) res[rk] = Math.max(0, (+res[rk] || 0) - td.cost[rk] * n);
+		};
 
 		// Cachear template e aprender o tamanho de lote que o usuário configurou.
 		// IMPORTANTE: qItem.count é quanto FALTA treinar naquele lote — o motor decrementa
@@ -2967,7 +2987,7 @@ function pudim_ProcessAutoQueue()
 							Engine.PostNetworkCommand({ "type": "stop-production", "entity": b.ent, "id": cur.id });
 							Engine.PostNetworkCommand({ "type": "train", "entities": [b.ent],
 								"template": tplDesejado, "count": lote });
-							gastaVagas(tplDesejado, lote);
+							gastaVagas(tplDesejado, lote); gastaRecurso(tplDesejado, lote);
 							g_PudimQueueSeededTpl[b.ent] = tplDesejado;
 							g_PudimQueueSeededAt[b.ent] = nowQueue;
 							pudim_Log("INFO", "QUEUE", "edifício " + b.ent + " trocado para " +
@@ -2986,7 +3006,7 @@ function pudim_ProcessAutoQueue()
 						if (affordable >= desiredCount && cur.id !== undefined) {
 							Engine.PostNetworkCommand({ "type": "stop-production", "entity": b.ent, "id": cur.id });
 							Engine.PostNetworkCommand({ "type": "train", "entities": [b.ent], "template": tpl, "count": desiredCount });
-							gastaVagas(tpl, desiredCount);
+							gastaVagas(tpl, desiredCount); gastaRecurso(tpl, desiredCount);
 							g_PudimQueueSeededAt[b.ent] = nowQueue;
 							pudim_Log("INFO", "QUEUE", "edifício " + b.ent + " lote degradado x" + curCount +
 								" trocado por x" + desiredCount + " " + tpl.split("/").pop());
@@ -3083,7 +3103,7 @@ function pudim_ProcessAutoQueue()
 				pudim_ComputeAffordableCount(template, desiredCount, res), vagasPop);
 			if (affordable <= 0) continue;
 			Engine.PostNetworkCommand({ "type": "train", "entities": [b.ent], "template": template, "count": affordable });
-			gastaVagas(template, affordable);
+			gastaVagas(template, affordable); gastaRecurso(template, affordable);
 			g_PudimQueueSeededAt[b.ent] = nowQueue;
 			// Guarda O QUE foi semeado: é a única forma de, depois, reconhecer um lote como
 			// do mod sem confundi-lo com uma ordem do jogador no mesmo edifício.

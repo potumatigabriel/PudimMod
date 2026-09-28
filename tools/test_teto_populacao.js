@@ -139,6 +139,31 @@ check("e os TRES caminhos que semeiam descontam",
 	(execP.match(/gastaVagas\((tplDesejado, lote|tpl, desiredCount|template, affordable)\);/g) || []).length === 3,
 	(execP.match(/gastaVagas\(/g) || []).length - 1 + " chamada(s)");
 
+// ── E O DINHEIRO TAMBEM E SALDO (28/09) ────────────────────────────────────────────────
+// `res` era lido uma vez e nunca descontado: sete edificios calculavam contra o estoque
+// cheio, o motor aceitava os primeiros e recusava os outros em silencio. Log
+// 20260927-174017, 95,2s: sete semeados no mesmo instante com `paga=1`. Tecnica do ModernGUI
+// (PanelScripts.trainUnits, "Simulate resource consumption this tick"), reescrita.
+check("existe o desconto de recurso por lote",
+	/const gastaRecurso = function\(tpl, n\)/.test(execP) &&
+	/res\[rk\] = Math\.max\(0, \(\+res\[rk\] \|\| 0\) - td\.cost\[rk\] \* n\);/.test(execP));
+check("e os TRES caminhos que semeiam descontam recurso junto com as vagas",
+	/gastaVagas\(tplDesejado, lote\); gastaRecurso\(tplDesejado, lote\);/.test(execP) &&
+	/gastaVagas\(tpl, desiredCount\); gastaRecurso\(tpl, desiredCount\);/.test(execP) &&
+	/gastaVagas\(template, affordable\); gastaRecurso\(template, affordable\);/.test(execP));
+function cicloDinheiro(comida, custo, edificios, lote) {
+	let saldo = comida, lotes = 0;
+	for (let i = 0; i < edificios; i++) {
+		const n = Math.min(lote, Math.floor(saldo / custo));
+		if (n <= 0) continue;
+		lotes++; saldo -= n * custo;
+	}
+	return lotes;
+}
+check("150 de comida, aldea a 50, sete edificios de lote 1: tres lotes, nao sete",
+	cicloDinheiro(150, 50, 7, 1) === 3);
+check("e sem dinheiro nenhum edificio semeia", cicloDinheiro(30, 50, 7, 1) === 0);
+
 // O caso do log 20260927-174017, espelhado: uma vaga, cinco edificios querendo semear.
 function ciclo(vagas, edificios, custo) {
 	let saldo = vagas, semeados = 0;

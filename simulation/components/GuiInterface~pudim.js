@@ -7643,15 +7643,24 @@ GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 		if (n.indexOf("phase_") !== -1) return 0;
 		// Techs excluídas explicitamente (inúteis ou imprevisíveis)
 		if (n.indexOf("fertility") !== -1 || n.indexOf("festival") !== -1) return 0;
+		// ── A ORDEM DO COMEÇO VEM DOS REPLAYS (28/09) ────────────────────────────────────
+		//
+		// Pedido: "fazer o upgrade do machado antes do cesto". E os replays concordam: dos 15
+		// jogadores mais rápidos a pop 200 (multiplayer, recurso padrão) com quartel medido,
+		// ANTES do 1º quartel 13 fizeram o machado (gather_lumbering_ironaxes), 14 o cesto de
+		// vime (gather_wicker_baskets) — e só 1 a cesta de capacidade (gather_capacity_basket).
+		// O mod fazia a cesta de capacidade PRIMEIRO (aos 1:44 na partida do relato), e ela
+		// foi uma das três pesquisas que atrasaram o 1º quartel para 3:56.
+		//
+		// Machado (e os passos seguintes da madeira)
+		if (n.indexOf("woodcutting") !== -1 || n.indexOf("lumbering") !== -1) return 115;
 		// Cestos de vime: modifica ResourceGatherer/Rates/food.fruit — é bônus de COMIDA
 		// (o comentário antigo dizia "madeira", conferido errado contra o JSON da tech)
 		if (n.indexOf("wicker") !== -1) return 110;
 		// Capacidade de carga (Cestas → Carrinho de Mão → Carroça): soma +5 em food, wood,
-		// stone E metal de uma vez, então rende mais que qualquer tech de um recurso só.
-		// Cestas já é liberada na Fase 1 (requirements: phase_village) e a regra de fase
-		// daqui a permite; faltava prioridade — com 76 o armazém sempre escolhia outra antes.
-		if (n.indexOf("gather_capacity") !== -1) return 105;
-		if (n.indexOf("woodcutting") !== -1 || n.indexOf("lumbering") !== -1) return 100;
+		// stone E metal de uma vez. Rende, mas não é o que os melhores fazem cedo — ver acima.
+		// Fica depois das de taxa de coleta da fase (fazenda 92, mineração 84).
+		if (n.indexOf("gather_capacity") !== -1) return 80;
 		if (n.indexOf("farming") !== -1 || n.indexOf("plows") !== -1 || n.indexOf("rotation") !== -1) return 92;
 		if (n.indexOf("mining") !== -1 || n.indexOf("silver") !== -1) return 84;
 		if (n.indexOf("gather_") !== -1) return 76;

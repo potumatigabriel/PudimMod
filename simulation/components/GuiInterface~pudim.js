@@ -5807,7 +5807,6 @@ GuiInterface.prototype.pudim_GetInitialBalanceData = function(player, data)
 	}
 	return result;
 };
-GuiInterface.prototype.pudim_GetMarketBarterData = function(player, data) { return null; };
 // Focus fire: direciona todos os soldados em combate para o alvo mais fraco.
 // Prioridade: unidades de ataque à distância (Ranged) com HP mais baixo.
 // Retorna: [{ units: [entityIds], target: entityId }] ou []
@@ -8146,7 +8145,6 @@ var pudim_exposedFunctions = {
   	"pudim_GetPlayerEconomyStats": 1,
   	"pudim_PushNotification": 1,
   	"pudim_GetInitialBalanceData": 1,
-  	"pudim_GetMarketBarterData": 1,
   	"pudim_GetSmartDropsiteData": 1,
   	"pudim_GetProactiveStorehouseData": 1,
   	"pudim_GetProactiveFarmsteadData": 1,

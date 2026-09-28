@@ -52,11 +52,11 @@
 			},
 			{
 				"type": "boolean",
-				"config": "pudim.advanced.barter",
-				"label": "[color=\"120 220 255\"]Economia:[/color] Mercado Inteligente",
-				"tooltip": "Vende no mercado o recurso que está sobrando para comprar o que está faltando, respeitando a taxa de câmbio do momento e sem despejar tudo de uma vez.",
-				"label_en": "[color=\"120 220 255\"]Economy:[/color] Smart Market",
-				"tooltip_en": "Sells the resource you have to spare to buy the one you are short of, at the current exchange rate and without dumping everything at once."
+				"config": "pudim.mercado.auto",
+				"label": "[color=\"120 220 255\"]Economia:[/color] Mercado Automático",
+				"tooltip": "Com um mercado pronto, troca 100 de cada vez: compra o que está faltando para o que você está guardando (fase, arma de cerco, pesquisa em cadeia) ou o recurso que quase zerou, e paga com o que sobra acima de 1000 fora do guardado. Só troca se receber pelo menos 60 por 100 entregues — como o preço piora a cada troca, isso impede de despejar tudo de uma vez. Uma troca a cada 3 segundos. Desligado por padrão.",
+				"label_en": "[color=\"120 220 255\"]Economy:[/color] Automatic Market",
+				"tooltip_en": "With a finished market, trades 100 at a time: buys what is missing for what you are saving for (phase, siege engine, research chain) or a resource that has almost run out, and pays with what you have above 1000 outside the savings. It only trades when it gets at least 60 for every 100 given — since the price worsens with every trade, this keeps it from dumping everything at once. One trade every 3 seconds. Off by default."
 			},
 			{
 				"type": "boolean",

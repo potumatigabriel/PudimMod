@@ -1355,7 +1355,6 @@ function pudim_ToggleRepeatBuild()
 
 /** Configuração dos Toggles Avançados */
 var g_PudimAdvancedAIEnabled = {
-	"barter": Engine.ConfigDB_GetValue("user", "pudim.advanced.barter") !== "false",
 	"dropsites": Engine.ConfigDB_GetValue("user", "pudim.advanced.dropsites") !== "false",
 	// retreat e focus nascem DESLIGADOS (=== "true" em vez de !== "false"): são as duas
 	// ajudas que mais brigam com o controle manual em combate, e é assim que o mod é
@@ -1990,6 +1989,80 @@ function pudim_EscolherTributo(eu, aliados, guardado, agora, ultimo) {
 	return null;
 }
 
+// ─── Mercado automático ──────────────────────────────────────────────────────────────
+//
+// O "Mercado Inteligente" existia no painel desde 10/08, mas a função da simulação que
+// decidia a troca sempre devolveu null: a opção vinha ligada e nunca trocou nada. Esta é a
+// primeira versão que troca de verdade. Chave NOVA (pudim.mercado.auto), desligada por
+// padrão: quem tinha a antiga gravada como "true" nunca viu ela gastar nada, e não pode
+// passar a gastar sem saber.
+//
+// O mercado do jogo, conferido em simulation/components/Barter.js da A28:
+//   • só aceita 100 ou 500 por troca (DEAL_AMOUNT, BATCH_SIZE);
+//   • recebe-se round(venda[s] / compra[b] × 100);
+//   • cada troca afasta o preço dos dois recursos em 2% (DIFFERENCE_PER_DEAL), e ele volta
+//     0,5% a cada 5 s (DIFFERENCE_RESTORE, RESTORE_TIMER_INTERVAL).
+// Os preços já chegam prontos na GUI: GetSimState().players[id].barterPrices e canBarter
+// (GuiInterface.GetSimulationState). Nenhuma consulta nova à simulação.
+//
+// A regra:
+//   • compra o que FALTA: o que está guardado (fase, cerco, cadeia) e ainda não juntou, ou
+//     um recurso que quase zerou (abaixo de PUDIM_MERCADO_PISO);
+//   • vende só o que SOBRA: acima do guardado mais PUDIM_MERCADO_SOBRA — a mesma folga do
+//     tributo, então os dois não brigam pelo mesmo recurso;
+//   • só a preço razoável: recebendo pelo menos PUDIM_MERCADO_TAXA_MIN do que entrega. O
+//     preço piora a cada troca, então é isto que impede de despejar tudo de uma vez;
+//   • de 100 em 100, uma troca a cada PUDIM_MERCADO_INTERVALO.
+const PUDIM_MERCADO_PISO = 100;
+const PUDIM_MERCADO_SOBRA = 1000;
+const PUDIM_MERCADO_TAXA_MIN = 0.6;
+const PUDIM_MERCADO_INTERVALO = 3000;
+const PUDIM_MERCADO_LOTE = 100;
+var g_PudimMercadoAccum = 0;
+
+/** Decide uma troca, ou null. Pura: não lê nem manda nada. */
+function pudim_EscolherTroca(res, precos, guardado) {
+	if (!res || !precos || !precos.sell || !precos.buy) return null;
+	guardado = guardado || {};
+	const codigos = Object.keys(precos.sell).filter(r => precos.buy[r] > 0);
+	let compra = null;
+	for (const r of codigos) {
+		const tem = res[r] || 0;
+		const falta = Math.max((guardado[r] || 0) - tem, PUDIM_MERCADO_PISO - tem);
+		if (falta > 0 && (!compra || falta > compra.falta)) compra = { r: r, falta: falta };
+	}
+	if (!compra) return null;
+	let venda = null;
+	for (const r of codigos) {
+		if (r === compra.r) continue;
+		const livre = (res[r] || 0) - (guardado[r] || 0);
+		if (livre < PUDIM_MERCADO_SOBRA + PUDIM_MERCADO_LOTE) continue;
+		const ganho = Math.round(precos.sell[r] / precos.buy[compra.r] * PUDIM_MERCADO_LOTE);
+		if (ganho < PUDIM_MERCADO_TAXA_MIN * PUDIM_MERCADO_LOTE) continue;
+		// Entre os que sobram, o que rende mais; empate, o que tem mais sobra.
+		if (!venda || ganho > venda.ganho || (ganho === venda.ganho && livre > venda.livre))
+			venda = { r: r, ganho: ganho, livre: livre };
+	}
+	if (!venda) return null;
+	return { "sell": venda.r, "buy": compra.r, "amount": PUDIM_MERCADO_LOTE,
+	         "ganho": venda.ganho, "falta": compra.falta };
+}
+
+/** Faz uma troca no mercado, quando ligado. Emite comando: roda abaixo da trava de espectador. */
+function pudim_ProcessMercado() {
+	if (Engine.ConfigDB_GetValue("user", "pudim.mercado.auto") !== "true") return;
+	const sim = GetSimState();
+	const eu = sim && sim.players && sim.players[Engine.GetPlayerID()];
+	if (!eu || !eu.canBarter || !eu.barterPrices) return;
+	const t = pudim_EscolherTroca(eu.resourceCounts, eu.barterPrices, g_PudimGuardado.total);
+	if (!t) return;
+	// Comando do jogo base, o mesmo do botão do mercado (gui/session/trade/BarterButton.js):
+	// Commands.js → Barter.ExchangeResources, que confere mercado, quantidade e saldo.
+	Engine.PostNetworkCommand({ "type": "barter", "sell": t.sell, "buy": t.buy, "amount": t.amount });
+	pudim_Log("INFO", "MERCADO", "vendeu " + t.amount + " " + t.sell + " por ~" + t.ganho + " " +
+		t.buy + " (faltavam " + Math.ceil(t.falta) + ")");
+}
+
 /** Manda o tributo, quando ligado e quando há sobra. Emite comando. */
 function pudim_ProcessTributo() {
 	if (Engine.ConfigDB_GetValue("user", "pudim.tributo.auto") !== "true") return;
@@ -2179,7 +2252,6 @@ function pudim_ToggleAdvancedAI(key)
 function pudim_UpdateAdvancedAILabels()
 {
 	const configs = [
-		{ key: "barter", labelId: "pudim_toggleBarterLabel", name: "Mercado Inteligente" },
 		{ key: "dropsites", labelId: "pudim_toggleDropsitesLabel", name: "Smart Dropsites" },
 		{ key: "retreat", labelId: "pudim_toggleRetreatLabel", name: "Auto-Retreat (HP < 20%)" },
 		{ key: "focus", labelId: "pudim_toggleFocusLabel", name: "Smart Focus Fire" },
@@ -2606,6 +2678,11 @@ function pudim_Tick(dt)
 	if (g_PudimTributoAccum >= PUDIM_TRIBUTO_INTERVALO) {
 		g_PudimTributoAccum = 0;
 		try { pudim_ProcessTributo(); } catch (e) {}
+	}
+	g_PudimMercadoAccum += dt;
+	if (g_PudimMercadoAccum >= PUDIM_MERCADO_INTERVALO) {
+		g_PudimMercadoAccum = 0;
+		try { pudim_ProcessMercado(); } catch (e) {}
 	}
 
 	// Balanceamento inicial de workers: a cada 1s até concluído
@@ -3890,21 +3967,8 @@ function pudim_ProcessAdvancedAI()
 	} // fim if 30s cooldown
 	} // fim if 5s check
 
-	// 3. Mercado Inteligente
-	if (g_PudimAdvancedAIEnabled["barter"]) {
-		try {
-			const barterData = Engine.GuiInterfaceCall("pudim_GetMarketBarterData");
-			if (barterData && barterData.sell && barterData.buy)
-			{
-				Engine.PostNetworkCommand({
-					"type": "barter",
-					"sell": barterData.sell,
-					"buy": barterData.buy,
-					"amount": barterData.amount
-				});
-			}
-		} catch (e) {}
-	}
+	// 3. Mercado: saiu daqui em 28/09 para pudim_ProcessMercado (a consulta antiga à
+	//    simulação sempre devolvia null).
 
 	// 4. Smart Dropsites (Expansão de Armazéns)
 	// Gate externo: 5s entre chamadas à API (evita overhead a cada tick)

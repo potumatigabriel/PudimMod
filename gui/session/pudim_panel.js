@@ -5785,7 +5785,9 @@ const PUDIM_ABAIXO_DO_COMBATE = [
 	"pudim_serieRot4", "pudim_serieX4", "pudim_serieRot5", "pudim_serieX5",
 	"pudim_serieRot6", "pudim_serieX6",
 	"pudim_backToWorkBtn2", "pudim_selectWarriorsBtn",
-	"pudim_optionsHint", "pudim_unitHeader", "pudim_pauseTrainBtn", "pudim_unitLabel0",
+	"pudim_optionsHint", "pudim_unitHeader", "pudim_pauseTrainBtn",
+	"pudim_unitIcon0", "pudim_unitIcon1", "pudim_unitIcon2", "pudim_unitIcon3", "pudim_unitIcon4", "pudim_unitIcon5", "pudim_unitIcon6", "pudim_unitIcon7", "pudim_unitIcon8", "pudim_unitIcon9", "pudim_unitIcon10", "pudim_unitIcon11", "pudim_unitIcon12", "pudim_unitIcon13",
+	"pudim_unitLabel0",
 	"pudim_unitMinus0", "pudim_unitPlus0", "pudim_unitVal0", "pudim_unitVazio",
 	"pudim_unitLabel1", "pudim_unitMinus1", "pudim_unitPlus1", "pudim_unitVal1",
 	"pudim_unitLabel2", "pudim_unitMinus2", "pudim_unitPlus2", "pudim_unitVal2",
@@ -6303,7 +6305,7 @@ function pudim_DesenharUnidades()
 	{
 		const u = g_PudimUnitLista[i];
 		const mostra = !!u;
-		for (const parte of ["Label", "Minus", "Val", "Plus"])
+		for (const parte of ["Icon", "Label", "Minus", "Val", "Plus"])
 		{
 			const o = Engine.TryGetGUIObjectByName("pudim_unit" + parte + i);
 			if (o) try { o.hidden = !mostra; } catch (e) {}
@@ -6316,11 +6318,22 @@ function pudim_DesenharUnidades()
 		if (lbl) try { lbl.caption = u.nome + " (" + u.existentes + ")"; } catch (e) {}
 		if (val) try { val.caption = String(g_PudimUnitPesos[u.tpl] || 0); } catch (e) {}
 
-		// A ficha da unidade, no rótulo e nos dois botões: o jogador passa o mouse em
+		// O RETRATO DA UNIDADE à esquerda da linha. Ideia do ModernGUI (a proporção deles é
+		// uma fileira de retratos), reescrita. O retrato reconhece a unidade de relance,
+		// antes de ler o nome — que é o que importa numa lista de 14 tipos.
+		// Caminho do retrato: o mesmo que o indicador de obras já usa
+		// ("stretched:session/portraits/" + icone do template).
+		const ico = Engine.TryGetGUIObjectByName("pudim_unitIcon" + i);
+		if (ico) try {
+			const td = GetTemplateData(u.tpl);
+			ico.sprite = (td && td.icon) ? "stretched:session/portraits/" + td.icon : "";
+		} catch (e) {}
+
+		// A ficha da unidade, no rótulo, no retrato e nos botões: o jogador passa o mouse em
 		// qualquer ponto da linha, não só no texto. Os rótulos deixaram de ser `ghost` no
 		// XML por isto — objeto ghost não recebe mouse, e sem mouse não há tooltip.
 		const ficha = pudim_TooltipUnidade(u);
-		for (const parte of ["Label", "Minus", "Val", "Plus"]) {
+		for (const parte of ["Icon", "Label", "Minus", "Val", "Plus"]) {
 			const o = Engine.TryGetGUIObjectByName("pudim_unit" + parte + i);
 			if (!o) continue;
 			try { o.tooltip = ficha; o.tooltip_style = "sessionToolTipBold"; } catch (e) {}

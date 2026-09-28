@@ -95,7 +95,7 @@ check("e o botao e inicializado junto com os outros",
 check("o botao entra na lista do modo compacto",
 	/"pudim_pauseTrainBtn", "pudim_siegeGarrisonBtn", "pudim_toggleAutoHouseBtn"/.test(execP));
 check("e na tabela que desce com o estimador colapsado",
-	/"pudim_unitHeader", "pudim_pauseTrainBtn", "pudim_unitLabel0"/.test(execP));
+	/"pudim_unitHeader", "pudim_pauseTrainBtn",\s*"pudim_unitIcon0"/.test(execP));
 
 // ══ PARTE 2: GUARNECER A ARMA DE CERCO ═════════════════════════════════════════════════
 console.log("\n-- guarnecer a arma de cerco");

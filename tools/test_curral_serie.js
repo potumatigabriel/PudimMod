@@ -116,7 +116,7 @@ check("nada colide com a fileira nova (730-750)",
 // lista cresce em tempo de execução, e só aparece o que cabe na tela. Elas não contam como
 // "fim do painel" — quem mede isso é tools/test_painel_cabe.js, com a régua certa.
 const extraUnidade = n => {
-	const mm = /^pudim_unit(?:Label|Minus|Val|Plus)(\d+)$/.exec(n);
+	const mm = /^pudim_unit(?:Icon|Label|Minus|Val|Plus)(\d+)$/.exec(n);
 	return !!mm && +mm[1] >= 5;
 };
 const fim = Math.max(...objs

@@ -84,7 +84,7 @@ const PASSO = +/const PUDIM_UNIT_PASSO = (\d+);/.exec(panel)[1];
 const MARGEM = +/const PUDIM_UNIT_MARGEM = (\d+);/.exec(panel)[1];
 const MAXLINHAS = +/const PUDIM_UNIT_LINHAS = (\d+);/.exec(panel)[1];
 const COMBAT_ALTURA = +/const PUDIM_COMBAT_ALTURA = (\d+);/.exec(panel)[1];
-const reExtra = /^pudim_unit(?:Label|Minus|Val|Plus)(\d+)$/;
+const reExtra = /^pudim_unit(?:Icon|Label|Minus|Val|Plus)(\d+)$/;
 const ehExtra = nome => {
 	const mm = reExtra.exec(nome);
 	return !!mm && +mm[1] >= BASE;
@@ -92,7 +92,7 @@ const ehExtra = nome => {
 const fixos = itens.filter(i => !ehExtra(i.nome));
 const extras = itens.filter(i => ehExtra(i.nome));
 check("as linhas extras de unidade existem no XML para a JS poder mostrá-las",
-	extras.length === (MAXLINHAS - BASE) * 4, extras.length);
+	extras.length === (MAXLINHAS - BASE) * 5, extras.length);   // retrato, rotulo, -, valor, +
 
 const foraDaTela = fixos.filter(i => i.y2 > CORTE);
 check("nenhum objeto fixo do painel cai fora da tela",

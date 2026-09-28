@@ -64,8 +64,9 @@ check("existe a funcao que monta a ficha",
 	/function pudim_TooltipUnidade\(u\)/.test(execP));
 check("ela sai do template, que e a fonte dos dados",
 	/td = GetTemplateData\(u\.tpl\)/.test(execP));
-check("a ficha vai nos QUATRO objetos da linha, nao so no texto",
-	/for \(const parte of \["Label", "Minus", "Val", "Plus"\]\) \{[\s\S]{0,260}o\.tooltip = ficha;/.test(execP));
+// Desde 28/09 a linha tem um retrato na frente: cinco partes, e a ficha vai em todas.
+check("a ficha vai nos CINCO objetos da linha (retrato, rotulo, -, valor, +), nao so no texto",
+	/for \(const parte of \["Icon", "Label", "Minus", "Val", "Plus"\]\) \{[\s\S]{0,260}o\.tooltip = ficha;/.test(execP));
 check("com o estilo de tooltip da sessao, como o resto do mod",
 	/o\.tooltip_style = "sessionToolTipBold";/.test(execP));
 
@@ -104,6 +105,20 @@ check("e avisa quando o peso zero significa 'nao treina'",
 check("o custo usa g_ViewedPlayer quando se esta assistindo",
 	/typeof g_ViewedPlayer !== "undefined" && g_ViewedPlayer > 0/.test(execP) &&
 	/\? g_ViewedPlayer : Engine\.GetPlayerID\(\)/.test(execP));
+
+// ── 6. O retrato na frente da linha (28/09) ────────────────────────────────────────────
+// Ideia do ModernGUI (a proporcao deles e uma fileira de retratos), reescrita: o retrato
+// reconhece a unidade de relance, antes de ler o nome.
+const icones = [...xml.matchAll(/<object name="pudim_unitIcon(\d+)" type="image" size="8 (\d+) 26 (\d+)"/g)];
+check("uma linha de retrato para cada linha de unidade (14)", icones.length === 14, icones.length);
+check("e o retrato fica na mesma faixa do rotulo, que abriu espaco a esquerda",
+	icones.every(m => new RegExp('name="pudim_unitLabel' + m[1] + '" type="text" size="30 ' + m[2] + ' 48%-4 ' + m[3] + '"').test(xml)));
+check("o retrato NAO e ghost: recebe mouse e mostra a ficha",
+	!/name="pudim_unitIcon\d+"[^>]*ghost="true"/.test(xml));
+check("o caminho do retrato e o que o indicador de obras ja usa",
+	/ico\.sprite = \(td && td\.icon\) \? "stretched:session\/portraits\/" \+ td\.icon : "";/.test(execP));
+check("e os retratos descem junto com o estimador colapsado",
+	/"pudim_unitIcon0", "pudim_unitIcon1",[\s\S]{0,400}"pudim_unitIcon13"/.test(panel));
 
 // ── A procedencia ──────────────────────────────────────────────────────────────────────
 check("a origem da receita fica escrita no codigo",

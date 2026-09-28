@@ -28,19 +28,11 @@
 			},
 			{
 				"type": "boolean",
-				"config": "pudim.advanced.garrison",
-				"label": "[color=\"255 200 120\"]Combate:[/color] Guarnição Defensiva",
-				"tooltip": "Durante um ataque, os trabalhadores se abrigam nos prédios próximos e voltam ao trabalho quando acalma. A casa vem antes do centro cívico: são muitas, espalhadas, e deixam o centro livre para a guarnição militar que o faz atirar. Se todos os abrigos estiverem lotados, eles correm — para o lado oposto ao atacante, longe o bastante para sair do alcance real da arma dele.",
-				"label_en": "[color=\"255 200 120\"]Combat:[/color] Defensive Garrison",
-				"tooltip_en": "During an attack, workers shelter in nearby buildings and return to work once it calms down. Houses come before the civic centre: there are many of them, spread out, and they leave the centre free for the military garrison that makes it shoot. If every shelter is full, they run — away from the attacker, far enough to leave the actual range of his weapon."
-			},
-			{
-				"type": "boolean",
 				"config": "pudim.advanced.panic",
 				"label": "[color=\"255 200 120\"]Combate:[/color] Sistema de Pânico",
-				"tooltip": "Num ataque sério, tudo para e os trabalhadores são protegidos. Só dispara com HOSTILIDADE REAL, não com proximidade: um inimigo só conta se estiver atacando algo seu ou de um aliado, ou se estiver dentro do seu território — tropa passando de largo não dispara nada. Se o seu centro cívico caiu, ou se um abrigo está cercado, o mod nunca desguarnece sozinho; isso continua sendo decisão sua.",
+				"tooltip": "Num ataque sério, tudo para e os trabalhadores se abrigam nos prédios próximos, voltando ao trabalho quando acalma. A casa vem antes do centro cívico: são muitas, espalhadas, e deixam o centro livre para a guarnição militar que o faz atirar. Se todos os abrigos estiverem lotados, eles correm para o lado oposto ao atacante, longe o bastante para sair do alcance real da arma dele. Só dispara com HOSTILIDADE REAL, não com proximidade: um inimigo só conta se estiver atacando algo seu ou de um aliado, ou se estiver dentro do seu território — tropa passando de largo não dispara nada. Se o seu centro cívico caiu, ou se um abrigo está cercado, o mod nunca desguarnece sozinho; isso continua sendo decisão sua.",
 				"label_en": "[color=\"255 200 120\"]Combat:[/color] Panic System",
-				"tooltip_en": "In a serious attack everything stops and the workers are protected. It only fires on REAL HOSTILITY, not on proximity: an enemy counts only if it is attacking something of yours or an ally's, or if it stands inside your territory — troops marching past trigger nothing. If your civic centre has fallen, or a shelter is surrounded, the mod never ungarrisons on its own; that stays your call."
+				"tooltip_en": "In a serious attack everything stops and the workers shelter in nearby buildings, returning to work once it calms down. Houses come before the civic centre: there are many of them, spread out, and they leave the centre free for the military garrison that makes it shoot. If every shelter is full, they run away from the attacker, far enough to leave the actual range of his weapon. It only fires on REAL HOSTILITY, not on proximity: an enemy counts only if it is attacking something of yours or an ally's, or if it stands inside your territory — troops marching past trigger nothing. If your civic centre has fallen, or a shelter is surrounded, the mod never ungarrisons on its own; that stays your call."
 			},
 			{
 				"type": "boolean",

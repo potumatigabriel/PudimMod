@@ -351,7 +351,7 @@ const PUDIM_CONFIG_ELEMENTS = [
 	// e somem junto com eles.
 	"pudim_toggleCombatBtn",
 	"pudim_toggleBarterBtn", "pudim_toggleDropsitesBtn", "pudim_toggleRetreatBtn",
-	"pudim_toggleFocusBtn", "pudim_toggleGarrisonBtn", "pudim_toggleDebugBtn",
+	"pudim_toggleFocusBtn", "pudim_toggleDebugBtn",
 	"pudim_togglePanicBtn", "pudim_panicStatus", "pudim_backToWorkBtn2",
 	"pudim_pauseTrainBtn", "pudim_siegeGarrisonBtn", "pudim_toggleAutoHouseBtn", "pudim_toggleCounterTrainBtn", "pudim_toggleAutoQueueBtn",
 	"pudim_counselorHeader", "pudim_counselorTip", "pudim_counselorCameraBtn"
@@ -427,7 +427,6 @@ var g_PudimGathererRes = {};
 
 /** Tracking GUI-side para evitar re-envio de ordens (não vai para simulação) */
 var g_PudimRetreating = {};
-var g_PudimGarrisoned = {};
 var g_PudimFocusFixed = {};
 
 /**
@@ -1363,7 +1362,6 @@ var g_PudimAdvancedAIEnabled = {
 	// jogado na prática. Quem quiser liga no painel; a escolha persiste normalmente.
 	"retreat": Engine.ConfigDB_GetValue("user", "pudim.advanced.retreat") === "true",
 	"focus": Engine.ConfigDB_GetValue("user", "pudim.advanced.focus") === "true",
-	"garrison": Engine.ConfigDB_GetValue("user", "pudim.advanced.garrison") !== "false",
 	"panic": Engine.ConfigDB_GetValue("user", "pudim.advanced.panic") !== "false",
 	"countertrain": Engine.ConfigDB_GetValue("user", "pudim.advanced.countertrain") !== "false",
 	"autoqueue": Engine.ConfigDB_GetValue("user", "pudim.advanced.autoqueue") !== "false"
@@ -2185,7 +2183,6 @@ function pudim_UpdateAdvancedAILabels()
 		{ key: "dropsites", labelId: "pudim_toggleDropsitesLabel", name: "Smart Dropsites" },
 		{ key: "retreat", labelId: "pudim_toggleRetreatLabel", name: "Auto-Retreat (HP < 20%)" },
 		{ key: "focus", labelId: "pudim_toggleFocusLabel", name: "Smart Focus Fire" },
-		{ key: "garrison", labelId: "pudim_toggleGarrisonLabel", name: "Auto-Guarnição Defensiva" },
 		{ key: "panic", labelId: "pudim_togglePanicLabel", name: "Sistema de Pânico" },
 		{ key: "countertrain", labelId: "pudim_toggleCounterTrainLabel", name: "Auto Counter-Train" },
 		{ key: "autoqueue", labelId: "pudim_toggleAutoQueueLabel", name: "Auto-Fila (Treino)" }
@@ -3803,27 +3800,11 @@ function pudim_ProcessAdvancedAI()
 		} catch (e) {}
 	}
 
-	// 2. Auto-Guarnição Defensiva
-	if (pudim_CombatAssistOn("garrison")) {
-		try {
-			const garrisonData = Engine.GuiInterfaceCall("pudim_GetDefensiveGarrisonData", { "garrisoned": g_PudimGarrisoned });
-			if (garrisonData && garrisonData.toGarrison && garrisonData.toGarrison.length > 0)
-			{
-				for (const task of garrisonData.toGarrison)
-				{
-					pudim_Ordenar({
-						"type": "garrison",
-						"entities": [task.unitId],
-						"target": task.towerId,
-						"queued": true
-					}, "pudim_ProcessAdvancedAI");
-					g_PudimGarrisoned[task.unitId] = true;
-				}
-			}
-		} catch (e) {}
-	}
+	// 2. (A "Auto-Guarnição Defensiva" saiu em 28/09: a função da simulação sempre devolveu
+	//    null desde que nasceu, em 10/08, e o que a descrição dela prometia — abrigar os
+	//    trabalhadores durante o ataque e soltar quando acalma — é o Sistema de Pânico.)
 
-	// 2b. Auto-Casas (independente do garrison)
+	// 2b. Auto-Casas
 	const nowTimer = Date.now();
 	// Verificar a cada 3s e permitir nova tentativa a cada 12s: com autoqueue contínuo no CC/quartel
 	// a população cresce rápido, e o intervalo de 5s/30s antigo deixava a folga (ex: "faltando 3")

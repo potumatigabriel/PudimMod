@@ -190,8 +190,9 @@ function escapados(src, nomeArq) {
 }
 const esc = escapados(panel, "painel").concat(escapados(scout, "scout"));
 check("nenhuma ordem a unidade chama Engine.PostNetworkCommand direto", esc.length === 0, esc.join(", "));
-check("e as 42 ordens convertidas passam pelo arbitro",
-	(panel.match(/pudim_Ordenar\(/g) || []).length - 1 + (scout.match(/pudim_Ordenar\(/g) || []).length >= 42,
+// 41 desde 28/09: a ordem de garrison da "Auto-Guarnicao Defensiva" saiu junto com ela.
+check("e as 41 ordens convertidas passam pelo arbitro",
+	(panel.match(/pudim_Ordenar\(/g) || []).length - 1 + (scout.match(/pudim_Ordenar\(/g) || []).length >= 41,
 	((panel.match(/pudim_Ordenar\(/g) || []).length - 1 + (scout.match(/pudim_Ordenar\(/g) || []).length) + " chamadas");
 // Sem dono o arbitro nao sabe a prioridade nem a quem pertence a reserva. Le cada chamada
 // ate o parentese que a fecha de verdade (conta aninhamento, pula strings).

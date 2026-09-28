@@ -261,7 +261,7 @@ const lista = opts[0].options;
 check("todas as opções têm rótulo, dica e chave de configuração",
 	lista.every(o => o.label && o.tooltip && o.config), lista.length);
 check("todos os interruptores que saíram do painel estão nas opções",
-	["combat", "retreat", "focus", "garrison", "panic", "countertrain",
+	["combat", "retreat", "focus", "panic", "countertrain",
 	 "dropsites", "barter", "autoqueue"].every(k =>
 		lista.some(o => o.config === "pudim.advanced." + k)));
 check("inclusive as mensagens de debug, com a chave certa",

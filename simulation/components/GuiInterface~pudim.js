@@ -3820,6 +3820,53 @@ GuiInterface.prototype.pudim_GetAllyStats = function(player, args) {
     }
     return allies;
 };
+// ── FANTASMA DE OBRA NA ESPERA ───────────────────────────────────────────────────────────
+//
+// Você posiciona um prédio sem ter o recurso; o mod guarda a obra e deixa este fantasma no
+// lugar até o recurso juntar (ideia do ModernGUI, reescrita).
+//
+// POR QUE NÃO QUEBRA O MULTIPLAYER — conferido, não suposto:
+//   • Engine.AddLocalEntity cria entidade LOCAL, que a serialização pula
+//     (ComponentManagerSerialization.cpp pula ENTITY_IS_LOCAL). É o que o próprio jogo faz
+//     no posicionamento (GuiInterface.SetBuildingPlacementPreview, "preview|" + template).
+//   • Mensagem de entidade local não chega a componente de script que assina globalmente:
+//     ComponentManager.cpp, SendGlobalMessage, "Messages for local entities shouldn't be
+//     sent to script components that subscribed globally". Por isso o SetOwner abaixo não
+//     mexe no classCounts do TechnologyManager nem em nada sincronizado.
+//   • O filtro special/filter/preview.xml só mantém componentes "safe (i.e. won't do
+//     anything that affects the synchronised simulation state)" e deixa a Obstruction com
+//     Active=false: o fantasma não bloqueia caminho nem a validação do próprio lugar.
+// A lista de fantasmas é variável do script, não do componente: fora do estado serializado.
+// Só se apaga entidade que ESTA lista criou — a GUI não consegue apagar nada real por aqui.
+const g_PudimFantasmas = new Set();
+GuiInterface.prototype.pudim_CriarFantasma = function(player, data) {
+	if (!data || typeof data.template !== "string" || !data.template) return null;
+	let ent;
+	try { ent = Engine.AddLocalEntity("preview|" + data.template); } catch (e) { return null; }
+	if (!ent) return null;
+	g_PudimFantasmas.add(ent);
+	const pos = Engine.QueryInterface(ent, IID_Position);
+	if (pos) {
+		pos.JumpTo(data.x, data.z);
+		pos.SetYRotation(data.angle || 0);
+	}
+	const own = Engine.QueryInterface(ent, IID_Ownership);
+	if (own) own.SetOwner(player);
+	const vis = Engine.QueryInterface(ent, IID_Visual);
+	if (vis) {
+		if (data.actorSeed !== undefined) vis.SetActorSeed(data.actorSeed);
+		// Azulado: não é o vermelho de "lugar inválido" nem o branco de "pronto".
+		vis.SetShadingColor(0.6, 0.85, 1.4, 1);
+	}
+	return ent;
+};
+GuiInterface.prototype.pudim_ApagarFantasma = function(player, data) {
+	const ent = data && data.ent;
+	if (!g_PudimFantasmas.has(ent)) return false;
+	g_PudimFantasmas.delete(ent);
+	Engine.DestroyEntity(ent);
+	return true;
+};
 // Geometria da regra "casa nunca entre o coletor e o dropsite".
 //
 // FOLGA 16: a casa gaul ocupa ~20 units, entao 10 de meio-corpo mais 6 de passagem para a
@@ -8129,6 +8176,8 @@ GuiInterface.prototype.pudim_GetDropsiteFoundationData = function(player, data)
 
 var pudim_exposedFunctions = {
   	"pudim_GetAllyStats": 1,
+  	"pudim_CriarFantasma": 1,
+  	"pudim_ApagarFantasma": 1,
  	"pudim_GetAutoHouseData": 1,
 	"pudim_GetHeroAuraData": 1,
 	"pudim_GetBarracksBuildData": 1,

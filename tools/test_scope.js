@@ -37,7 +37,11 @@ const GLOBAIS = new Set([
 	"GetEntityState", "GetTemplateData", "GetSimState", "Engine", "g_SimState", "g_Selection",
 	"g_ViewedPlayer", "g_IsObserver", "g_PlayerAssignments", "g_LastTickTime",
 	"getEntityOrHolder", "playerColor", "colorizePlayernameHelper", "clearSelection",
-	"globalThis", "g_Players", "g_CivData", "g_DiplomacyColors", "g_MaxZoom"
+	"globalThis", "g_Players", "g_CivData", "g_DiplomacyColors", "g_MaxZoom",
+	// Obra na espera (28/09), conferidos no public.zip da A28: placementSupport em
+	// gui/session/input.js, g_AutoFormation em gui/session/AutoFormation.js (usado por
+	// tryPlaceBuilding), g_SelectionPanels em gui/session/selection_panels.js.
+	"placementSupport", "g_AutoFormation", "g_SelectionPanels"
 ]);
 
 let fails = 0;

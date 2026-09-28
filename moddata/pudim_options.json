@@ -100,6 +100,14 @@
 			},
 			{
 				"type": "boolean",
+				"config": "pudim.obra.espera",
+				"label": "[color=\"120 220 255\"]Economia:[/color] Posicionar prédio sem ter o recurso",
+				"tooltip": "O botão de construir deixa de ficar apagado quando só falta recurso. Você posiciona o prédio, fica um fantasma azulado no lugar, o custo é guardado (a fila automática não gasta ele) e o mod manda construir assim que juntar, com os construtores que você escolheu. Cancelar: clique direito no botão de treino do painel. A obra desiste sozinha depois de 3 minutos, se os construtores morrerem ou se o lugar for ocupado, sempre avisando. Muralha fica de fora.",
+				"label_en": "[color=\"120 220 255\"]Economy:[/color] Place a building without the resources",
+				"tooltip_en": "The build button no longer greys out when only resources are missing. You place the building, a bluish ghost stays on the spot, its cost is saved (the automatic queue will not spend it) and the mod orders the construction as soon as it adds up, with the builders you picked. To cancel: right-click the training button in the panel. The building gives up on its own after 3 minutes, if the builders die or if the spot gets taken, always with a notice. Walls are left out."
+			},
+			{
+				"type": "boolean",
 				"config": "pudim.comercio.lembrar",
 				"label": "[color=\"120 220 255\"]Economia:[/color] Lembrar a divisão de mercadorias do comércio",
 				"tooltip": "Guarda como você dividiu as mercadorias das rotas de comércio (quanto de comida, madeira, pedra e metal os mercadores trazem) e aplica a mesma divisão no começo da próxima partida. Só repete a SUA escolha: sem nada gravado, fica a do jogo.",

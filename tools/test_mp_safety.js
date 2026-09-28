@@ -89,6 +89,24 @@ for (const f of simFiles) {
 		!/SerializableAttributes|prototype\.Serialize\b|prototype\.Deserialize\b/.test(simCodigo[f]));
 }
 
+// ── 3b. Entidade: so LOCAL, so de preview, e so se apaga o que o mod criou ────────────
+// A obra na espera (28/09) cria um fantasma. Engine.AddEntity criaria entidade SINCRONIZADA
+// num cliente so — divergencia na hora. AddLocalEntity e pulada pela serializacao, e
+// mensagem de entidade local nao chega a componente de script (ComponentManager.cpp,
+// SendGlobalMessage). O filtro "preview|" e o do proprio posicionamento do jogo.
+for (const f of simFiles) {
+	const src = simCodigo[f];
+	check(rel(f) + " nunca cria entidade sincronizada (Engine.AddEntity)", !/Engine\.AddEntity\s*\(/.test(src));
+	const locais = src.match(/Engine\.AddLocalEntity\(([^)]*)\)/g) || [];
+	check(rel(f) + " so cria entidade local de preview",
+		locais.every(l => /Engine\.AddLocalEntity\("preview\|" \+/.test(l)), locais.join(" | "));
+	const destr = src.match(/Engine\.DestroyEntity\(/g) || [];
+	check(rel(f) + " so destroi o fantasma que ele mesmo criou",
+		destr.length === 0 || (destr.length === 1 &&
+			/if \(!g_PudimFantasmas\.has\(ent\)\) return false;\s*g_PudimFantasmas\.delete\(ent\);\s*Engine\.DestroyEntity\(ent\);/.test(src)),
+		destr.length + " chamada(s)");
+}
+
 // ── 4. So o GuiInterface pode ser estendido ────────────────────────────────────────────
 // Ele vive na SYSTEM_ENTITY, que a serializacao ignora. Qualquer outro componente da
 // simulacao muda o comportamento do jogo e quebra quem nao tem o mod.

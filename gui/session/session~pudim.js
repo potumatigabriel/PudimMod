@@ -173,8 +173,20 @@ pudim_patchApplyN("addResearchToQueue", function(target, that, args)
 pudim_patchApplyN("tryPlaceBuilding", function(target, that, args)
 {
 	try { pudim_MarcarOrdemDoJogador(); } catch (e) {}
+	// Sem recurso e com lugar válido: a obra fica na espera (pudim_panel.js) e o comando
+	// NÃO sai agora — o motor só recusaria. Sai quando juntar, com estes construtores.
+	try { if (pudim_TalvezEsperarObra(args[0], args[1])) return true; } catch (e) {}
 	return target.apply(that, args);
 });
+// O botão de construção nasce desligado sem recurso; religar quando esse for o único
+// motivo, para dar para posicionar a obra na espera. Ver pudim_LiberarBotaoSemRecurso.
+if (typeof g_SelectionPanels !== "undefined" && g_SelectionPanels.Construction)
+	pudim_patchApplyN(g_SelectionPanels.Construction, "setupButton", function(target, that, args)
+	{
+		const r = target.apply(that, args);
+		if (r) try { pudim_LiberarBotaoSemRecurso(args[0]); } catch (e) {}
+		return r;
+	});
 pudim_patchApplyN("tryPlaceWall", function(target, that, args)
 {
 	try { pudim_MarcarOrdemDoJogador(); } catch (e) {}

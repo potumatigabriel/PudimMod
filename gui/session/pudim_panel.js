@@ -1692,7 +1692,9 @@ const PUDIM_SEM_AUTO_REORDEM = new Set(["pudim_RunAutoWork", "pudim_ProcessFarms
 	"pudim_ExecuteInitialBalance", "pudim_ApplyRally", "pudim_ReturnPanicUnitsToWork",
 	"pudim_ProcessDropsiteFoundations"]);
 // Botões que VOCÊ aperta: são ordem sua, e passam por cima da janela do jogador.
-const PUDIM_DONOS_DO_JOGADOR = new Set(["pudim_GuarnecerCerco", "pudim_ToggleScout"]);
+// A obra na espera também: é o SEU clique de construir, só adiado até o recurso juntar.
+const PUDIM_DONOS_DO_JOGADOR = new Set(["pudim_GuarnecerCerco", "pudim_ToggleScout",
+	"pudim_ProcessObrasEspera"]);
 
 var g_PudimReserva = {};   // id -> { dono, prio, ate }
 var g_PudimReservaChamadas = 0;
@@ -1925,6 +1927,9 @@ function pudim_AtualizarReserva() {
 			itens.push({ tipo: "cerco", nome: tpl, custo: custo });
 		}
 	}
+	// Obra na espera: o custo dela fica fora do alcance da auto-fila até ela sair.
+	for (const o of g_PudimObrasEspera)
+		itens.push({ tipo: "obra", nome: pudim_NomeDaObra(o.template), custo: o.custo });
 	const total = {};
 	for (const it of itens)
 		for (const r in it.custo) total[r] = (total[r] || 0) + it.custo[r];
@@ -2061,6 +2066,175 @@ function pudim_ProcessMercado() {
 	Engine.PostNetworkCommand({ "type": "barter", "sell": t.sell, "buy": t.buy, "amount": t.amount });
 	pudim_Log("INFO", "MERCADO", "vendeu " + t.amount + " " + t.sell + " por ~" + t.ganho + " " +
 		t.buy + " (faltavam " + Math.ceil(t.falta) + ")");
+}
+
+// ─── Obra na espera de recurso ─────────────────────────────────────────────────────────
+//
+// Ideia do ModernGUI (fila global de construção), reescrita. Você posiciona o prédio mesmo
+// sem ter o recurso; o mod deixa um fantasma azulado no lugar, GUARDA o custo (a obra entra
+// na reserva, então a auto-fila não come o dinheiro dela) e manda construir quando juntar —
+// com os construtores que VOCÊ escolheu, exatamente o comando que o seu clique teria mandado.
+//
+// Conferido no jogo base:
+//   • o botão de construção fica desligado sem recurso (selection_panels.js,
+//     g_SelectionPanels.Construction.setupButton: `else if (neededResources) enabled = false`),
+//     mas startBuildingPlacement não confere recurso — só o limite. Então basta religar o
+//     botão quando o ÚNICO motivo for recurso; requisito e limite continuam bloqueando;
+//   • tryPlaceBuilding (input.js) valida o lugar com updateBuildingPlacementPreview e manda
+//     {"type": "construct", ...}. A obra na espera guarda os mesmos campos e manda o mesmo.
+// Muralha fica de fora: ela é um conjunto de peças (tryPlaceWall), não um prédio só.
+//
+// Cancelar: clique direito no botão de treino/reserva do painel. Sem isso, a obra desiste
+// sozinha depois de PUDIM_OBRA_ESPERA_MAX, se os construtores morrerem, ou se o lugar for
+// ocupado — sempre avisando.
+const PUDIM_OBRA_ESPERA_MAX = 180000;
+const PUDIM_OBRA_INTERVALO = 1000;
+var g_PudimObrasEspera = [];   // { template, x, z, angle, actorSeed, entities, queued, pushFront, custo, fantasma, desde }
+var g_PudimObrasAccum = 0;
+
+/** Espectador não posiciona obra nem religa botão. (Escrito assim, e não com a trava do
+ *  tique, para o teste de multiplayer continuar achando A trava do tique.) */
+function pudim_Assistindo() {
+	return typeof g_IsObserver !== "undefined" && !!g_IsObserver;
+}
+
+function pudim_ObraLigada() {
+	return Engine.ConfigDB_GetValue("user", "pudim.obra.espera") !== "false";
+}
+
+/** Só os quatro recursos do custo do prédio (sem tempo, sem população). */
+function pudim_CustoDaObra(tpl) {
+	const custo = {};
+	try {
+		const td = GetTemplateData(tpl);
+		if (td && td.cost) for (const r of ["food", "wood", "stone", "metal"])
+			if (td.cost[r] > 0) custo[r] = td.cost[r];
+	} catch (e) {}
+	return custo;
+}
+
+/** O que falta para pagar, ou null se dá. GuiInterface.GetNeededResources → Player.GetNeededResources. */
+function pudim_FaltaParaObra(custo) {
+	let falta = null;
+	try { falta = Engine.GuiInterfaceCall("GetNeededResources", { "cost": custo, "player": Engine.GetPlayerID() }); } catch (e) {}
+	if (!falta) return null;
+	for (const r in falta) if (falta[r] > 0) return falta;
+	return null;
+}
+
+function pudim_NomeDaObra(tpl) {
+	try {
+		const td = GetTemplateData(tpl);
+		if (td && td.name) return td.name.specific || td.name.generic || tpl.split("/").pop();
+	} catch (e) {}
+	return String(tpl).split("/").pop();
+}
+
+/**
+ * Chamado pelo gancho de g_SelectionPanels.Construction.setupButton: religa o botão quando o
+ * único bloqueio é recurso. O ícone continua com a máscara vermelha do jogo.
+ */
+function pudim_LiberarBotaoSemRecurso(data) {
+	if (!data || !data.button || data.button.enabled || !pudim_ObraLigada()) return;
+	if (pudim_Assistindo()) return;
+	if (typeof controlsPlayer === "function" && !controlsPlayer(data.player)) return;
+	const t = GetTemplateData(data.item, data.player);
+	if (!t || t.wallSet || !t.cost) return;
+	if (!Engine.GuiInterfaceCall("AreRequirementsMet", { "requirements": t.requirements, "player": data.player })) return;
+	if (getEntityLimitAndCount(data.playerState, data.item).canBeAddedCount == 0) return;
+	data.button.enabled = true;
+	data.button.tooltip += "\n[color=\"150 220 255\"]Sem recurso agora: posicione mesmo assim e o PudimMod constrói quando juntar.[/color]";
+}
+
+/**
+ * Chamado pelo gancho de tryPlaceBuilding. true = a obra ficou na espera e o original não
+ * deve rodar (ele mandaria o construct, e o motor recusaria por falta de recurso).
+ */
+function pudim_TalvezEsperarObra(queued, pushFront) {
+	if (!pudim_ObraLigada()) return false;
+	if (pudim_Assistindo()) return false;
+	if (typeof placementSupport === "undefined" || placementSupport.mode !== "building" || !placementSupport.template) return false;
+	const custo = pudim_CustoDaObra(placementSupport.template);
+	const falta = pudim_FaltaParaObra(custo);
+	if (!falta) return false;                         // tem recurso: segue o jogo normal
+	if (!updateBuildingPlacementPreview()) return false;  // lugar inválido: o original avisa
+	const entities = g_Selection.toList();
+	if (!entities.length) return false;
+	const p = placementSupport;
+	const obra = { "template": p.template, "x": p.position.x, "z": p.position.z, "angle": p.angle,
+		"actorSeed": p.actorSeed, "entities": entities, "queued": !!queued, "pushFront": !!pushFront,
+		"custo": custo, "fantasma": null, "desde": Date.now() };
+	try {
+		obra.fantasma = Engine.GuiInterfaceCall("pudim_CriarFantasma", { "template": obra.template,
+			"x": obra.x, "z": obra.z, "angle": obra.angle, "actorSeed": obra.actorSeed });
+	} catch (e) {}
+	g_PudimObrasEspera.push(obra);
+	const msg = "Obra na espera: " + pudim_NomeDaObra(obra.template) + " — faltam " + pudim_CustoCurto(falta);
+	pudim_Log("INFO", "OBRA", msg);
+	try { Engine.GuiInterfaceCall("pudim_PushNotification", { "message": msg }); } catch (e) {}
+	g_PudimReservaAccum = PUDIM_RESERVA_INTERVALO;   // guardar o custo já no próximo ciclo
+	if (!queued || !g_Selection.size()) placementSupport.Reset();
+	else placementSupport.RandomizeActorSeed();
+	return true;
+}
+
+function pudim_TirarObra(i, motivo) {
+	const o = g_PudimObrasEspera[i];
+	if (!o) return;
+	g_PudimObrasEspera.splice(i, 1);
+	if (o.fantasma) try { Engine.GuiInterfaceCall("pudim_ApagarFantasma", { "ent": o.fantasma }); } catch (e) {}
+	if (motivo) {
+		const msg = "Obra cancelada: " + pudim_NomeDaObra(o.template) + " (" + motivo + ")";
+		pudim_Log("INFO", "OBRA", msg);
+		try { Engine.GuiInterfaceCall("pudim_PushNotification", { "message": msg }); } catch (e) {}
+	}
+	g_PudimReservaAccum = PUDIM_RESERVA_INTERVALO;
+}
+
+/** Clique direito no botão de treino/reserva. */
+function pudim_CancelarObrasEspera() {
+	while (g_PudimObrasEspera.length) pudim_TirarObra(g_PudimObrasEspera.length - 1, "você cancelou");
+}
+
+/** Constrói a primeira obra da espera quando der. Emite comando: roda abaixo da trava de espectador. */
+function pudim_ProcessObrasEspera() {
+	if (!g_PudimObrasEspera.length) return;
+	// Você posicionando algo agora: a checagem de lugar abaixo usa o MESMO fantasma de
+	// posicionamento do jogo e atrapalharia o seu.
+	if (typeof placementSupport !== "undefined" && placementSupport.mode) return;
+	const agora = Date.now();
+	const o = g_PudimObrasEspera[0];
+	if (agora - o.desde > PUDIM_OBRA_ESPERA_MAX) { pudim_TirarObra(0, "3 minutos sem juntar o recurso"); return; }
+	const eu = Engine.GetPlayerID();
+	const vivos = [];
+	for (const e of o.entities) {
+		const estado = GetEntityState(e);
+		if (estado && estado.player === eu) vivos.push(e);
+	}
+	if (!vivos.length) { pudim_TirarObra(0, "os construtores morreram"); return; }
+	if (pudim_FaltaParaObra(o.custo)) return;
+	let lugar = null;
+	try {
+		lugar = Engine.GuiInterfaceCall("SetBuildingPlacementPreview", { "template": o.template,
+			"x": o.x, "z": o.z, "angle": o.angle, "actorSeed": o.actorSeed });
+	} catch (e) {}
+	try { Engine.GuiInterfaceCall("SetBuildingPlacementPreview", { "template": "" }); } catch (e) {}
+	if (!lugar || !lugar.success) { pudim_TirarObra(0, "o lugar ficou ocupado"); return; }
+	pudim_TirarObra(0, null);
+	// A ordem é SUA, só adiada: passa pelo árbitro como botão do jogador e marca os
+	// construtores como sob ordem sua, igual ao clique original.
+	pudim_Ordenar({ "type": "construct", "template": o.template, "x": o.x, "z": o.z,
+		"angle": o.angle, "actorSeed": o.actorSeed, "entities": vivos,
+		"autorepair": true, "autocontinue": true, "queued": o.queued, "pushFront": o.pushFront,
+		"formation": typeof g_AutoFormation !== "undefined" ? g_AutoFormation.getNull() : undefined },
+		"pudim_ProcessObrasEspera");
+	for (const e of vivos) {
+		g_PudimPlayerOrders[e] = agora;
+		if (o.queued) g_PudimPlayerQueued[e] = agora;
+		else delete g_PudimPlayerQueued[e];
+	}
+	pudim_Log("INFO", "OBRA", "recurso juntou: construindo " + pudim_NomeDaObra(o.template) +
+		" com " + vivos.length + " construtor(es)");
 }
 
 // ─── Divisão de mercadorias do comércio, lembrada entre partidas ────────────────────────
@@ -2235,7 +2409,13 @@ function pudim_AtualizarBotaoPausa() {
 	for (const it of outros)
 		dica += "\nReservado para " + it.nome + ": " + pudim_CustoCurto(it.custo) +
 			(it.pronto ? " (pronto)" : "");
-	if (btn) try { btn.tooltip = dica; btn.tooltip_style = "sessionToolTipBold"; } catch (e) {}
+	if (g_PudimObrasEspera.length)
+		dica += "\n[color=\"150 220 255\"]Clique direito: cancelar " + g_PudimObrasEspera.length +
+			" obra(s) na espera de recurso.[/color]";
+	if (btn) try {
+		btn.tooltip = dica; btn.tooltip_style = "sessionToolTipBold";
+		btn.onPressRight = pudim_CancelarObrasEspera;
+	} catch (e) {}
 }
 
 /**
@@ -2760,6 +2940,11 @@ function pudim_Tick(dt)
 	if (g_PudimMercadoAccum >= PUDIM_MERCADO_INTERVALO) {
 		g_PudimMercadoAccum = 0;
 		try { pudim_ProcessMercado(); } catch (e) {}
+	}
+	g_PudimObrasAccum += dt;
+	if (g_PudimObrasAccum >= PUDIM_OBRA_INTERVALO) {
+		g_PudimObrasAccum = 0;
+		try { pudim_Medir("ProcessObrasEspera", pudim_ProcessObrasEspera); } catch (e) {}
 	}
 	g_PudimMercadoriasAccum += dt;
 	if (g_PudimMercadoriasAccum >= PUDIM_MERCADORIAS_INTERVALO) {

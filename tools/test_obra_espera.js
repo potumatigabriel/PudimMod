@@ -226,5 +226,67 @@ check("a opção existe, em pt e en", op && op.tooltip && op.tooltip_en);
 	check("template vazio ou ausente: nem tenta", G.pudim_CriarFantasma(1, { template: "" }) === null && criados.length === 1);
 }
 
+// ── O jogo cancelava o posicionamento no primeiro movimento do mouse (28/09) ─────────
+// Relato: "quando clico, nada acontece pra eu posicionar". gui/session/input.js da A28,
+// handleInputAfterGui, "mousemotion": com recurso faltando, placementSupport.Reset(). Aqui
+// essa checagem roda COPIADA do jogo, com os ganchos reais de session~pudim.js por cima.
+{
+	const i = sess.indexOf('pudim_patchApplyN("GetTemplateData"');
+	const j = sess.indexOf("\n", sess.indexOf('pudim_patchApplyN("autociv_showBuildingPlacementTerrainSnap"'));
+	const ganchos = sess.slice(i, j);
+	const k = panel.indexOf("function pudim_CustoDaObra(tpl)");
+	const l = panel.indexOf("/** O que falta para pagar");
+	const m2 = panel.indexOf("var g_PudimOcultarCusto = false;");
+	const n2 = panel.indexOf("\n}", panel.indexOf("function pudim_ComCustoOculto")) + 2;
+	function montar(opts) {
+		const ctx = {
+			Object, global: null,
+			placementSupport: { mode: "building", template: "structures/gaul/barracks",
+				Reset() { this.mode = null; this.template = null; this.resetou = true; } },
+			pudim_ObraLigada: () => opts.ligada !== false,
+			pudim_Assistindo: () => false,
+			pudim_patchApplyN(nome, patch) { ctx[nome] = new Proxy(ctx[nome], { apply: patch }); },
+			GetTemplateData: t => ({ cost: { wood: 300, stone: 0, time: 120 }, name: { specific: "Quartel" } }),
+			Engine: { GuiInterfaceCall: (n, d) => {
+				if (n !== "GetNeededResources") throw new Error(n);
+				// Player.GetNeededResources: undefined quando não falta nada
+				const falta = {};
+				for (const r in d.cost) if (r !== "time" && d.cost[r] > 150) falta[r] = d.cost[r] - 150;
+				return Object.keys(falta).length ? falta : undefined;
+			} },
+			// A checagem do jogo, como está em input.js da A28:
+			handleInputAfterGui(ev) {
+				if (ctx.placementSupport.template && ctx.Engine.GuiInterfaceCall("GetNeededResources",
+					{ "cost": ctx.GetTemplateData(ctx.placementSupport.template).cost })) {
+					ctx.placementSupport.Reset();
+					return true;
+				}
+				ctx.custoVisto = ctx.pudim_CustoDaObra(ctx.placementSupport.template);
+				return false;
+			}
+		};
+		vm.createContext(ctx);
+		vm.runInContext(panel.slice(m2, n2) + "\n" + panel.slice(k, l) + "\n" +
+			ganchos.replace(/typeof autociv_showBuildingPlacementTerrainSnap === "function"/, "false"), ctx);
+		return ctx;
+	}
+	const semMod = { resetou: false };
+	{
+		const ctx = montar({ ligada: false });
+		ctx.handleInputAfterGui({ type: "mousemotion" });
+		semMod.resetou = !!ctx.placementSupport.resetou;
+	}
+	check("sem a obra na espera, o jogo cancela o posicionamento (é o que o relato viu)", semMod.resetou === true);
+	const ctx = montar({});
+	ctx.handleInputAfterGui({ type: "mousemotion" });
+	check("com ela, o mouse se move e o posicionamento continua", !ctx.placementSupport.resetou && ctx.placementSupport.mode === "building");
+	check("e a conta da obra enxerga o custo REAL no meio do posicionamento (senão mandaria o construct sem recurso)",
+		ctx.custoVisto && ctx.custoVisto.wood === 300, JSON.stringify(ctx.custoVisto));
+	check("fora do posicionamento, GetTemplateData devolve o custo normal",
+		ctx.GetTemplateData("structures/gaul/barracks").cost.wood === 300 && ctx.g_PudimOcultarCusto === false);
+	check("o autociv também é coberto (atalho de teclado para construir)",
+		/if \(typeof autociv_showBuildingPlacementTerrainSnap === "function"\)\s*\n\s*pudim_patchApplyN\("autociv_showBuildingPlacementTerrainSnap", pudim_ComCustoOculto\);/.test(sess));
+}
+
 console.log(fails === 0 ? "\nTODOS OS TESTES PASSARAM" : "\n" + fails + " TESTE(S) FALHARAM");
 process.exit(fails === 0 ? 0 : 1);

@@ -193,6 +193,23 @@ pudim_patchApplyN("tryPlaceWall", function(target, that, args)
 	return target.apply(that, args);
 });
 
+// O posicionamento sem recurso não pode ser cancelado no primeiro movimento do mouse — ver
+// "O POSICIONAMENTO NÃO PODE SER CANCELADO" em pudim_panel.js. GetTemplateData só esconde o
+// custo com a bandeira ligada, e só do template que está sendo posicionado.
+pudim_patchApplyN("GetTemplateData", function(target, that, args)
+{
+	const d = target.apply(that, args);
+	if (!g_PudimOcultarCusto || !d || !d.cost || typeof placementSupport === "undefined" ||
+	    args[0] !== placementSupport.template)
+		return d;
+	return Object.assign({}, d, { "cost": undefined });
+});
+pudim_patchApplyN("handleInputAfterGui", pudim_ComCustoOculto);
+// O autociv repete a checagem no atalho de teclado para construir. Ele carrega ANTES deste
+// arquivo ("input~!autociv.js" < "session~pudim.js"), então a função já existe aqui.
+if (typeof autociv_showBuildingPlacementTerrainSnap === "function")
+	pudim_patchApplyN("autociv_showBuildingPlacementTerrainSnap", pudim_ComCustoOculto);
+
 // ─── Hook de Mudança de Seleção ───────────────────────────────────────────────
 
 /**

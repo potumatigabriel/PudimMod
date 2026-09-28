@@ -2110,12 +2110,55 @@ function pudim_ObraLigada() {
 /** Só os quatro recursos do custo do prédio (sem tempo, sem população). */
 function pudim_CustoDaObra(tpl) {
 	const custo = {};
+	// A conta da obra enxerga SEMPRE o custo real, mesmo no meio do posicionamento em que o
+	// custo é escondido do jogo (ver g_PudimOcultarCusto) — senão o clique mandaria o
+	// construct sem recurso e o motor recusaria.
+	const antes = g_PudimOcultarCusto;
+	g_PudimOcultarCusto = false;
 	try {
 		const td = GetTemplateData(tpl);
 		if (td && td.cost) for (const r of ["food", "wood", "stone", "metal"])
 			if (td.cost[r] > 0) custo[r] = td.cost[r];
 	} catch (e) {}
+	g_PudimOcultarCusto = antes;
 	return custo;
+}
+
+// ── O POSICIONAMENTO NÃO PODE SER CANCELADO POR FALTA DE RECURSO ─────────────────────
+//
+// Relato de 28/09 (print): a dica "Sem recurso agora: posicione mesmo assim" aparecia, o
+// botão aceitava o clique, e "nada acontece pra eu posicionar". O botão estava certo; quem
+// cancelava era o PRÓPRIO JOGO, no primeiro movimento do mouse. gui/session/input.js da A28,
+// handleInputAfterGui, INPUT_BUILDING_PLACEMENT, "mousemotion":
+//
+//     if (placementSupport.template && Engine.GuiInterfaceCall("GetNeededResources",
+//         { "cost": GetTemplateData(placementSupport.template).cost }))
+//     { placementSupport.Reset(); inputState = INPUT_NORMAL; return true; }
+//
+// E o autociv copia a mesma checagem em autociv_showBuildingPlacementTerrainSnap (o atalho
+// de teclado para construir). O teste da obra na espera não pegou porque simulava o
+// posicionamento já feito.
+//
+// Enquanto essas duas funções rodam com um PRÉDIO em posicionamento, GetTemplateData daquele
+// template devolve o custo vazio: GetNeededResources de custo vazio devolve undefined
+// (Player.GetNeededResources: `if (Object.keys(amountsNeeded).length == 0) return undefined`)
+// e a checagem deixa passar. Fora delas, nada muda. Os ganchos ficam em session~pudim.js.
+var g_PudimOcultarCusto = false;
+
+function pudim_PosicionandoPredio() {
+	return pudim_ObraLigada() && !pudim_Assistindo() &&
+		typeof placementSupport !== "undefined" && placementSupport.mode === "building" &&
+		!!placementSupport.template;
+}
+
+/** Roda `target` com o custo do prédio em posicionamento escondido. Para os ganchos. */
+function pudim_ComCustoOculto(target, that, args) {
+	let ocultar = false;
+	try { ocultar = pudim_PosicionandoPredio(); } catch (e) {}
+	if (!ocultar) return target.apply(that, args);
+	g_PudimOcultarCusto = true;
+	try { return target.apply(that, args); }
+	finally { g_PudimOcultarCusto = false; }
 }
 
 /** O que falta para pagar, ou null se dá. GuiInterface.GetNeededResources → Player.GetNeededResources. */

@@ -140,8 +140,8 @@ const PUDIM_STRINGS = {
 	                      "Fatia dos trabalhadores destinada à pedra. Zero faz o mod nunca mandar ninguém para pedra."],
 	"tip.prioMetal":     ["Share of workers assigned to metal. Zero means the mod never sends anyone to metal.",
 	                      "Fatia dos trabalhadores destinada ao metal. Zero faz o mod nunca mandar ninguém para metal."],
-	"tip.sendIdle":      ["Send every idle worker to gather right now, without waiting for the next cycle.",
-	                      "Manda todos os trabalhadores ociosos coletarem agora, sem esperar o próximo ciclo."],
+	"tip.sendIdle":      ["Send every worker standing idle on the map to gather right now, without waiting for the next cycle. Workers sheltered by the panic are not idle: for those, use \"Back to Work\".",
+	                      "Manda coletar agora todo trabalhador parado no mapa, sem esperar o próximo ciclo. Quem o pânico abrigou não conta como ocioso: para esses, use \"Voltar ao Trabalho\"."],
 
 	// Repetir construção
 	"tip.stopRepeat":    ["Stop all builders that are repeating a construction.",
@@ -160,8 +160,8 @@ const PUDIM_STRINGS = {
 	                      "Mostra mensagens detalhadas no log. Útil para entender por que o mod tomou uma decisão."],
 	"tip.panic":         ["Panic mode: on a serious attack, drop everything and protect the workers.",
 	                      "Modo pânico: num ataque sério, larga tudo e protege os trabalhadores."],
-	"tip.backToWork":    ["Take everyone out of panic mode and send them back to gathering.",
-	                      "Tira todo mundo do modo pânico e manda de volta para a coleta."],
+	"tip.backToWork":    ["Releases the workers the panic sheltered in buildings (or sent running) and sends each one back to the task it had before the attack. Overrides the safety locks (no civic centre, siege, fighting): it is your call. The number is how many are being held; greyed out when there is nobody. Not the same as \"Send Idle Now\", which handles units standing idle on the map.",
+	                      "Solta os trabalhadores que o pânico abrigou nos prédios (ou mandou fugir) e devolve cada um à tarefa de antes do ataque. Passa por cima das travas de segurança (sem centro cívico, cerco, luta): a decisão é sua. O número é quantos estão sendo segurados; fica apagado quando não há ninguém. Não é o mesmo que \"Enviar Ociosos Agora\", que cuida de quem está parado no mapa."],
 	"tip.autoHouse":     ["Build houses on their own before the population cap blocks unit training.",
 	                      "Constrói casas sozinho antes que o limite de população trave o treino de unidades."],
 	"tip.counterTrain":  ["Train units that counter what the enemy is actually fielding.",
@@ -295,7 +295,9 @@ const PUDIM_CAPTION_MAP = {
 	"pudim_repeatDesc":         "cap.repeatDesc",
 	"pudim_stopAllRepeatBtn":   "cap.repeatStop",
 	"pudim_quartelHeader":      "cap.serieHeader",
-	"pudim_backToWorkBtn2":     "cap.backToWork",
+	// pudim_backToWorkBtn2 saiu daqui: o texto dele leva o número de abrigados e quem
+	// escreve é pudim_AtualizarBotaoVoltar (pudim_panel.js). Daqui ele seria sobrescrito
+	// a cada quadro.
 	"pudim_unitHeader":         "cap.unitHeader",
 	"pudim_unitVazio":          "cap.unitVazio"
 };

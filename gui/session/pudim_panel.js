@@ -2923,6 +2923,15 @@ function pudim_Tick(dt)
 		try { pudim_Medir("AtualizarUnidades", pudim_AtualizarUnidades); } catch(e) {}
 	}
 
+	// Botão "Voltar ao Trabalho": só lê e desenha. Assistindo ele fica apagado sozinho — quem
+	// assiste não tem ninguém abrigado pelo pânico.
+	g_PudimVoltarAccum += dt;
+	if (g_PudimVoltarAccum >= PUDIM_VOLTAR_INTERVALO)
+	{
+		g_PudimVoltarAccum = 0;
+		try { pudim_AtualizarBotaoVoltar(); } catch(e) {}
+	}
+
 	// Não enviar comandos de rede se for espectador (causaria OOS)
 	if (typeof g_IsObserver !== "undefined" && g_IsObserver) return;
 
@@ -4836,6 +4845,41 @@ function pudim_ReturnToWork()
 {
 	// Botão do painel = ordem explícita do jogador: sempre obedece, mesmo sem CC ou em cerco.
 	pudim_ReturnPanicUnitsToWork(true);
+	try { pudim_AtualizarBotaoVoltar(); } catch (e) {}
+}
+
+// ── "VOLTAR AO TRABALHO (N)" ─────────────────────────────────────────────────────────
+//
+// Pergunta de 28/09: "enviar ociosos agora e voltar ao trabalho, não fazem a mesma coisa?".
+// Não fazem — este solta quem o PÂNICO abrigou (ou mandou fugir) e devolve cada um à tarefa
+// de antes do ataque; o outro pega quem está parado no mapa. A confusão vinha de os dois
+// ficarem acesos o tempo todo. Agora este mostra QUANTOS o pânico está segurando e fica
+// apagado quando não há ninguém, que é quando apertá-lo não faria nada.
+//
+// Conta só quem ainda existe: unidade abrigada que morreu continua no registro até a
+// soltura, e contá-la mostraria gente que não vai voltar.
+const PUDIM_VOLTAR_INTERVALO = 1000;
+var g_PudimVoltarAccum = 0;
+var g_PudimVoltarUltimo = null;
+
+function pudim_ContarAbrigados() {
+	let n = 0;
+	for (const id in g_PudimPanicGarrisoned)
+		if (GetEntityState(+id)) ++n;
+	return n;
+}
+
+function pudim_AtualizarBotaoVoltar() {
+	const btn = Engine.TryGetGUIObjectByName("pudim_backToWorkBtn2");
+	if (!btn) return;
+	const n = pudim_ContarAbrigados();
+	// Compara o TEXTO, não só o número: o idioma pode ser detectado depois do início, e a
+	// legenda tem de trocar junto. Sem mudança, não reescreve.
+	const texto = pudim_T("cap.backToWork") + (n > 0 ? " (" + n + ")" : "");
+	if (texto === g_PudimVoltarUltimo) return;
+	g_PudimVoltarUltimo = texto;
+	btn.caption = texto;
+	btn.enabled = n > 0;
 }
 
 /**

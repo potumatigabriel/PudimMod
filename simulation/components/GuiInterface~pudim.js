@@ -6644,6 +6644,11 @@ GuiInterface.prototype.pudim_GetProactiveStorehouseData = function(player, data)
 	return { "builderId": builderEnt, "template": template, "candidatePositions": candidates, "resource": "wood", "workersToMove": [] };
 };
 
+// Fruta a até esta distância (do centro das frutas ao centro do ponto de entrega) de um
+// celeiro ou CC não ganha celeiro novo: a caminhada até o que já existe é curta. 50 era o
+// número que o caminho proativo já usava; o do armazém inteligente passou a usar o mesmo.
+const PUDIM_FRUTA_PERTO_DE_ENTREGA = 50;
+
 // ── Farmstead proativo: constrói farmstead perto de fruta ANTES dos workers chegarem ──
 // Chamado pelo panel quando pudim_GetIdleWorkersAndBestResource retorna suggestFarmstead.
 GuiInterface.prototype.pudim_GetProactiveFarmsteadData = function(player, data)
@@ -6696,7 +6701,8 @@ GuiInterface.prototype.pudim_GetProactiveFarmsteadData = function(player, data)
 		if (peso > 0) { nearX = sx / peso; nearZ = sz / peso; }
 	}
 
-	// Abortar se já há farmstead (ou dropsite de comida) a ≤ 50m desta fruta
+	// Abortar se já há ponto de entrega de comida (celeiro, CC) perto desta fruta — a mesma
+	// regra do armazém inteligente, PUDIM_FRUTA_PERTO_DE_ENTREGA.
 	for (const ent of allEnts) {
 		const ci = Engine.QueryInterface(ent, IID_Identity);
 		if (!ci) continue;
@@ -6705,7 +6711,7 @@ GuiInterface.prototype.pudim_GetProactiveFarmsteadData = function(player, data)
 		if (!p || !p.IsInWorld()) continue;
 		const pos = p.GetPosition2D();
 		const dx = pos.x - nearX, dz = pos.y - nearZ;
-		if (dx*dx + dz*dz < 50*50) return null;
+		if (dx*dx + dz*dz <= PUDIM_FRUTA_PERTO_DE_ENTREGA * PUDIM_FRUTA_PERTO_DE_ENTREGA) return null;
 	}
 
 	// Encontrar builder civil (não-soldado, não-cavalaria)
@@ -7189,6 +7195,27 @@ GuiInterface.prototype.pudim_GetSmartDropsiteData = function(player, data)
 		if (d < nearestDedicatedDist) nearestDedicatedDist = d;
 	}
 	result._dbg.nearestDed = Math.round(nearestDedicatedDist);
+	// ── FRUTA PERTO DE PONTO DE ENTREGA NÃO GANHA CELEIRO (28/09) ────────────────────────
+	//
+	// Pedido: "só não faz celeiros se as frutas estiverem muito perto de um dropsite". Este
+	// caminho, para comida, só olhava CELEIRO (o `!ds.isFarmstead` acima) e ignorava o CC —
+	// que também recebe comida. Fruta a 30 do CC ganhava celeiro próprio. Foi daqui que saiu o
+	// primeiro celeiro da partida do relato (DROP "build farmstead recurso=food density=1").
+	// O caminho proativo (pudim_GetProactiveFarmsteadData) já contava o CC; os dois agora
+	// usam a MESMA regra, PUDIM_FRUTA_PERTO_DE_ENTREGA.
+	if (bestGroupKey === "food") {
+		let entregaComida = Infinity;
+		for (const ds of dropsites) {
+			if (!ds.isCC && !ds.isFarmstead) continue;
+			const ddx = ds.x - anchorX, ddz = ds.y - anchorZ;
+			entregaComida = Math.min(entregaComida, Math.sqrt(ddx*ddx + ddz*ddz));
+		}
+		result._dbg.entregaComida = Math.round(entregaComida);
+		if (entregaComida <= PUDIM_FRUTA_PERTO_DE_ENTREGA) {
+			result._dbg.skip = "fruta_perto_entrega:" + Math.round(entregaComida);
+			return result;
+		}
+	}
 	if (nearestDedicatedDist <= buildThresh) {
 		// Âncora principal já tem dropsite. Verificar se workers longe têm um cluster
 		// secundário sem dropsite — se sim, recalcular âncora no centróide dos workers longe.

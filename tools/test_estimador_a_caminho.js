@@ -36,7 +36,7 @@ check("e é calculada depois da winChance",
 	sim.indexOf("result.winChanceTotal = result.winChanceTotal === null") >
 	sim.indexOf("result.winChance = Math.max(1, Math.min(99, Math.round(100 * tKillUs"));
 
-check("o painel mostra '+N a caminho: X%'", /"\+" \+ aCaminho\.count \+ " a caminho: " \+ chanceCor \+ "%/.test(panel));
+check("o painel mostra '+N a caminho: X%'", /\+" \+ aCaminho\.count \+ " a caminho: " \+ chanceCor \+ "%/.test(panel));
 check("a cor e a barra usam a chance com os que vêm", /wanted = chanceCor >= 60/.test(panel) &&
 	/totalWidth \* chanceCor \/ 100/.test(panel));
 check("o log ESTIM registra os dois números", /"u a caminho \(hp" \+ data\.aCaminho\.totalHP/.test(panel));

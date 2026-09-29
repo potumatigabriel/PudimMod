@@ -93,9 +93,11 @@ check("o painel marca a ameaça como rápida",
 	/if \(panicData\.underAttack && \(panicData\.fastEnemies \|\| 0\) > 0\)\s*\n\s*g_PudimAmeacaRapida = true;/.test(execP));
 check("e a memória zera quando o pânico acaba, para não herdar ataque antigo",
 	/else if \(!g_PudimPanicMode\)\s*\n\s*g_PudimAmeacaRapida = false;/.test(execP));
-check("as duas solturas usam a calma variável, não a constante",
-	(execP.match(/pudim_CalmaExigida\(\)/g) || []).length === 3,
-	(execP.match(/pudim_CalmaExigida\(\)/g) || []).length + " (1 definição + 2 usos)");
+// Desde 28/09 há um terceiro uso: a volta dos ociosos com a base calma
+// (pudim_AutoTrabalhoLiberado, tools/test_panico_ociosos.js) espera a mesma calma.
+check("as duas solturas e a volta dos ociosos usam a calma variável, não a constante",
+	(execP.match(/pudim_CalmaExigida\(\)/g) || []).length === 4,
+	(execP.match(/pudim_CalmaExigida\(\)/g) || []).length + " (1 definição + 3 usos)");
 check("a calma contra cavalaria é bem maior que a normal",
 	CALMA_R >= CALMA * 4, (CALMA_R / 1000) + "s contra " + (CALMA / 1000) + "s");
 // Mas não pode passar do teto que força o retorno, senão a economia nunca volta.

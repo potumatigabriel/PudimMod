@@ -2991,6 +2991,25 @@ var g_PudimFleeAt = {};
 
 /** Tropa nossa lutando agora, em qualquer lugar do mapa (vem de pudim_GetPanicData) */
 var g_PudimEmCombate = false;
+var g_PudimBaseCalmaDesde = 0;   // instante desde o qual não há inimigo perto da base (0 = há)
+
+// ─── Ociosos voltam ao trabalho com a base calma, mesmo com batalha longe (28/09) ─────────
+//
+// Log 20260928-211137 (replay 2026-09-28_0007): "batalha em curso — segurando as unidades
+// abrigadas", e o FARM mostrando ocio=39 com a coleta em F0 W2 por mais de um minuto, com
+// 4,6 mil de recurso parado. O pânico total trava o Auto-Trabalho até acabar, e ele só acaba
+// quando NENHUMA unidade nossa está atacando em lugar nenhum do mapa — o exército brigando
+// longe segurava a base inteira parada.
+//
+// Com a base calma pelo tempo de calma exigido (o mesmo da soltura, mais longo contra
+// cavalaria), o Auto-Trabalho volta — e ele só enxerga quem está FORA de abrigo (a simulação
+// pula isGarrisoned e quem não está no mundo). Os abrigados continuam presos até a batalha
+// acabar ou até você apertar "Voltar ao Trabalho", como antes; sem CC, idem.
+function pudim_AutoTrabalhoLiberado(agora)
+{
+	if (!g_PudimPanicFull) return true;
+	return g_PudimBaseCalmaDesde > 0 && agora - g_PudimBaseCalmaDesde > pudim_CalmaExigida();
+}
 /** Para a linha de log da trava sair uma vez por batalha, não a cada tique */
 var g_PudimHoldCombateLogged = false;
 
@@ -3231,8 +3250,10 @@ function pudim_Tick(dt)
 		try { pudim_LogCusto(); } catch (e) {}
 	}
 
-	// Auto-Trabalho: bloqueado durante pânico (não redirecionar trabalhadores em batalha)
-	if (g_PudimAutoWorkEnabled && g_PudimAutoWorkAccum >= PUDIM_AUTOWORK_INTERVAL && g_PudimInitialBalanceDone && !g_PudimPanicFull)
+	// Auto-Trabalho: bloqueado durante pânico (não redirecionar trabalhadores em batalha) —
+	// menos com a base já calma, ver pudim_AutoTrabalhoLiberado.
+	if (g_PudimAutoWorkEnabled && g_PudimAutoWorkAccum >= PUDIM_AUTOWORK_INTERVAL && g_PudimInitialBalanceDone &&
+	    pudim_AutoTrabalhoLiberado(Date.now()))
 	{
 		g_PudimAutoWorkAccum = 0;
 		pudim_Medir("RunAutoWork", pudim_RunAutoWork);
@@ -5381,6 +5402,9 @@ function pudim_ProcessPanic()
 	// nosso exército — a base fica calma com a batalha rolando. No log de 24/08 isso
 	// devolveu 152 unidades ao trabalho 57s depois de "defendendo com 28 inimigo(s)".
 	g_PudimEmCombate = !!panicData.emCombate;
+	// Desde quando a BASE está sem inimigo por perto (ver pudim_AutoTrabalhoLiberado).
+	if (panicData.underAttack) g_PudimBaseCalmaDesde = 0;
+	else if (!g_PudimBaseCalmaDesde) g_PudimBaseCalmaDesde = now;
 
 	// Estado que trava o desguarnecimento automático (ver pudim_ReturnPanicUnitsToWork)
 	g_PudimNoCivCentre = !!panicData.noCivCentre;

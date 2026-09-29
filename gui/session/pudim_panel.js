@@ -1830,6 +1830,8 @@ function pudim_GetPlayerOrderedIds() {
 var g_AutoHouseCandidateOffset = 0;
 var g_PudimLastHouseLogTime = 0;
 var g_PudimLastDropsiteLogTime = 0;
+var g_PudimDropGateLogado = null;   // último estado do portão já registrado
+var g_PudimDropSkipLogado = null;   // último motivo de "não construir armazém" registrado
 var g_PudimLastDropsiteDiagTime = 0; // Timer separado para log diagnóstico (evita conflito com GATE)
 var g_PudimFarmDebugLastLog = 0;
 
@@ -4608,7 +4610,13 @@ function pudim_ProcessAdvancedAI()
 		// senão o cálculo dá o epoch inteiro em segundos, poluindo o log com números absurdos
 		const fdDt = g_PudimLastDropsiteTimeByRes.food ? Math.round((_nowDrop - g_PudimLastDropsiteTimeByRes.food) / 1000) + "s" : "never";
 		const wdDt = g_PudimLastDropsiteTimeByRes.wood ? Math.round((_nowDrop - g_PudimLastDropsiteTimeByRes.wood) / 1000) + "s" : "never";
-		pudim_Log("DEBUG", "DROP", "GATE on=" + g_PudimAdvancedAIEnabled["dropsites"] + " food_dt=" + fdDt + " wood_dt=" + wdDt);
+		// Só quando o portão muda de estado: o retrato a cada 10s era 4,6% do log, e os
+		// tempos desde o último armazém já aparecem na linha de quando ele é construído.
+		const gate = String(g_PudimAdvancedAIEnabled["dropsites"]);
+		if (gate !== g_PudimDropGateLogado) {
+			g_PudimDropGateLogado = gate;
+			pudim_Log("DEBUG", "DROP", "GATE on=" + gate + " food_dt=" + fdDt + " wood_dt=" + wdDt);
+		}
 	}
 	if (g_PudimAdvancedAIEnabled["dropsites"] && !pudim_ObrasPausadas() &&
 	    _nowDrop - g_PudimLastDropsiteTime > 5000) {
@@ -4721,9 +4729,11 @@ function pudim_ProcessAdvancedAI()
 			}
 			else {
 				// Log diagnóstico a cada 15s
-				if (Date.now() - g_PudimLastDropsiteDiagTime > 15000) {
+				// O mesmo motivo repetido vai a cada 60s; motivo novo, a cada 15s.
+				const skip = dbg.skip || "?";
+				if (Date.now() - g_PudimLastDropsiteDiagTime > (skip === g_PudimDropSkipLogado ? 60000 : 15000)) {
 					g_PudimLastDropsiteDiagTime = Date.now();
-					const skip = dbg.skip || "?";
+					g_PudimDropSkipLogado = skip;
 					pudim_Log("DEBUG", "DROP", "skip=" + skip + " fw=" + (dbg.fw||0) + " ds=" + (dbg.ds||0) + " sc=" + (dbg.sc||0) + " density=" + (dbg.density||0) + " wtm=" + (dbg.wtm||0) + " w=" + (dbg.wood||"?"));
 				}
 			}
@@ -5685,6 +5695,7 @@ function pudim_ProcessPanic()
 let g_PudimHeroAccum = 0;
 let g_PudimHeroLastAt = 0;
 let g_PudimHeroLogAt = 0;
+let g_PudimHeroSemLogado = false;   // "sem_heroi" já foi dito uma vez
 
 function pudim_ProcessHeroAura()
 {
@@ -5701,9 +5712,13 @@ function pudim_ProcessHeroAura()
 	} catch (e) { return; }
 	if (!d) return;
 
-	if (g_PudimShowDebug && agora - g_PudimHeroLogAt > 15000) {
+	// Sem herói não há o que dizer: "sem_heroi" repetido a cada 15s era 4% do log (medido
+	// em 28/09 nos logs guardados) e empurrava para fora os minutos que importam.
+	if (g_PudimShowDebug && agora - g_PudimHeroLogAt > 15000 &&
+	    !((d._dbg || {}).reason === "sem_heroi" && g_PudimHeroSemLogado)) {
 		g_PudimHeroLogAt = agora;
 		const g = d._dbg || {};
+		g_PudimHeroSemLogado = g.reason === "sem_heroi";
 		pudim_Log("DEBUG", "HEROI", "acao=" + d.action + " motivo=" + (g.reason || "?") +
 			" raio=" + (g.raio || 0) + " lutando=" + (g.lutando || 0) +
 			" ameacas=" + (g.ameacas || 0) + " mover=" + (g.mover || 0) + "m");
@@ -6671,6 +6686,7 @@ var g_PudimUnitLista = [];      // o que a simulação devolveu na última leitu
 var g_PudimUnitAccum = 0;
 var g_PudimUnitVisiveis = PUDIM_UNIT_BASE;  // quantas linhas a tela comporta agora
 var g_PudimUnitVazioLogAt = 0;  // ver o diagnostico de lista vazia em pudim_AtualizarUnidades
+var g_PudimUnitForaLogado = 0;  // quantos tipos fora por requisito já foram ditos no log
 
 function pudim_UnitWeightDelta(linha, delta)
 {
@@ -6890,8 +6906,13 @@ function pudim_AtualizarUnidades()
 	};
 	const antes = lista.length;
 	lista = lista.filter(u => disponivel(u.tpl));
-	if (g_PudimShowDebug && antes !== lista.length)
-		pudim_Log("DEBUG", "UNIDADES", (antes - lista.length) + " tipo(s) fora por requisito");
+	// Só quando o número muda. Repetida a cada 1,5s esta linha era 36% de TODO o log guardado
+	// (1082 entradas, medido em 28/09) — o log de 32 KB cobria 1 a 7 minutos da partida.
+	if (g_PudimShowDebug && antes - lista.length !== g_PudimUnitForaLogado) {
+		g_PudimUnitForaLogado = antes - lista.length;
+		if (g_PudimUnitForaLogado > 0)
+			pudim_Log("DEBUG", "UNIDADES", g_PudimUnitForaLogado + " tipo(s) fora por requisito");
+	}
 
 	// LISTA VAZIA COM EDIFICIO DE PE E UM DEFEITO, NAO UM ESTADO.
 	//
@@ -7198,6 +7219,7 @@ var g_PudimUnitTodas = [];
  * qual das duas, porque mostra se o edificio declara saber treina-lo.
  */
 var g_PudimPropDiagUltimo = {};
+var g_PudimPropDiagEscolha = {};   // ent -> última escolha registrada
 function pudim_ProporcaoDiag(b, escolhida)
 {
 	if (!g_PudimShowDebug || !pudim_ProporcaoAtiva()) return;
@@ -7214,9 +7236,14 @@ function pudim_ProporcaoDiag(b, escolhida)
 	// só faz sentido quando ele podia ter escolhido algo.
 	const podia = (b.trainerEntities || []).some(t => (g_PudimUnitPesos[t] || 0) > 0);
 	if (!podia) return;
+	// Quando a escolha MUDA, na hora; repetindo a mesma, no máximo a cada 60s. Com dez
+	// quartéis a 20s cada, esta linha era ~12% do log guardado (medido em 28/09).
 	const agora = Date.now();
-	if (agora - (g_PudimPropDiagUltimo[b.ent] || 0) < 20000) return;
+	const tplEsc = escolhida ? escolhida.tpl : "";
+	const mudou = tplEsc !== g_PudimPropDiagEscolha[b.ent];
+	if (agora - (g_PudimPropDiagUltimo[b.ent] || 0) < (mudou ? 20000 : 60000)) return;
 	g_PudimPropDiagUltimo[b.ent] = agora;
+	g_PudimPropDiagEscolha[b.ent] = tplEsc;
 
 	const permitidos = b.trainerEntities || [];
 	const partes = [];

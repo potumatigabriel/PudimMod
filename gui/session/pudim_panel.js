@@ -3477,6 +3477,18 @@ function pudim_ProcessAutoQueue()
 			for (const rk of ["food", "wood", "stone", "metal"])
 				if (td.cost[rk] > 0) res[rk] = Math.max(0, (+res[rk] || 0) - td.cost[rk] * n);
 		};
+		// ── E A FILA TAMBÉM É SALDO (28/09) ─────────────────────────────────────────────
+		//
+		// Replay 2026-09-28_0008, aos 20:36: oito quartéis semearam espadachim no MESMO
+		// segundo; 5s depois o mod cancelou e trocou todos para dardeiro, e voltou — 22
+		// stop-production em 40s. A proporção lia `emFila` de g_PudimUnitTodas, que só é
+		// relida da simulação no ciclo seguinte: dentro do laço, todo edifício via a mesma
+		// unidade como a mais atrasada. Agora cada envio e cada cancelamento deste ciclo
+		// entram na conta na hora, como o recurso e as vagas acima.
+		const contaFila = function(tpl, n) {
+			for (const u of (g_PudimUnitTodas || []))
+				if (u.tpl === tpl) { u.emFila = Math.max(0, (u.emFila || 0) + n); return; }
+		};
 
 		// Cachear template e aprender o tamanho de lote que o usuário configurou.
 		// IMPORTANTE: qItem.count é quanto FALTA treinar naquele lote — o motor decrementa
@@ -3718,7 +3730,10 @@ function pudim_ProcessAutoQueue()
 			// MOD. Lote de outro tipo e ordem dele e nao se toca; lote que ja comecou tambem
 			// nao, porque cancelar jogaria fora o tempo investido (sem progresso, o
 			// cancelamento devolve os recursos e a troca sai de graca).
-			if (pudim_ProporcaoAtiva() && b.trainingQueue && b.trainingQueue.length) {
+			// Lote semeado há menos de 7s não é trocado: o comando pode nem ter chegado ao motor,
+			// e a contagem relida da simulação ainda não o inclui (ver "A FILA TAMBÉM É SALDO").
+			const semeadoHaPouco = nowQueue - (g_PudimQueueSeededAt[b.ent] || 0) < 7000;
+			if (pudim_ProporcaoAtiva() && !semeadoHaPouco && b.trainingQueue && b.trainingQueue.length) {
 				const seededTpl = g_PudimQueueSeededTpl[b.ent];
 				// Quantos deste tipo estao na fila SEM ter comecado — sao exatamente os que
 				// seriam cancelados, e por isso sao os que saem da conta da proporcao.
@@ -3738,6 +3753,7 @@ function pudim_ProcessAutoQueue()
 						if (item.id === undefined) continue;
 						Engine.PostNetworkCommand({ "type": "stop-production",
 							"entity": b.ent, "id": item.id });
+						contaFila(seededTpl, -(item.count || 1));
 						cancelados++;
 					}
 					if (cancelados > 0) {
@@ -3797,6 +3813,7 @@ function pudim_ProcessAutoQueue()
 					Engine.PostNetworkCommand({ "type": "train", "entities": [b.ent],
 						"template": cab.unitTemplate, "count": cabem });
 					gastaVagas(cab.unitTemplate, cabem);
+					contaFila(cab.unitTemplate, cabem - (cab.count || 1));
 					g_PudimQueueSeededAt[b.ent] = nowQueue;
 					pudim_Log("INFO", "QUEUE", "edifício " + b.ent + " parado por população: lote x" +
 						(cab.count || 1) + " trocado por x" + cabem + " (as vagas que há)");
@@ -3852,7 +3869,7 @@ function pudim_ProcessAutoQueue()
 					// é a mesma regra que impediu 5 guerreiros de voltarem como 2 aldeões, e
 					// configurar proporção não é motivo para reabri-la.
 					let tplDesejado = null;
-					if (isOurs && pudim_ProporcaoAtiva()) {
+					if (isOurs && pudim_ProporcaoAtiva() && !semeadoHaPouco) {
 						const alvo = pudim_ProporcaoTrocaria(b.trainerEntities || [],
 							cur.unitTemplate, cur.count || 1);
 						if (alvo && !(atFemaleCap && isFemaleTemplate(alvo.tpl)))
@@ -3868,6 +3885,7 @@ function pudim_ProcessAutoQueue()
 							Engine.PostNetworkCommand({ "type": "train", "entities": [b.ent],
 								"template": tplDesejado, "count": lote });
 							gastaVagas(tplDesejado, lote); gastaRecurso(tplDesejado, lote);
+							contaFila(cur.unitTemplate, -curCount); contaFila(tplDesejado, lote);
 							g_PudimQueueSeededTpl[b.ent] = tplDesejado;
 							g_PudimQueueSeededAt[b.ent] = nowQueue;
 							pudim_Log("INFO", "QUEUE", "edifício " + b.ent + " trocado para " +
@@ -3887,6 +3905,7 @@ function pudim_ProcessAutoQueue()
 							Engine.PostNetworkCommand({ "type": "stop-production", "entity": b.ent, "id": cur.id });
 							Engine.PostNetworkCommand({ "type": "train", "entities": [b.ent], "template": tpl, "count": desiredCount });
 							gastaVagas(tpl, desiredCount); gastaRecurso(tpl, desiredCount);
+							contaFila(tpl, desiredCount - curCount);
 							g_PudimQueueSeededAt[b.ent] = nowQueue;
 							pudim_Log("INFO", "QUEUE", "edifício " + b.ent + " lote degradado x" + curCount +
 								" trocado por x" + desiredCount + " " + tpl.split("/").pop());
@@ -4006,6 +4025,7 @@ function pudim_ProcessAutoQueue()
 			}
 			Engine.PostNetworkCommand({ "type": "train", "entities": [b.ent], "template": template, "count": affordable });
 			gastaVagas(template, affordable); gastaRecurso(template, affordable);
+			contaFila(template, affordable);
 			g_PudimQueueSeededAt[b.ent] = nowQueue;
 			// Guarda O QUE foi semeado: é a única forma de, depois, reconhecer um lote como
 			// do mod sem confundi-lo com uma ordem do jogador no mesmo edifício.

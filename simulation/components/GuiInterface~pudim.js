@@ -7839,6 +7839,8 @@ GuiInterface.prototype.pudim_GetSmartDropsiteData = function(player, data)
 // Retorna: { research: [{ building: entityId, tech: techName, score: number }] }
 /** População mínima para o mod investir em tecnologia de combate (forja) */
 const PUDIM_FORGE_MIN_POP = 150;
+// Mineradores de um recurso a partir dos quais a tech que só acelera ele passa a render.
+const PUDIM_MINERADORES_MIN = 5;
 
 // ─── Reserva de recurso: quanto guardar, e para quê ────────────────────────────────────
 //
@@ -8002,7 +8004,19 @@ GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 	const allEnts = cmpRangeManager.GetEntitiesByPlayer(player);
 
 	// Auto-pesquisa restrita a: Armazém, Edifício Agrícola e Forja (não CC, não forte, não quartel)
-	const ALLOWED_RESEARCH_CLASSES = ["Storehouse", "Farmstead", "Forge", "Smith", "Blacksmith"];
+	// Fortaleza entra só por UMA tecnologia (ver PUDIM_FORTALEZA_TECHS): a lista dela
+	// (template_structure_military_fortress.xml) tem também torre, veneno e reforma romana,
+	// que o mod não sabe avaliar.
+	const ALLOWED_RESEARCH_CLASSES = ["Storehouse", "Farmstead", "Forge", "Smith", "Blacksmith", "Fortress"];
+	// ── VONTADE DE LUTAR (28/09) ──────────────────────────────────────────────────────────
+	//
+	// Replays de 28/09: os três melhores da partida (Tzilacatzin, tonyfurg2, gandalf_deluxe)
+	// pesquisaram attack_soldiers_will por volta dos 15 min; o mod nunca, porque ela sai da
+	// FORTALEZA, que não estava na lista acima. Conferido em
+	// simulation/data/technologies/attack_soldiers_will.json: +25% de ataque (hack, pierce e
+	// crush, corpo a corpo e à distância) para Soldier, Siege e Ship; 1500 de cada recurso;
+	// exige phase_city.
+	const PUDIM_FORTALEZA_TECHS = new Set(["attack_soldiers_will"]);
 
 	// ── Liberação de pesquisa por FASE ────────────────────────────────────────────
 	// Fase 1 (Aldeia): só comida e madeira (+ capacidade de carga, que serve a todos)
@@ -8071,6 +8085,18 @@ GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 	const wStone = +((data && data.weights && data.weights.stone) || 0);
 	const wMetal = +((data && data.weights && data.weights.metal) || 0);
 
+	// Quem está minerando agora: a primeira ordem é Gather/GatherNearPosition/ReturnResource
+	// de pedra ou metal — a mesma leitura que o censo do Auto-Trabalho faz.
+	const mineradores = { stone: 0, metal: 0 };
+	for (const mEnt of allEnts) {
+		const mAI = Engine.QueryInterface(mEnt, IID_UnitAI);
+		const mo = mAI && mAI.orderQueue && mAI.orderQueue[0];
+		if (!mo || !mo.data) continue;
+		if (mo.type !== "Gather" && mo.type !== "GatherNearPosition" && mo.type !== "ReturnResource") continue;
+		const g = (mo.data.type && mo.data.type.generic) || (mo.data.resourceType && mo.data.resourceType.generic);
+		if (g === "stone" || g === "metal") mineradores[g]++;
+	}
+
 	/** true se a tech é permitida na fase atual */
 	const allowedInPhase = (tech) => {
 		const n = tech.toLowerCase();
@@ -8091,7 +8117,17 @@ GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 		// ele pediu — não faz sentido segurar até a fase seguinte.
 		if (resSet.has("stone") && wStone > 0) return true;
 		if (resSet.has("metal") && wMetal > 0) return true;
-		return isPhase2;
+		// ── E NA FASE 2, SÓ COM GENTE MINERANDO (28/09) ────────────────────────────────
+		//
+		// Log 20260928-221547: servants e wedgemallet aos 7:05, com "colet S0 M0" — ninguém
+		// minerando — enquanto os quartéis paravam por falta de 50F 50W. Nos replays de 28/09
+		// o mod fez 4 a 6 techs de mineração por partida; os melhores, 2 a 3. Rende só com
+		// mineradores: tech que só acelera pedra/metal espera PUDIM_MINERADORES_MIN deles.
+		if (!isPhase2) return false;
+		for (const r of resSet)
+			if ((r === "stone" || r === "metal") && (mineradores[r] || 0) >= PUDIM_MINERADORES_MIN)
+				return true;
+		return false;
 	};
 
 	// Existe pelo menos uma fazenda? Techs de GRÃOS dependem disso.
@@ -8151,6 +8187,9 @@ GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 		// Techs de combate (forja): reconhecidas pelo que modificam, nao pelo nome.
 		// Ataque rende mais que resistencia; ambas so chegam aqui na Fase 3.
 		if (isCombatTech(tech)) {
+			// Depois das da forja, como fizeram os melhores: custa 6000 e o saldo já decide
+			// quando cabe.
+			if (PUDIM_FORTALEZA_TECHS.has(tech)) return 52;
 			if (n.indexOf("attack") !== -1) return 60;
 			if (n.indexOf("resistance") !== -1 || n.indexOf("armor") !== -1) return 55;
 			return 50;
@@ -8271,6 +8310,7 @@ GuiInterface.prototype.pudim_GetAutoResearchData = function(player, data)
 				: (Array.isArray(item) ? item : [item]);
 			for (const tech of candidates) {
 				if (!tech || typeof tech !== "string") continue;
+				if (cmpIdentR.HasClass("Fortress") && !PUDIM_FORTALEZA_TECHS.has(tech)) continue;
 				if (alreadyQueued.has(tech)) continue;
 				if (blacklist.has(tech)) continue;
 				if (reservadasP.has(tech)) continue;   // fase ou passo de cadeia: já tem dono

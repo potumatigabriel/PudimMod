@@ -111,7 +111,8 @@ check("a simulacao le os pesos de pedra e metal",
 	/const wMetal = \+\(\(data && data\.weights && data\.weights\.metal\) \|\| 0\)/.test(SIM));
 check("pedra com peso libera a tech", /if \(resSet\.has\("stone"\) && wStone > 0\) return true;/.test(SIM));
 check("metal com peso libera a tech", /if \(resSet\.has\("metal"\) && wMetal > 0\) return true;/.test(SIM));
-check("sem peso continua esperando a Fase 2", /return isPhase2;/.test(SIM));
+// Desde 28/09, na Fase 2 ainda exige mineradores (tools/test_pesquisa_mineracao_vontade.js).
+check("sem peso continua esperando a Fase 2", /if \(!isPhase2\) return false;/.test(SIM));
 
 // Réplica da decisão.
 function permitida(recursos, wStone, wMetal, isPhase2) {

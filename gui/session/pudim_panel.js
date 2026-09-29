@@ -913,7 +913,9 @@ function pudim_RunAutoWork()
 	try
 	{
 		result = Engine.GuiInterfaceCall("pudim_GetIdleWorkersAndBestResource", {
-			"weights": g_PudimResourceWeights,
+			// Os seus pesos, mais o recurso que a proporção de unidades precisa e ninguém
+			// coleta (ver pudim_PesosDeColeta).
+			"weights": pudim_PesosDeColeta((GetSimState().players[Engine.GetPlayerID()] || {}).resourceCounts),
 			"repeatBuilders": Object.keys(g_PudimRepeatBuilding).map(Number).filter(ent => g_PudimRepeatBuilding[ent]),
 			"playerOrdered": pudim_GetPlayerOrderedIds(),
 			"protectedIds": pudim_GetProtectedBuilderIds(),
@@ -2877,6 +2879,7 @@ var g_PudimUnplacedLogAt = 0; // throttle do log de trabalhadores sem alvo
 var g_PudimBalLogAt = 0;      // throttle do retrato de balanceamento
 /** Edifícios já avisados por falta de template treinável (evita repetir o log a cada 3s) */
 var g_PudimQueueNoTplLogged = {};
+var g_PudimQueueParadoLogAt = {};   // ent -> último log de "parado" (20 s)
 
 /** Edifícios que o Pudim ativou autoqueue — para detectar desativação manual */
 var g_PudimAutoQueueManagedByMod = new Set();
@@ -3983,7 +3986,24 @@ function pudim_ProcessAutoQueue()
 			// espera o próximo ciclo (evita comando inválido que pode disparar o bug nativo)
 			const affordable = Math.min(
 				pudim_ComputeAffordableCount(template, desiredCount, res), vagasPop);
-			if (affordable <= 0) continue;
+			if (affordable <= 0) {
+				// Parar por falta de recurso não pode ser silencioso: foi assim que "parou de
+				// fazer tropas" (28/09) custou uma leitura do log inteiro para achar a causa.
+				// Sem vaga de população não loga: com dez edifícios parados no teto seriam dez
+				// linhas a cada 20 s, e o CASAS já conta essa história.
+				if (vagasPop > 0 && nowQueue - (g_PudimQueueParadoLogAt[b.ent] || 0) > 20000) {
+					g_PudimQueueParadoLogAt[b.ent] = nowQueue;
+					// Só os quatro recursos: o cost do template traz também population e time.
+					const cst = (GetTemplateData(template) || {}).cost || {};
+					const pede = {};
+					for (const r of ["food", "wood", "stone", "metal"]) pede[r] = +cst[r] || 0;
+					pudim_Log("INFO", "QUEUE", "edifício " + b.ent + " parado: sem recurso para " +
+						(propAtivaAqui ? "nenhuma unidade com peso (" : "") +
+						template.split("/").pop() + " pede " + pudim_CustoCurto(pede) +
+						(propAtivaAqui ? ")" : ""));
+				}
+				continue;
+			}
 			Engine.PostNetworkCommand({ "type": "train", "entities": [b.ent], "template": template, "count": affordable });
 			gastaVagas(template, affordable); gastaRecurso(template, affordable);
 			g_PudimQueueSeededAt[b.ent] = nowQueue;
@@ -7154,6 +7174,66 @@ function pudim_ProporcaoAtiva()
 	for (const tpl in g_PudimUnitPesos)
 		if (g_PudimUnitPesos[tpl] > 0) return true;
 	return false;
+}
+
+// ─── A coleta segue a proporção (28/09) ────────────────────────────────────────────────
+//
+// Relato: o quartel parou. Log: proporção 1:1 espadachim/escaramuçador, Metal em 0 nas
+// prioridades, "colet M0" e M0 no estoque — o espadachim nunca ficava pagável, e sem
+// madeira o escaramuçador também não. Pedido: "sim, mas se não tiver metal, treina o que
+// for possível" (a troca pela pagável já é pudim_ProporcaoPagavel).
+//
+// Recurso com peso 0 que uma unidade PESADA da proporção custa, e cujo estoque não paga
+// PUDIM_COLETA_PROP_LOTES lotes dela, ganha peso 1 só para o Auto-Trabalho. Histerese: sai
+// quando o estoque passa do dobro. O painel continua mostrando o 0 que você escolheu; a
+// pesquisa por pontuação e as fazendas continuam lendo os seus pesos como estão.
+const PUDIM_COLETA_PROP_LOTES = 5;
+const PUDIM_COLETA_PROP_PESO = 1;
+var g_PudimColetaPropLigada = {};   // recurso -> true enquanto a proporção o puxa
+
+function pudim_PesosDeColeta(res)
+{
+	const pesos = Object.assign({}, g_PudimResourceWeights);
+	if (!res || !pudim_ProporcaoAtiva()) {
+		g_PudimColetaPropLigada = {};
+		return pesos;
+	}
+	// Quanto de cada recurso as unidades pesadas pedem: a mais cara manda.
+	const precisa = {};
+	const quem = {};
+	for (const u of (g_PudimUnitTodas || [])) {
+		if (!((g_PudimUnitPesos[u.tpl] || 0) > 0)) continue;
+		let td = null;
+		try { td = GetTemplateData(u.tpl); } catch (e) {}
+		if (!td || !td.cost) continue;
+		for (const r of ["food", "wood", "stone", "metal"]) {
+			const c = +td.cost[r] || 0;
+			if (c > 0 && c * PUDIM_COLETA_PROP_LOTES > (precisa[r] || 0)) {
+				precisa[r] = c * PUDIM_COLETA_PROP_LOTES;
+				quem[r] = u.tpl;
+			}
+		}
+	}
+	for (const r of ["food", "wood", "stone", "metal"]) {
+		if ((g_PudimResourceWeights[r] || 0) > 0 || !precisa[r]) {
+			delete g_PudimColetaPropLigada[r];
+			continue;
+		}
+		const tem = +res[r] || 0;
+		const antes = !!g_PudimColetaPropLigada[r];
+		const liga = antes ? tem < precisa[r] * 2 : tem < precisa[r];
+		if (liga) {
+			pesos[r] = PUDIM_COLETA_PROP_PESO;
+			g_PudimColetaPropLigada[r] = true;
+		} else delete g_PudimColetaPropLigada[r];
+		if (liga !== antes)
+			pudim_Log("INFO", "BALANCE", liga
+				? r + " em 0 nas prioridades, mas " + quem[r].split("/").pop() +
+				  " da proporção precisa (tem " + Math.round(tem) + ", " + precisa[r] +
+				  " paga " + PUDIM_COLETA_PROP_LOTES + "): alguns coletores vão para " + r
+				: r + " juntou " + Math.round(tem) + ": coletores voltam às suas prioridades");
+	}
+	return pesos;
 }
 
 // Teto do lote. O ganho por unidade continua subindo além de 10 (0,44x em 15, 0,41x em 20),

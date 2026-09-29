@@ -2079,15 +2079,25 @@ function pudim_ProcessReforcoCasa() {
 //   • de 100 em 100, uma troca a cada PUDIM_MERCADO_INTERVALO.
 const PUDIM_MERCADO_PISO = 100;
 const PUDIM_MERCADO_SOBRA = 1000;
-const PUDIM_MERCADO_TAXA_MIN = 0.6;
+// ── TAXA MÍNIMA: 0,75; 0,6 SÓ QUANDO O RECURSO ESTÁ PARANDO O TREINO (28/09) ──────────────
+//
+// Replay 2026-09-28_0008: 5900 vendidos por 3799 comprados — 64%, contra 77% do Arpad no mesmo
+// jogo. Cada troca piora o preço da seguinte, e 0,6 deixava o mod trocar até o fundo. Agora a
+// taxa normal exige 0,75; a baixa só vale para o recurso que fez um edifício parar nos últimos
+// PUDIM_MERCADO_URGENTE_MS (g_PudimFaltouRecursoEm, gravado pela auto-fila).
+const PUDIM_MERCADO_TAXA_MIN = 0.75;
+const PUDIM_MERCADO_TAXA_URGENTE = 0.6;
+const PUDIM_MERCADO_URGENTE_MS = 30000;
+var g_PudimFaltouRecursoEm = {};   // recurso -> último instante em que parou um edifício
 const PUDIM_MERCADO_INTERVALO = 3000;
 const PUDIM_MERCADO_LOTE = 100;
 var g_PudimMercadoAccum = 0;
 
 /** Decide uma troca, ou null. Pura: não lê nem manda nada. */
-function pudim_EscolherTroca(res, precos, guardado) {
+function pudim_EscolherTroca(res, precos, guardado, urgentes) {
 	if (!res || !precos || !precos.sell || !precos.buy) return null;
 	guardado = guardado || {};
+	urgentes = urgentes || {};
 	const codigos = Object.keys(precos.sell).filter(r => precos.buy[r] > 0);
 	let compra = null;
 	for (const r of codigos) {
@@ -2102,7 +2112,8 @@ function pudim_EscolherTroca(res, precos, guardado) {
 		const livre = (res[r] || 0) - (guardado[r] || 0);
 		if (livre < PUDIM_MERCADO_SOBRA + PUDIM_MERCADO_LOTE) continue;
 		const ganho = Math.round(precos.sell[r] / precos.buy[compra.r] * PUDIM_MERCADO_LOTE);
-		if (ganho < PUDIM_MERCADO_TAXA_MIN * PUDIM_MERCADO_LOTE) continue;
+		const taxa = urgentes[compra.r] ? PUDIM_MERCADO_TAXA_URGENTE : PUDIM_MERCADO_TAXA_MIN;
+		if (ganho < taxa * PUDIM_MERCADO_LOTE) continue;
 		// Entre os que sobram, o que rende mais; empate, o que tem mais sobra.
 		if (!venda || ganho > venda.ganho || (ganho === venda.ganho && livre > venda.livre))
 			venda = { r: r, ganho: ganho, livre: livre };
@@ -2118,7 +2129,10 @@ function pudim_ProcessMercado() {
 	const sim = GetSimState();
 	const eu = sim && sim.players && sim.players[Engine.GetPlayerID()];
 	if (!eu || !eu.canBarter || !eu.barterPrices) return;
-	const t = pudim_EscolherTroca(eu.resourceCounts, eu.barterPrices, g_PudimGuardado.total);
+	const agoraM = Date.now(), urgentes = {};
+	for (const r in g_PudimFaltouRecursoEm)
+		if (agoraM - g_PudimFaltouRecursoEm[r] < PUDIM_MERCADO_URGENTE_MS) urgentes[r] = true;
+	const t = pudim_EscolherTroca(eu.resourceCounts, eu.barterPrices, g_PudimGuardado.total, urgentes);
 	if (!t) return;
 	// Comando do jogo base, o mesmo do botão do mercado (gui/session/trade/BarterButton.js):
 	// Commands.js → Barter.ExchangeResources, que confere mercado, quantidade e saldo.
@@ -4029,6 +4043,14 @@ function pudim_ProcessAutoQueue()
 			const affordable = Math.min(
 				pudim_ComputeAffordableCount(template, desiredCount, res), vagasPop);
 			if (affordable <= 0) {
+				// Qual recurso parou este edifício: o mercado aceita preço pior só por ele.
+				if (vagasPop > 0) {
+					let tdF = null;
+					try { tdF = GetTemplateData(template); } catch (e) {}
+					const cF = (tdF && tdF.cost) || {};
+					for (const r of ["food", "wood", "stone", "metal"])
+						if ((+cF[r] || 0) > (+res[r] || 0)) g_PudimFaltouRecursoEm[r] = nowQueue;
+				}
 				// Parar por falta de recurso não pode ser silencioso: foi assim que "parou de
 				// fazer tropas" (28/09) custou uma leitura do log inteiro para achar a causa.
 				// Sem vaga de população não loga: com dez edifícios parados no teto seriam dez

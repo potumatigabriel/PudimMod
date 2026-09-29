@@ -74,7 +74,8 @@ check("sem preços: não troca (sem mercado ou estado incompleto)",
 // Reproduz Barter.js: cada troca afasta os preços em 2% × ganho/100. Com 5000 de madeira e
 // metal zerado, o mod para antes de o preço ficar abaixo de 60 por 100 — e bem antes de
 // esvaziar a madeira.
-{
+// Desde 28/09 a taxa normal é 0,75 e só o recurso URGENTE (parou um edifício) aceita 0,6.
+function simular(urgentes) {
 	const dif = { food: 0, wood: 0, stone: 0, metal: 0 };
 	const precos = () => {
 		const p = { sell: {}, buy: {} };
@@ -87,7 +88,7 @@ check("sem preços: não troca (sem mercado ou estado incompleto)",
 	const res = { food: 500, wood: 5000, stone: 500, metal: 0 };
 	let trocas = 0;
 	for (let k = 0; k < 200; ++k) {
-		const x = escolher(res, precos(), { metal: 2000 });
+		const x = escolher(res, precos(), { metal: 2000 }, urgentes);
 		if (!x) break;
 		const p = precos();
 		const ganho = Math.round(p.sell[x.sell] / p.buy[x.buy] * 100);
@@ -96,9 +97,15 @@ check("sem preços: não troca (sem mercado ou estado incompleto)",
 		dif[x.sell] -= d; dif[x.buy] += d;
 		++trocas;
 	}
-	check("guardando 2000 de metal, para sozinho pelo preço (" + trocas + " trocas)",
-		trocas > 3 && trocas < 40, trocas);
-	check("e a madeira fica bem acima da folga de 1000", res.wood > 1000, res.wood);
+	return { trocas, res };
+}
+{
+	const n = simular({}), u = simular({ metal: true });
+	check("taxa normal (0,75): para cedo, sem descer o preço (" + n.trocas + " trocas)",
+		n.trocas >= 1 && n.trocas <= 6, n.trocas);
+	check("metal urgente (parou o treino): aceita até 0,6, mais trocas (" + u.trocas + ")",
+		u.trocas > n.trocas && u.trocas < 40, u.trocas);
+	check("e a madeira fica bem acima da folga de 1000", u.res.wood > 1000, u.res.wood);
 }
 
 // ── O código ─────────────────────────────────────────────────────────────────────────
@@ -113,7 +120,8 @@ check("desligado por padrão, com chave NOVA (a antiga ficou gravada como true)"
 const trava = execP.indexOf("if (typeof g_IsObserver !== \"undefined\" && g_IsObserver) return;");
 const chamada = execP.indexOf("pudim_ProcessMercado(); } catch");
 check("roda ABAIXO da trava de espectador (manda comando)", trava > 0 && chamada > trava);
-check("desconta o que está guardado", /pudim_EscolherTroca\(eu\.resourceCounts, eu\.barterPrices, g_PudimGuardado\.total\)/.test(execP));
+check("desconta o que está guardado, e passa os urgentes", /pudim_EscolherTroca\(eu\.resourceCounts, eu\.barterPrices, g_PudimGuardado\.total, urgentes\)/.test(execP));
+check("parada por recurso marca o recurso que faltou", /g_PudimFaltouRecursoEm\[r\] = nowQueue;/.test(execP));
 const op = opts[0].options.find(o => o.config === "pudim.mercado.auto");
 check("a opção existe, em pt e en, e diz que vem desligada",
 	op && op.tooltip && op.tooltip_en && /Desligado por padrão/.test(op.tooltip));

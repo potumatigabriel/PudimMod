@@ -4096,6 +4096,8 @@ function pudim_ProcessAutoQueue()
 				(g_PudimShowDebug ? " | " + pudim_LoteDiag(template, res, buildings) : ""));
 		}
 
+		try { pudim_ChecarProducaoExtra(buildings, res, vagasPop, nowQueue); } catch (e) {}
+
 		if (atFemaleCap && !g_PudimFemaleCapLogged) {
 			pudim_Log("INFO", "QUEUE", "limite de 50 mulheres atingido (atual=" + femaleCount + ") — produção mudou para soldados");
 			g_PudimFemaleCapLogged = true;
@@ -4103,6 +4105,58 @@ function pudim_ProcessAutoQueue()
 			g_PudimFemaleCapLogged = false; // resetar se cair abaixo do limite
 		}
 	} catch(e) {}
+}
+
+// ─── Recurso sobrando com todo quartel ocupado: mais um quartel (28/09) ─────────────────
+//
+// Replays de 28/09: no 0007 o Pudim teve 2 quartéis a partida inteira (Arpad, 10); no 0008,
+// 2 até os 17,5 min e nenhum estábulo, enquanto os vencedores tinham 6 a 8 estábulos aos 13
+// min — e o estoque passou de 3 a 5 mil. Quando todo edifício militar já está treinando, há
+// vaga de população e ainda sobra recurso DEPOIS de alimentar as filas (o `res` que chega
+// aqui já é o saldo do ciclo), o gargalo é a quantidade de edifícios.
+//
+// Sempre avisa; com a opção pudim.producao.auto ligada, começa uma Construção em Série de 1
+// (a mesma do botão, com a mesma equipe e a mesma escolha de lugar). Estábulo quando a
+// unidade mais atrasada da proporção é cavalaria e o estábulo está disponível.
+const PUDIM_PRODUCAO_SOBRA = 1500;        // recurso livre somado, depois das filas
+const PUDIM_PRODUCAO_MADEIRA_MIN = 300;   // quartel e estábulo são de madeira (e pedra)
+const PUDIM_PRODUCAO_ESPERA = 60000;      // a sobra tem de durar isso
+const PUDIM_PRODUCAO_INTERVALO = 120000;  // no máximo um aviso/obra a cada 2 min
+var g_PudimProducaoSobraDesde = 0;
+var g_PudimProducaoUltima = 0;
+
+function pudim_ChecarProducaoExtra(buildings, res, vagasPop, agora)
+{
+	const militar = t => /(^|\/)(infantry|cavalry)_/.test(t.split("/").pop());
+	const prod = (buildings || []).filter(b => !b.isCC && (b.trainerEntities || []).some(militar));
+	const livre = ["food", "wood", "stone", "metal"].reduce((s, r) => s + (+res[r] || 0), 0);
+	const todosOcupados = prod.length > 0 && prod.every(b => b.trainingQueue && b.trainingQueue.length > 0);
+	const sobra = vagasPop > 0 && todosOcupados && livre >= PUDIM_PRODUCAO_SOBRA &&
+		(+res.wood || 0) >= PUDIM_PRODUCAO_MADEIRA_MIN;
+	if (!sobra) { g_PudimProducaoSobraDesde = 0; return null; }
+	if (!g_PudimProducaoSobraDesde) g_PudimProducaoSobraDesde = agora;
+	if (agora - g_PudimProducaoSobraDesde < PUDIM_PRODUCAO_ESPERA) return null;
+	if (agora - g_PudimProducaoUltima < PUDIM_PRODUCAO_INTERVALO) return null;
+	// Série de quartel/estábulo já em andamento: o pedido já está sendo atendido.
+	if (pudim_SerieEstado("quartel").ativo || pudim_SerieEstado("estabulo").ativo) return null;
+	g_PudimProducaoUltima = agora;
+
+	const atrasada = pudim_ProporcaoAtiva() ? pudim_UnidadeMaisAtrasada(null) : null;
+	const tipo = (atrasada && /cavalry/.test(atrasada.tpl) &&
+		(g_PudimQuartelDisponiveis || []).indexOf("estabulo") >= 0) ? "estabulo" : "quartel";
+	const auto = Engine.ConfigDB_GetValue("user", "pudim.producao.auto") === "true";
+	const msg = "Recurso sobrando (" + Math.round(livre) + ") e os " + prod.length +
+		" edifício(s) militares ocupados: " + (auto ? "construindo mais 1 " : "construa mais 1 ") +
+		pudim_QuartelNome(tipo);
+	pudim_Log("INFO", "QUARTEL", msg);
+	try { Engine.GuiInterfaceCall("pudim_PushNotification", { "message": msg }); } catch (e) {}
+	if (!auto) return tipo;
+
+	const st = pudim_SerieEstado(tipo);
+	st.alvo = 1; st.ativo = true; st.base = null; st.ultima = 0; st.ultimoPonto = null;
+	st.progresso = -1; st.falhas = 0; st.faltam = undefined; st.feitos = 0;
+	try { pudim_QuartelAtualizarLabel(); } catch (e) {}
+	return tipo;
 }
 
 /**

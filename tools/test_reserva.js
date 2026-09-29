@@ -76,7 +76,8 @@ check("auto-fila: com reserva, a auto-fila NATIVA fica desligada (ela gastaria s
 	/if \(b\.alwaysQueue && modSemeia\)/.test(execP));
 check("contra-treino: nao age com reserva (manda lote sem olhar custo)",
 	/if \(g_PudimTreinoPausado\) return;[\s\S]{0,300}if \(pudim_ReservaAtiva\(\)\) return;/.test(execP));
-check("auto-pesquisa: recebe a reserva", /reserva: g_PudimGuardado\.total,/.test(execP));
+// Desde 28/09 somada a uma unidade por edifício de produção (test_treino_antes_pesquisa.js).
+check("auto-pesquisa: recebe a reserva", /reserva: pudim_SomaCustos\(g_PudimGuardado\.total, /.test(execP));
 check("e a simulacao a desconta do saldo",
 	/for \(const r in reservaP\) saldoPesquisa\[r\] = \(saldoPesquisa\[r\] \|\| 0\) - \(reservaP\[r\] \|\| 0\);/.test(execS));
 

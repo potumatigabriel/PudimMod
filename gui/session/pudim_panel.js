@@ -4056,6 +4056,49 @@ const PUDIM_RESEARCH_RETRY = 180000;
 var g_PudimResearchLastTry = {};
 const PUDIM_RESEARCH_RESEND_MIN = 30000;
 
+// ─── Unidade antes de pesquisa por pontuação (28/09) ──────────────────────────────────────
+//
+// Relato: "tá ficando uns segundos parados sem fazer unidades". Log da partida 221547: entre
+// 7:05 e 7:40 a auto-pesquisa mandou arado, servants e wedgemallet, e os dois quartéis
+// ficaram "parado: sem recurso (lanceiro pede 50F 50W)" quatro vezes seguidas.
+//
+// A pesquisa POR PONTUAÇÃO só usa o que sobra depois de UMA unidade para cada edifício que o
+// mod está semeando (a última que ele semeou ali). É pouco — três edifícios de lanceiro são
+// 150F 150W — então a economia continua saindo, só não à custa de parar a produção. Com a
+// população no teto não há treino possível, e a reserva some. Fase, cadeia e o que você
+// clicou não passam por aqui.
+function pudim_ReservaParaTreino()
+{
+	const reserva = {};
+	let eu = null;
+	try { eu = GetSimState().players[Engine.GetPlayerID()]; } catch (e) {}
+	if (!eu || (eu.popLimit || 0) - (eu.popCount || 0) <= 0) return reserva;
+	for (const ent in g_PudimQueueSeededTpl) {
+		const tpl = g_PudimQueueSeededTpl[ent];
+		if (!tpl) continue;
+		// Edifício que já não existe não treina mais.
+		let st = null;
+		try { st = GetEntityState(+ent); } catch (e) {}
+		if (!st || st.player !== Engine.GetPlayerID()) continue;
+		let td = null;
+		try { td = GetTemplateData(tpl); } catch (e) {}
+		if (!td || !td.cost) continue;
+		for (const r of ["food", "wood", "stone", "metal"])
+			if ((+td.cost[r] || 0) > 0) reserva[r] = (reserva[r] || 0) + (+td.cost[r]);
+	}
+	return reserva;
+}
+
+function pudim_SomaCustos(a, b)
+{
+	const s = {};
+	for (const r of ["food", "wood", "stone", "metal"]) {
+		const v = (+(a && a[r]) || 0) + (+(b && b[r]) || 0);
+		if (v > 0) s[r] = v;
+	}
+	return s;
+}
+
 function pudim_ProcessAutoResearch()
 {
 	try {
@@ -4081,7 +4124,8 @@ function pudim_ProcessAutoResearch()
 		const researchData = Engine.GuiInterfaceCall("pudim_GetAutoResearchData", {
 			blacklist: blacklistAtiva,
 			// O que está guardado (fase, cerco, cadeia) não é dinheiro para pesquisa de score.
-			reserva: g_PudimGuardado.total,
+			// E uma unidade por edifício de produção vem antes (pudim_ReservaParaTreino).
+			reserva: pudim_SomaCustos(g_PudimGuardado.total, pudim_ReservaParaTreino()),
 			// E o que está reservado não é escolhido de novo por pontuação: a fase e o passo
 			// da cadeia têm dono. Dois pedidos da mesma pesquisa = erro do motor na tela.
 			reservadas: g_PudimGuardado.itens.map(i => i.nome),

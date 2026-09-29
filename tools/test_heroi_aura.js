@@ -170,8 +170,10 @@ check("sem ameaça, ele fica no limite da aura (mais longe é sempre melhor)",
 // ── Os números escolhidos ──────────────────────────────────────────────────────────────
 check("a folga da aura absorve o passo do herói sem ser exagerada",
 	FOLGA >= 4 && FOLGA <= 12, FOLGA);
+// 29/09: a margem caiu de 12 para 6 — com 12 + 2s de caminhada nenhum ponto da aura sobrava
+// numa luta de verdade e o herói só fugia (ver tools/test_heroi_aura_cobertura.js).
 check("a margem sobre a arma inimiga é maior que zero e não absurda",
-	MARGEM >= 8 && MARGEM <= 30, MARGEM);
+	MARGEM >= 4 && MARGEM <= 30, MARGEM);
 check("passos suficientes para cercar a luta sem buraco grande",
 	PASSOS >= 12, PASSOS + " passos = " + (360 / PASSOS).toFixed(0) + " graus");
 check("o passo angular no raio 60 deixa buraco menor que um corpo",
@@ -179,10 +181,12 @@ check("o passo angular no raio 60 deixa buraco menor que um corpo",
 check("não emite ordem por menos de 10m",
 	MIN_MOVER >= 10, MIN_MOVER);
 
-// A margem de tempo embutida (2s de caminhada do inimigo) tem de cobrir o passo real: um
-// lanceiro a velocidade 9 anda 18m em 2s, e é isso que separa "seguro" de "morto".
-check("a margem de tempo cobre 2 segundos de caminhada inimiga",
-	/margem \+= 2 \* \(\+cmpMot\.GetWalkSpeed\(\) \|\| 0\)/.test(src));
+// A margem de tempo embutida vale só para o CORPO A CORPO, que precisa andar até o herói: um
+// lanceiro a velocidade 9 anda 13,5m em 1,5s. Quem atira de longe já está no alcance dele
+// (29/09; antes eram 2s para todo inimigo, e o herói só fugia).
+check("a margem de tempo cobre a caminhada do corpo a corpo",
+	/if \(!longe && cmpMot && cmpMot\.GetWalkSpeed\) \{\s*try \{ margem \+= PUDIM_HEROI_SEG_CORPO \* \(\+cmpMot\.GetWalkSpeed\(\) \|\| 0\); \}/.test(src) &&
+	/const PUDIM_HEROI_SEG_CORPO = 1\.5;/.test(src));
 
 console.log(fails === 0 ? "\nTODOS OS TESTES PASSARAM" : "\n" + fails + " TESTE(S) FALHARAM");
 process.exit(fails === 0 ? 0 : 1);

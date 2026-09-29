@@ -35,8 +35,10 @@ check("o alcance vem de Attack.GetFullAttackRange (aplica tecnologias)",
 check("as ameacas saem de uma query por IID_Attack nos inimigos",
 	/ExecuteQueryAroundPos\(\s*\{ x: cx, y: cz \}, 0, radius, enemyIds, IID_Attack, false\)/.test(SIM));
 check("gaia nao entra na lista de inimigos", /GetEnemies\(\)\.filter\(id => id > 0\)/.test(SIM));
+// Esta expressao casava, por acaso, a linha do HEROI; a do batedor mudou em 28/09 (cavalaria
+// conta 5s correndo). Agora confere a do batedor mesmo.
 check("unidade ganha margem pelo proprio deslocamento",
-	/margem \+= 2 \* \(\+cmpMot\.GetWalkSpeed\(\) \|\| 0\)/.test(SIM));
+	/const anda = \+cmpMot\.GetWalkSpeed\(\) \|\| 0;[\s\S]{0,200}margem \+= 5 \* anda \*[\s\S]{0,120}else\s+margem \+= 2 \* anda;/.test(SIM));
 
 // ── 2. A orbita segue a fronteira do territorio ────────────────────────────────────────
 check("existe calculo do raio da fronteira do territorio",

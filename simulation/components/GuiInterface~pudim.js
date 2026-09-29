@@ -5874,7 +5874,24 @@ const PUDIM_KITE_SEG_APROXIMACAO = 1;
 // a maior parte dos heróis em 60. É espaço de sobra — o herói quase sempre consegue cobrir
 // a luta de um ponto que nenhuma arma inimiga alcança.
 const PUDIM_HEROI_FOLGA_AURA = 6;    // margem para dentro da aura, absorve o passo dele
-const PUDIM_HEROI_MARGEM_ARMA = 12;  // margem sobre o alcance inimigo
+// ── PERTO DA LUTA DE VERDADE (29/09) ─────────────────────────────────────────────────────
+//
+// Relato: "o herói tem que ficar perto das unidades que estão lutando, pra fornecer aura...
+// ele agora anda sempre fugindo pra longe". A margem era alcance + 12m + 2s de caminhada para
+// TODO inimigo — um arqueiro virava 90m de raio proibido. Na luta os inimigos estão no MEIO
+// da nossa tropa, então nenhum ponto da aura (60m) sobrava: "aura_toda_exposta" → "recuar",
+// que não emite ordem nenhuma. E como o herói está em passivo ("fuja se atacado"), é o
+// próprio jogo que o faz fugir ao levar o primeiro golpe, e o mod nunca o trazia de volta.
+//
+// Agora: corpo a corpo = alcance + 1,5s de caminhada + 6m (ele tem de ANDAR até o herói);
+// a distância = alcance + 6m. Continua SEM RISCO (pedido: "tem que ficar em posição sem
+// risco, mas que forneça aura a uma maior quantidade possível de unidades"): o ponto
+// escolhido é o seguro que cobre mais tropa — ver "Escolher onde ele fica".
+const PUDIM_HEROI_MARGEM_ARMA = 6;   // margem sobre o alcance inimigo
+const PUDIM_HEROI_SEG_CORPO = 1.5;   // segundos de caminhada de um corpo a corpo
+const PUDIM_HEROI_ALCANCE_RANGED = 15; // a partir disto a arma é de longe
+// Já seguro e cobrindo pelo menos isto do melhor ponto: fica onde está.
+const PUDIM_HEROI_COBRE_BASTA = 0.85;
 const PUDIM_HEROI_PASSOS = 16;       // direções testadas em volta da luta
 const PUDIM_HEROI_MIN_MOVER = 10;    // não emite ordem por menos que isto
 
@@ -5913,7 +5930,7 @@ GuiInterface.prototype.pudim_GetHeroAuraData = function(player, data)
 	// Só conta quem está REALMENTE trocando golpes: ordem de Attack na frente da fila. Um
 	// exército parado em posição não precisa do herói colado nele.
 	let sx = 0, sz = 0, n = 0;
-	const classesEmLuta = {};
+	const lutadores = [];   // { x, z, classes } — quem a aura pode cobrir
 	for (const ent of allEnts) {
 		if (ent === heroi) continue;
 		const cmpAI = Engine.QueryInterface(ent, IID_UnitAI);
@@ -5924,8 +5941,8 @@ GuiInterface.prototype.pudim_GetHeroAuraData = function(player, data)
 		const q = p.GetPosition2D();
 		sx += q.x; sz += q.y; n++;
 		const cid = Engine.QueryInterface(ent, IID_Identity);
-		if (cid && cid.GetClassesList)
-			for (const c of cid.GetClassesList()) classesEmLuta[c] = true;
+		const cls = (cid && cid.GetClassesList) ? cid.GetClassesList() : [];
+		lutadores.push({ x: q.x, z: q.y, classes: cls });
 	}
 	if (n === 0) { result._dbg.reason = "ninguem_lutando"; return result; }
 	const lutaX = sx / n, lutaZ = sz / n;
@@ -5936,16 +5953,20 @@ GuiInterface.prototype.pudim_GetHeroAuraData = function(player, data)
 	// respeitando a menor, todas as outras vêm junto. Aura global não entra na conta — ela
 	// já vale no mapa inteiro, então não é motivo para o herói chegar perto de nada.
 	let raio = Infinity, quantas = 0;
+	// Quem as auras úteis afetam, como lista de classes do motor: null = alguma não filtra
+	// por classe, então afeta todos. "Melee Cavalry" é as DUAS classes juntas — o motor lê
+	// isso com MatchesClassList (globalscripts/Templates.js), e é ela que se usa aqui; ler
+	// cada entrada como uma classe só não casava nenhuma unidade com essas auras.
+	let classesAura = [];
 	for (const nome of cmpAuras.GetAuraNames()) {
 		if (!cmpAuras.IsRangeAura || !cmpAuras.IsRangeAura(nome)) continue;
 		const r = +cmpAuras.GetRange(nome);
 		if (!(r > 0)) continue;
 		const afeta = cmpAuras.GetClasses ? cmpAuras.GetClasses(nome) : null;
 		if (afeta && afeta.length) {
-			let serve = false;
-			for (const c of afeta) if (classesEmLuta[c]) { serve = true; break; }
-			if (!serve) continue;
-		}
+			if (!lutadores.some(u => MatchesClassList(u.classes, afeta))) continue;
+			if (classesAura) classesAura = classesAura.concat(afeta);
+		} else classesAura = null;
 		quantas++;
 		if (r < raio) raio = r;
 	}
@@ -5974,15 +5995,16 @@ GuiInterface.prototype.pudim_GetHeroAuraData = function(player, data)
 			let rng = 0;
 			try { rng = +cmpAtk.GetFullAttackRange().max || 0; } catch (e2) { continue; }
 			if (rng <= 0) continue;
-			// Margem sobre o alcance: quem anda fecha distância enquanto o herói se
-			// posiciona, então quem anda assusta mais. Prédio não persegue ninguém.
+			// Margem sobre o alcance: o corpo a corpo tem de andar até o herói, então conta 1s
+			// de caminhada dele; quem atira de longe já está no alcance dele. Prédio não anda.
+			const longe = rng >= PUDIM_HEROI_ALCANCE_RANGED;
 			let margem = PUDIM_HEROI_MARGEM_ARMA;
 			const cmpMot = Engine.QueryInterface(e, IID_UnitMotion);
-			if (cmpMot && cmpMot.GetWalkSpeed) {
-				try { margem += 2 * (+cmpMot.GetWalkSpeed() || 0); } catch (e2) {}
+			if (!longe && cmpMot && cmpMot.GetWalkSpeed) {
+				try { margem += PUDIM_HEROI_SEG_CORPO * (+cmpMot.GetWalkSpeed() || 0); } catch (e2) {}
 			}
 			const q = p.GetPosition2D();
-			ameacas.push({ x: q.x, z: q.y, alcance: rng + margem });
+			ameacas.push({ x: q.x, z: q.y, alcance: rng + margem, longe: longe });
 		}
 	}
 	result._dbg.ameacas = ameacas.length;
@@ -5995,52 +6017,76 @@ GuiInterface.prototype.pudim_GetHeroAuraData = function(player, data)
 		return false;
 	};
 
-	// ── Escolher onde ele fica ───────────────────────────────────────────────────────
-	// Anéis de fora para dentro: começa no limite da aura e só encosta mais se precisar.
-	// Ficar longe é sempre melhor quando o efeito é o mesmo — dentro da aura, 20m e 55m
-	// valem igual para as tropas, e valem muito diferente para a vida do herói.
+	// ── Escolher onde ele fica: SEM RISCO, cobrindo o MÁXIMO de tropa (29/09) ──────────
+	//
+	// Pedido: "ele tem que ficar em posição sem risco, mas que forneça aura a uma maior
+	// quantidade possível de unidades". Antes o ponto era tirado de anéis em volta do CENTRO
+	// da luta e vencia o mais LONGE do perigo — com a luta espalhada, a aura medida do centro
+	// cobria pouca gente, e o "mais longe do perigo" empurrava o herói para a borda.
+	//
+	// Agora testa pontos em anéis de 0 até (espalhamento da luta + raio) e conta, para cada
+	// ponto SEGURO, quantos dos que estão lutando (e que a aura afeta, pelo MatchesClassList do
+	// motor) ficam dentro do raio. Vence quem cobre mais; empate, o de maior folga até a arma
+	// inimiga mais próxima. Nenhum ponto seguro cobre ninguém: fica fora (regra de sempre).
 	const alvoRaio = Math.max(0, raio - PUDIM_HEROI_FOLGA_AURA);
-	let melhor = null, melhorScore = -Infinity;
-	for (let anel = 0; anel < 4; anel++) {
-		const d = alvoRaio * (1 - anel * 0.22);
-		for (let i = 0; i < PUDIM_HEROI_PASSOS; i++) {
-			const ang = (i * 2 * Math.PI) / PUDIM_HEROI_PASSOS;
-			const px = lutaX + Math.cos(ang) * d;
-			const pz = lutaZ + Math.sin(ang) * d;
-			if (exposto(px, pz)) continue;
-			// Entre os pontos seguros, o melhor é o mais LONGE da ameaça mais próxima. Isso
-			// empurra o herói para trás da própria linha sozinho, sem ninguém precisar
-			// calcular onde é a retaguarda: a retaguarda é, por definição, o lado de onde
-			// as armas inimigas estão mais distantes.
-			let folga = Infinity;
-			for (const a of ameacas) {
-				const dx = px - a.x, dz = pz - a.z;
-				const f = Math.sqrt(dx*dx + dz*dz) - a.alcance;
-				if (f < folga) folga = f;
-			}
-			if (folga === Infinity) folga = 1000;
-			// Desempate leve por proximidade da luta, para ele não vagar pela borda.
-			const score = folga - d * 0.05;
-			if (score > melhorScore) { melhorScore = score; melhor = { x: px, z: pz, d: d }; }
+	const cobertos = (lista => function(px, pz) {
+		let c = 0;
+		for (const u of lista) {
+			const dx = px - u.x, dz = pz - u.z;
+			if (dx*dx + dz*dz <= alvoRaio * alvoRaio) c++;
 		}
-		if (melhor) break;   // achou no anel mais afastado: não precisa chegar mais perto
+		return c;
+	})(classesAura ? lutadores.filter(u => MatchesClassList(u.classes, classesAura)) : lutadores);
+	const folgaDe = function(px, pz) {
+		let f = Infinity;
+		for (const a of ameacas) {
+			const dx = px - a.x, dz = pz - a.z;
+			const v = Math.sqrt(dx*dx + dz*dz) - a.alcance;
+			if (v < f) f = v;
+		}
+		return f === Infinity ? 1000 : f;
+	};
+	let espalho = 0;
+	for (const u of lutadores) {
+		const dx = u.x - lutaX, dz = u.z - lutaZ;
+		espalho = Math.max(espalho, Math.sqrt(dx*dx + dz*dz));
 	}
+	const alcanceBusca = espalho + alvoRaio;
+	const passo = Math.max(8, alvoRaio / 3);
+	let melhor = null, melhorCob = 0, melhorFolga = -Infinity;
+	for (let d = 0; d <= alcanceBusca + 0.01; d += passo) {
+		const voltas = d === 0 ? 1 : PUDIM_HEROI_PASSOS;
+		for (let i = 0; i < voltas; i++) {
+			const ang = (i * 2 * Math.PI) / voltas;
+			const px = lutaX + Math.cos(ang) * d, pz = lutaZ + Math.sin(ang) * d;
+			if (exposto(px, pz)) continue;
+			const cob = cobertos(px, pz);
+			if (cob <= 0) continue;
+			const f = folgaDe(px, pz);
+			if (cob > melhorCob || (cob === melhorCob && f > melhorFolga)) {
+				melhorCob = cob; melhorFolga = f; melhor = { x: px, z: pz, d: d };
+			}
+		}
+	}
+	result._dbg.cobre = melhorCob;
+	result._dbg.total = lutadores.length;
 
 	if (!melhor) {
-		// Nenhum ponto da aura está fora do alcance inimigo. Aqui a regra do jogador manda:
-		// "pra nunca morrer" ganha da aura. Ele recua e a tropa luta sem o bônus.
+		// Nenhum ponto seguro alcança tropa nenhuma: "pra nunca morrer" ganha da aura.
 		result._dbg.reason = "aura_toda_exposta";
 		result.action = "recuar";
 		return result;
 	}
 
-	// Já está coberto e seguro: não mexe. Ordem à toa interrompe o que ele estiver fazendo
-	// e é exatamente o "passeio" que o jogador reclamou nas tropas.
-	const dLuta = Math.sqrt((heroiPos.x - lutaX) * (heroiPos.x - lutaX) +
-	                        (heroiPos.y - lutaZ) * (heroiPos.y - lutaZ));
-	if (dLuta <= alvoRaio && !exposto(heroiPos.x, heroiPos.y)) {
-		result._dbg.reason = "ja_cobre_e_seguro";
-		return result;
+	// Já está seguro e cobrindo quase o mesmo que o melhor ponto: não mexe. Ordem à toa
+	// interrompe o que ele estiver fazendo — é o "passeio" que o jogador reclamou nas tropas.
+	if (!exposto(heroiPos.x, heroiPos.y)) {
+		const aqui = cobertos(heroiPos.x, heroiPos.y);
+		result._dbg.cobreAqui = aqui;
+		if (aqui > 0 && aqui >= melhorCob * PUDIM_HEROI_COBRE_BASTA) {
+			result._dbg.reason = "ja_cobre_e_seguro";
+			return result;
+		}
 	}
 
 	const dx = melhor.x - heroiPos.x, dz = melhor.z - heroiPos.y;

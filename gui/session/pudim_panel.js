@@ -4122,6 +4122,9 @@ const PUDIM_PRODUCAO_SOBRA = 1500;        // recurso livre somado, depois das fi
 const PUDIM_PRODUCAO_MADEIRA_MIN = 300;   // quartel e estábulo são de madeira (e pedra)
 const PUDIM_PRODUCAO_ESPERA = 60000;      // a sobra tem de durar isso
 const PUDIM_PRODUCAO_INTERVALO = 120000;  // no máximo um aviso/obra a cada 2 min
+// Teto de edifícios militares (quartel + estábulo + o que mais treinar infantaria/cavalaria,
+// fora o CC). Pedido de 29/09: "tem como limitar a 10?". Com 10 ou mais, nem avisa.
+const PUDIM_PRODUCAO_MAX = 10;
 var g_PudimProducaoSobraDesde = 0;
 var g_PudimProducaoUltima = 0;
 
@@ -4129,6 +4132,7 @@ function pudim_ChecarProducaoExtra(buildings, res, vagasPop, agora)
 {
 	const militar = t => /(^|\/)(infantry|cavalry)_/.test(t.split("/").pop());
 	const prod = (buildings || []).filter(b => !b.isCC && (b.trainerEntities || []).some(militar));
+	if (prod.length >= PUDIM_PRODUCAO_MAX) { g_PudimProducaoSobraDesde = 0; return null; }
 	const livre = ["food", "wood", "stone", "metal"].reduce((s, r) => s + (+res[r] || 0), 0);
 	const todosOcupados = prod.length > 0 && prod.every(b => b.trainingQueue && b.trainingQueue.length > 0);
 	const sobra = vagasPop > 0 && todosOcupados && livre >= PUDIM_PRODUCAO_SOBRA &&

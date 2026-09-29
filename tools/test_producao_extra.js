@@ -87,6 +87,17 @@ const rico = { food: 800, wood: 900, stone: 300, metal: 200 };
 	check("série de quartel já rodando: não empilha outra", s.f([quartel(true)], rico, 10, 62000) === null);
 }
 
+{
+	const m = mundo({ auto: true });
+	const dez = Array.from({ length: 10 }, () => quartel(true));
+	m.f(dez, rico, 10, 1000);
+	check("com 10 edifícios militares: nem avisa, nem constrói (teto de 29/09)",
+		m.f(dez, rico, 10, 62000) === null && m.w.avisos.length === 0);
+	const nove = dez.slice(0, 9);
+	m.f(nove, rico, 10, 63000);
+	check("com 9: ainda pede o décimo", m.f(nove, rico, 10, 124000) === "quartel");
+}
+
 check("chamado no fim do ciclo da fila, com o saldo do ciclo",
 	/try \{ pudim_ChecarProducaoExtra\(buildings, res, vagasPop, nowQueue\); \} catch \(e\) \{\}/.test(panel));
 const op = opts[0].options.find(x => x.config === "pudim.producao.auto");

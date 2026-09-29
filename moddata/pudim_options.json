@@ -62,9 +62,9 @@
 				"type": "boolean",
 				"config": "pudim.producao.auto",
 				"label": "[color=\"120 220 255\"]Economia:[/color] Construir quartel/estábulo quando sobrar recurso",
-				"tooltip": "Quando sobra recurso depois de alimentar todas as filas, há vaga de população e TODOS os quartéis e estábulos estão treinando por 1 minuto, o mod avisa na tela. Com esta opção ligada, ele também começa uma Construção em Série de 1 quartel (ou 1 estábulo, se a unidade mais atrasada da proporção for cavalaria). No máximo uma a cada 2 minutos. Desligado, só avisa.",
+				"tooltip": "Quando sobra recurso depois de alimentar todas as filas, há vaga de população e TODOS os quartéis e estábulos estão treinando por 1 minuto, o mod avisa na tela. Com esta opção ligada, ele também começa uma Construção em Série de 1 quartel (ou 1 estábulo, se a unidade mais atrasada da proporção for cavalaria). No máximo uma a cada 2 minutos, e para de vez quando você tiver 10 edifícios militares (quartéis + estábulos). Desligado, só avisa.",
 				"label_en": "[color=\"120 220 255\"]Economy:[/color] Build a barracks/stable when resources pile up",
-				"tooltip_en": "When resources are left over after feeding every queue, there is population room and ALL barracks and stables have been training for 1 minute, the mod shows a notice. With this option on, it also starts a Serial Construction of 1 barracks (or 1 stable, if the most lagging unit in the proportion is cavalry). At most one every 2 minutes. When off, it only notifies."
+				"tooltip_en": "When resources are left over after feeding every queue, there is population room and ALL barracks and stables have been training for 1 minute, the mod shows a notice. With this option on, it also starts a Serial Construction of 1 barracks (or 1 stable, if the most lagging unit in the proportion is cavalry). At most one every 2 minutes, and it stops for good once you have 10 military buildings (barracks + stables). When off, it only notifies."
 			},
 			{
 				"type": "boolean",

@@ -766,7 +766,11 @@ function pudim_LogCombate(data)
 		" | eles " + e.count + "u hp" + Math.round(e.totalHP) + " dps" + Math.round(e.totalAttack) +
 		" | matamos em " + (data.timeToKillEnemy === undefined ? "?" : data.timeToKillEnemy) + "s" +
 		" morremos em " + (data.timeToKillUs === undefined ? "?" : data.timeToKillUs) + "s" +
-		" | chance " + data.winChance + "%");
+		" | chance " + data.winChance + "%" +
+		(data.aCaminho && data.aCaminho.count > 0
+			? " | +" + data.aCaminho.count + "u a caminho (hp" + data.aCaminho.totalHP + "): " +
+			  data.winChanceTotal + "%"
+			: ""));
 }
 
 function pudim_UpdateCombatDisplay(data)
@@ -779,6 +783,12 @@ function pudim_UpdateCombatDisplay(data)
 	const allies = data.allies;
 	const enemies = data.enemies;
 	const winChance = data.winChance;
+	// Com inimigo visível a caminho (80-200m), a chance que vale para a cor e a barra é a
+	// que os soma — ver "E QUEM ESTÁ A CAMINHO" na simulação.
+	const aCaminho = (data.aCaminho && data.aCaminho.count > 0) ? data.aCaminho : null;
+	const chanceCor = aCaminho && typeof data.winChanceTotal === "number" ? data.winChanceTotal : winChance;
+	const sufixoCaminho = aCaminho
+		? "  [color=\"230 120 90\"]+" + aCaminho.count + " a caminho: " + chanceCor + "%[/color]" : "";
 
 	// Aliados
 	pudim_SetCaption("pudim_allyCount", "Aliados: " + allies.count);
@@ -806,9 +816,9 @@ function pudim_UpdateCombatDisplay(data)
 		const tE = data.timeToKillEnemy >= 0 ? data.timeToKillEnemy + "s" : "--";
 		const tU = data.timeToKillUs >= 0 ? data.timeToKillUs + "s" : "--";
 		pudim_SetCaption("pudim_winChancePct", winChance + "%   [color=\"170 170 170\"]mata em " +
-			tE + " / morre em " + tU + "[/color]");
+			tE + " / morre em " + tU + "[/color]" + sufixoCaminho);
 	} else {
-		pudim_SetCaption("pudim_winChancePct", winChance + "%");
+		pudim_SetCaption("pudim_winChancePct", winChance + "%" + sufixoCaminho);
 	}
 
 	// Contras disponiveis contra a composicao inimiga
@@ -830,7 +840,7 @@ function pudim_UpdateCombatDisplay(data)
 		else if (reality <= 0.42) wanted = "green";
 		else wanted = "yellow";
 	} else {
-		wanted = winChance >= 60 ? "green" : (winChance >= 40 ? "yellow" : "red");
+		wanted = chanceCor >= 60 ? "green" : (chanceCor >= 40 ? "yellow" : "red");
 	}
 	const color = pudim_StableColor(now, wanted);
 
@@ -842,7 +852,7 @@ function pudim_UpdateCombatDisplay(data)
 		{
 			const bgSize = bgObj.size;
 			const totalWidth = bgSize.right - bgSize.left - 8; // margem
-			const barWidth = Math.round(totalWidth * winChance / 100);
+			const barWidth = Math.round(totalWidth * chanceCor / 100);
 			bar.size = "8 178 " + (8 + barWidth) + " 196";
 		}
 		bar.sprite = color === "green" ? "color: 30 180 60 200"

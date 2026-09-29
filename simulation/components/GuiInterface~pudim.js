@@ -398,6 +398,50 @@ GuiInterface.prototype.pudim_GetCombatEstimation = function(player, data)
 	result.allies.totalAttack = Math.round(allyDPS * 10) / 10;
 	result.enemies.totalAttack = Math.round(enemyDPS * 10) / 10;
 
+	// ── E QUEM ESTÁ A CAMINHO (28/09) ────────────────────────────────────────────────────
+	//
+	// Log 211137 (replay 0007): "eles 25u ... chance 94%" e, no minuto seguinte, 87 perdas
+	// contra 27 mortes. A estimativa só olha 80m em volta do exército; o resto do exército
+	// inimigo vinha logo atrás. Agora conta à parte os militares inimigos entre 80 e 200m —
+	// SÓ OS QUE VOCÊ ESTÁ VENDO (GetLosVisibility == "visible", a mesma checagem do
+	// GuiInterface.js do jogo): o mod não revela nada que a névoa esconde. E dá uma segunda
+	// chance, com eles somados, ao lado da primeira.
+	result.aCaminho = { count: 0, totalHP: 0 };
+	result.winChanceTotal = null;   // sem ninguém a caminho, vira a própria winChance (abaixo)
+	if (allyPositions.length > 0 && allyDPS > 0) {
+		let cx2 = 0, cy2 = 0;
+		for (const p of allyPositions) { cx2 += p.x; cy2 += p.y; }
+		cx2 /= allyPositions.length; cy2 /= allyPositions.length;
+		const jaContados = new Set(enemyEntList);
+		const longe = cmpRangeManager.ExecuteQueryAroundPos({ "x": cx2, "y": cy2 }, 80, 200,
+			cmpDiplomacy.GetEnemies(), IID_Attack, false);
+		const extra = [];
+		const bucketExtra = { count: 0, totalHP: 0, totalMaxHP: 0, totalAttack: 0, totalArmor: 0,
+			types: { "meleeInf": 0, "rangedInf": 0, "cavalry": 0, "siege": 0, "support": 0 } };
+		for (const ent of longe) {
+			if (jaContados.has(ent)) continue;
+			if (Engine.QueryInterface(ent, IID_Foundation) || Engine.QueryInterface(ent, IID_Mirage)) continue;
+			const idX = Engine.QueryInterface(ent, IID_Identity);
+			if (!idX || !(idX.HasClass("Soldier") || idX.HasClass("Hero") || idX.HasClass("Siege"))) continue;
+			if (cmpRangeManager.GetLosVisibility(ent, player) !== "visible") continue;
+			if (collectStats(ent, bucketExtra)) extra.push(ent);
+		}
+		if (extra.length) {
+			const todos = enemyEntList.concat(extra);
+			const alvoTodos = buildFoe(todos);
+			let aDPS = 0, eDPS = 0;
+			for (const e of allyEntList) aDPS += pudim_EffectiveDPS(e, alvoTodos);
+			for (const e of todos) eDPS += pudim_EffectiveDPS(e, enemyFoe);
+			const tE = aDPS > 0 ? (result.enemies.totalHP + bucketExtra.totalHP) / aDPS : Infinity;
+			const tU = eDPS > 0 ? result.allies.totalHP / eDPS : Infinity;
+			result.aCaminho = { count: extra.length, totalHP: Math.round(bucketExtra.totalHP) };
+			if (isFinite(tE) && isFinite(tU))
+				result.winChanceTotal = Math.max(1, Math.min(99, Math.round(100 * tU / (tU + tE))));
+			else if (!isFinite(tE))
+				result.winChanceTotal = 5;
+		}
+	}
+
 	// Tempo para cada lado zerar o outro. Menor tempo = vence.
 	const tKillEnemy = allyDPS > 0 ? result.enemies.totalHP / allyDPS : Infinity;
 	const tKillUs    = enemyDPS > 0 ? result.allies.totalHP / enemyDPS : Infinity;
@@ -413,6 +457,9 @@ GuiInterface.prototype.pudim_GetCombatEstimation = function(player, data)
 	else
 		// Quanto menor o nosso tempo em relacao ao deles, maior a chance.
 		result.winChance = Math.max(1, Math.min(99, Math.round(100 * tKillUs / (tKillUs + tKillEnemy))));
+	// Reforço inimigo nunca melhora a nossa chance.
+	result.winChanceTotal = result.winChanceTotal === null ? result.winChance
+		: Math.min(result.winChance, result.winChanceTotal);
 
 	// Contra disponivel: bonus que ja temos e que rende contra a composicao deles
 	result.counters = [];

@@ -70,7 +70,7 @@ check("e 'cheio' passou a ser 'sem vaga', nao 'no maximo da partida'",
 // volta por ele — foi assim que o popMax antigo cobria so a religacao da auto-fila do motor
 // e deixava a semeadura do mod passar.
 check("semeadura: o lote nao passa das vagas",
-	/const affordable = Math\.min\(\s*\n?\s*pudim_ComputeAffordableCount\(template, desiredCount, res\), vagasPop\);/.test(execP));
+	/let affordable = Math\.min\(\s*\n?\s*pudim_ComputeAffordableCount\(template, desiredCount, res\), vagasPop\);/.test(execP));
 check("troca por proporcao: nem acontece sem vaga, e o lote e limitado",
 	/if \(isOurs && \(cur\.progress \|\| 0\) <= 0 && tplDesejado && vagasPop > 0\)/.test(execP) &&
 	/Math\.min\(desiredCount, affordable, vagasPop\)/.test(execP));

@@ -1882,6 +1882,7 @@ var g_PudimGuardado = { total: {}, itens: [] };
 const PUDIM_RESERVA_INTERVALO = 2000;
 var g_PudimReservaAccum = PUDIM_RESERVA_INTERVALO;
 var g_PudimFaseMandadaEm = 0;   // anti-repetição da fase automática (latência de rede)
+const PUDIM_FASE_GUARDA_FRACAO = 0.6;   // ver "A FASE AUTOMÁTICA SÓ GUARDA PERTO DE SAIR"
 // Edifícios cuja auto-fila NATIVA o próprio mod desligou (proporção, reserva, pausa). Sem
 // esta memória, no ciclo seguinte a auto-fila apagada parecia decisão do jogador.
 var g_PudimDesligadoPeloMod = new Map();   // ent -> instante em que o mod apagou
@@ -1923,9 +1924,26 @@ function pudim_AtualizarReserva() {
 		plano = Engine.GuiInterfaceCall("pudim_GetPlanoReserva",
 			{ "fase": faseReserva || faseAuto, "cadeias": pudim_CadeiasAtivas() });
 	} catch (e) {}
-	if (plano && plano.fase)
-		itens.push({ tipo: "fase", nome: plano.fase.tech, custo: plano.fase.custo,
-		             pronto: plano.fase.pronto, alvo: plano.fase.cc });
+	// ── A FASE AUTOMÁTICA SÓ GUARDA PERTO DE SAIR (29/09) ────────────────────────────────
+	//
+	// Replay 2026-09-29_0006: a reserva guardou os 500F da Fase 2 desde cedo, a madeira nunca
+	// passou de 373 e a partida inteira ficou na Fase 1 — com o quartel parado. Com só a fase
+	// AUTOMÁTICA ligada, ela entra no guardado quando TODO recurso dela já tem
+	// PUDIM_FASE_GUARDA_FRACAO do custo; antes disso as unidades usam o estoque. (A reserva
+	// da fase que VOCÊ liga, pudim.reserva.fase, continua guardando tudo desde o início.)
+	if (plano && plano.fase) {
+		let perto = true;
+		if (!faseReserva) {
+			let eu = null;
+			try { eu = GetSimState().players[Engine.GetPlayerID()]; } catch (e) {}
+			const tem = (eu && eu.resourceCounts) || {};
+			for (const r in (plano.fase.custo || {}))
+				if ((+tem[r] || 0) < PUDIM_FASE_GUARDA_FRACAO * plano.fase.custo[r]) { perto = false; break; }
+		}
+		if (perto)
+			itens.push({ tipo: "fase", nome: plano.fase.tech, custo: plano.fase.custo,
+			             pronto: plano.fase.pronto, alvo: plano.fase.cc });
+	}
 	if (plano && plano.cadeia)
 		for (const c of plano.cadeia)
 			itens.push({ tipo: "cadeia", nome: c.tech, custo: c.custo, pronto: c.pronto, alvo: c.ent });
@@ -3457,6 +3475,10 @@ function pudim_ProcessAutoQueue()
 		const resBruto = aqData.resources || {};
 		const res = {};
 		for (const k in resBruto) res[k] = resBruto[k];
+		// O estoque DE VERDADE, sem reserva nenhuma: é dele que sai o lote de 1 quando as
+		// reservas comem todo o livre (ver "A RESERVA NUNCA PARA A PRODUÇÃO").
+		const resReal = {};
+		for (const k in resBruto) resReal[k] = resBruto[k];
 		if (g_PudimMadeiraReservada > 0) {
 			res.wood = Math.max(0, (+res.wood || 0) - g_PudimMadeiraReservada);
 			if (g_PudimShowDebug && res.wood === 0)
@@ -3522,7 +3544,10 @@ function pudim_ProcessAutoQueue()
 			try { td = GetTemplateData(tpl); } catch (e) {}
 			if (!td || !td.cost) return;
 			for (const rk of ["food", "wood", "stone", "metal"])
-				if (td.cost[rk] > 0) res[rk] = Math.max(0, (+res[rk] || 0) - td.cost[rk] * n);
+				if (td.cost[rk] > 0) {
+					res[rk] = Math.max(0, (+res[rk] || 0) - td.cost[rk] * n);
+					resReal[rk] = Math.max(0, (+resReal[rk] || 0) - td.cost[rk] * n);
+				}
 		};
 		// ── E A FILA TAMBÉM É SALDO (28/09) ─────────────────────────────────────────────
 		//
@@ -4050,8 +4075,22 @@ function pudim_ProcessAutoQueue()
 
 			// Custo real do template: enfileira o máximo que der; se não der pra nem 1,
 			// espera o próximo ciclo (evita comando inválido que pode disparar o bug nativo)
-			const affordable = Math.min(
+			// ── A RESERVA NUNCA PARA A PRODUÇÃO (29/09) ─────────────────────────────────────
+			//
+			// Replay 2026-09-29_0006: "parado: sem recurso (fundeiro pede 50F 20W 30S)" com F480
+			// no estoque — a reserva da fase automática guardava 500F 500W, a madeira nunca
+			// chegou a 500, e a fase não saiu nem as unidades. Pedido: "nunca pode parar de
+			// fazer unidades, pode diminuir o tamanho dos lotes, mas não parar de fazer".
+			// O lote normal sai do dinheiro LIVRE (sem as reservas); se ele não paga nem 1 e o
+			// estoque de verdade paga, sai um lote de 1 do estoque. Parado só sem recurso de fato.
+			let affordable = Math.min(
 				pudim_ComputeAffordableCount(template, desiredCount, res), vagasPop);
+			let daReserva = false;
+			if (affordable <= 0 && vagasPop > 0 &&
+			    pudim_ComputeAffordableCount(template, 1, resReal) >= 1) {
+				affordable = 1;
+				daReserva = true;
+			}
 			if (affordable <= 0) {
 				// Qual recurso parou este edifício: o mercado aceita preço pior só por ele.
 				if (vagasPop > 0) {
@@ -4059,7 +4098,7 @@ function pudim_ProcessAutoQueue()
 					try { tdF = GetTemplateData(template); } catch (e) {}
 					const cF = (tdF && tdF.cost) || {};
 					for (const r of ["food", "wood", "stone", "metal"])
-						if ((+cF[r] || 0) > (+res[r] || 0)) g_PudimFaltouRecursoEm[r] = nowQueue;
+						if ((+cF[r] || 0) > (+resReal[r] || 0)) g_PudimFaltouRecursoEm[r] = nowQueue;
 				}
 				// Parar por falta de recurso não pode ser silencioso: foi assim que "parou de
 				// fazer tropas" (28/09) custou uma leitura do log inteiro para achar a causa.
@@ -4090,6 +4129,7 @@ function pudim_ProcessAutoQueue()
 			// itens (leitura errada) ou se cada semeadura viu vazio de verdade (corrida).
 			pudim_Log("INFO", "QUEUE", "fila semeada em " + b.ent + " x" + affordable + " " +
 				template.split("/").pop() + (doJogador ? " (escolha do jogador)" : "") +
+				(daReserva ? " (lote de 1 com o recurso guardado: a reserva não para a produção)" : "") +
 				(reporAntes ? " (repondo antes de esvaziar, faltavam " +
 					Math.round(q0.timeRemaining / 100) / 10 + "s)" : "") +
 				" qlen=" + ((b.trainingQueue && b.trainingQueue.length) || 0) +

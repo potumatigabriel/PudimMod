@@ -694,6 +694,18 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 		}
 	}
 
+	// Zonas de perigo vindas do painel (pudim_GetZonasDePerigo, só o que o jogador vê):
+	// recurso ou campo dentro delas não é candidato (pedido de 29/09, "tem que evitar região de
+	// perigo de ataque"). Sem o mapa, lista vazia: nada muda.
+	const zonasPerigo = (data && Array.isArray(data.perigo)) ? data.perigo : [];
+	const emPerigo = function(x, z) {
+		for (const zn of zonasPerigo) {
+			const dx = x - zn.x, dz = z - zn.z;
+			if (dx * dx + dz * dz < zn.r * zn.r) return true;
+		}
+		return false;
+	};
+
 	const civicCenters = [];
 	for (const ent of allEnts) {
 		const cmpIdentity = Engine.QueryInterface(ent, IID_Identity);
@@ -784,7 +796,7 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 				const dz = resPos.y - ep.y;
 				if (dx*dx + dz*dz < 80*80) { isSafe = false; break; }
 			}
-			if (!isSafe) continue;
+			if (!isSafe || emPerigo(resPos.x, resPos.y)) continue;
 
 			// Recursos Gaia de comida (berries/frutas): check por proximidade de CC/dropsite
 			// Em vez de território (berries ficam fora da borda do CC mas são acessíveis)
@@ -993,6 +1005,7 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 			const cmpPos = Engine.QueryInterface(ent, IID_Position);
 			if (!cmpPos || !cmpPos.IsInWorld()) continue;
 			const resPos = cmpPos.GetPosition2D();
+			if (emPerigo(resPos.x, resPos.y)) continue;   // campo sob ataque: outro
 			const dx = resPos.x - workerPos.x;
 			const dz = resPos.y - workerPos.y;
 			const distSq = dx*dx + dz*dz;
@@ -6319,6 +6332,82 @@ GuiInterface.prototype.pudim_GetInitialBalanceData = function(player, data)
 	}
 	return result;
 };
+// ─── Zonas de perigo: onde trabalhador nenhum pode ser mandado (29/09) ─────────────────
+//
+// Pedido: "os aldeões não podem ser mandados perto de regiões perigosas, se tem inimigos, tem
+// que evitar região de perigo de ataque". Replay 2026-09-29_0005: de 7:24 a 9:03 a rotina de
+// armazém mandou 3 aldeões à obra 2137 a cada 3-6s, com inimigo em volta, e as mortes foram
+// de 6 a 28 em um minuto.
+//
+// Um círculo por inimigo que ataca: unidade corpo a corpo = alcance + 2s de caminhada + folga
+// (ela vem atrás); a distância = alcance + folga; prédio que atira (torre, CC, forte) = alcance
+// + folga. SÓ O QUE VOCÊ VÊ: unidade precisa estar "visible" (Range Manager.GetLosVisibility,
+// a mesma checagem do GuiInterface.js do jogo); prédio vale também "fogged" — não anda, e você
+// já o viu. Nada da névoa é revelado. Fauna agressiva de Gaia perto dos seus CCs também conta.
+const PUDIM_PERIGO_FOLGA = 8;
+const PUDIM_PERIGO_SEG_CORPO = 2;
+const PUDIM_PERIGO_ALCANCE_LONGE = 15;
+const PUDIM_PERIGO_GAIA_RAIO = 250;
+
+GuiInterface.prototype.pudim_GetZonasDePerigo = function(player, data)
+{
+	const result = { zonas: [] };
+	const cmpRangeManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_RangeManager);
+	const cmpPlayerManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_PlayerManager);
+	if (!cmpRangeManager || !cmpPlayerManager || player < 0) return result;
+	const pe = cmpPlayerManager.GetPlayerByID(player);
+	const cmpDip = pe && Engine.QueryInterface(pe, IID_Diplomacy);
+	const inimigos = cmpDip && cmpDip.GetEnemies ? cmpDip.GetEnemies().filter(id => id > 0) : [];
+
+	const zonaDe = function(e, podeNevoa) {
+		const atk = Engine.QueryInterface(e, IID_Attack);
+		if (!atk || !atk.GetFullAttackRange) return null;
+		const pos = Engine.QueryInterface(e, IID_Position);
+		if (!pos || !pos.IsInWorld()) return null;
+		if (Engine.QueryInterface(e, IID_Foundation) || Engine.QueryInterface(e, IID_Mirage)) return null;
+		const vis = cmpRangeManager.GetLosVisibility(e, player);
+		if (vis !== "visible" && !(podeNevoa && vis === "fogged")) return null;
+		let rng = 0;
+		try { rng = +atk.GetFullAttackRange().max || 0; } catch (err) { return null; }
+		if (rng <= 0) return null;
+		let r = rng + PUDIM_PERIGO_FOLGA;
+		if (rng < PUDIM_PERIGO_ALCANCE_LONGE) {
+			const mot = Engine.QueryInterface(e, IID_UnitMotion);
+			if (mot && mot.GetWalkSpeed) r += PUDIM_PERIGO_SEG_CORPO * (+mot.GetWalkSpeed() || 0);
+		}
+		const q = pos.GetPosition2D();
+		return { x: Math.round(q.x), z: Math.round(q.y), r: Math.round(r) };
+	};
+
+	for (const inimigo of inimigos) {
+		for (const e of cmpRangeManager.GetEntitiesByPlayer(inimigo)) {
+			const id = Engine.QueryInterface(e, IID_Identity);
+			if (!id) continue;
+			const predio = id.HasClass("Structure");
+			// Prédio só entra se atira (torre, CC, forte); casa e campo não ferem ninguém.
+			const z = zonaDe(e, predio);
+			if (z) result.zonas.push(z);
+		}
+	}
+
+	// Gaia: só bicho que ataca por conta própria, e só perto dos seus CCs (GetEntitiesByPlayer(0)
+	// traria cada árvore do mapa).
+	for (const cc of cmpRangeManager.GetEntitiesByPlayer(player)) {
+		const idc = Engine.QueryInterface(cc, IID_Identity);
+		if (!idc || !idc.HasClass("CivCentre")) continue;
+		const pc = Engine.QueryInterface(cc, IID_Position);
+		if (!pc || !pc.IsInWorld()) continue;
+		for (const g of cmpRangeManager.ExecuteQueryAroundPos(pc.GetPosition2D(), 0, PUDIM_PERIGO_GAIA_RAIO, [0], IID_Attack, false)) {
+			const ai = Engine.QueryInterface(g, IID_UnitAI);
+			const st = ai && ai.GetStanceName ? ai.GetStanceName() : "";
+			if (st !== "aggressive" && st !== "violent") continue;
+			const z = zonaDe(g, false);
+			if (z) result.zonas.push(z);
+		}
+	}
+	return result;
+};
+
 // Focus fire: direciona todos os soldados em combate para o alvo mais fraco.
 // Prioridade: unidades de ataque à distância (Ranged) com HP mais baixo.
 // Retorna: [{ units: [entityIds], target: entityId }] ou []
@@ -8859,6 +8948,7 @@ var pudim_exposedFunctions = {
   	"pudim_GetPlayerEconomyStats": 1,
   	"pudim_PushNotification": 1,
   	"pudim_GetInitialBalanceData": 1,
+  	"pudim_GetZonasDePerigo": 1,
   	"pudim_GetSmartDropsiteData": 1,
   	"pudim_GetProactiveStorehouseData": 1,
   	"pudim_GetProactiveFarmsteadData": 1,

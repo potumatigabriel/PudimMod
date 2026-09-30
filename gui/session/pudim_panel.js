@@ -210,10 +210,11 @@ function pudim_LogSnapshot() {
 			// tentando se desfazer. É o número que diz se o vai-e-volta acabou.
 			" | arb ok" + g_PudimArbitro.enviadas + " jog" + g_PudimArbitro.jogador +
 			      " pri" + g_PudimArbitro.prioridade + " reo" + g_PudimArbitro.reordem +
+			      " per" + (g_PudimArbitro.perigo || 0) +
 			(me.inCombat ? " | COMBATE x" + me.combatSize : ""));
 		g_PudimChurnCount = 0;
 		g_PudimWalkHeld = 0;
-		g_PudimArbitro = { enviadas: 0, jogador: 0, prioridade: 0, reordem: 0 };
+		g_PudimArbitro = { enviadas: 0, jogador: 0, prioridade: 0, reordem: 0, perigo: 0 };
 	} catch(e) {}
 }
 
@@ -926,6 +927,8 @@ function pudim_RunAutoWork()
 			// Os seus pesos, mais o recurso que a proporção de unidades precisa e ninguém
 			// coleta (ver pudim_PesosDeColeta).
 			"weights": pudim_PesosDeColeta((GetSimState().players[Engine.GetPlayerID()] || {}).resourceCounts),
+			// Recurso dentro de zona de perigo não é candidato: o trabalhador vai para outro.
+			"perigo": g_PudimZonasPerigo,
 			"repeatBuilders": Object.keys(g_PudimRepeatBuilding).map(Number).filter(ent => g_PudimRepeatBuilding[ent]),
 			"playerOrdered": pudim_GetPlayerOrderedIds(),
 			"protectedIds": pudim_GetProtectedBuilderIds(),
@@ -1717,7 +1720,47 @@ const PUDIM_DONOS_DO_JOGADOR = new Set(["pudim_GuarnecerCerco", "pudim_ToggleSco
 var g_PudimReserva = {};   // id -> { dono, prio, ate }
 var g_PudimReservaChamadas = 0;
 // Telemetria: o que o árbitro barrou, por quê e de quem. Vai para o SNAP do minuto.
-var g_PudimArbitro = { enviadas: 0, jogador: 0, prioridade: 0, reordem: 0 };
+var g_PudimArbitro = { enviadas: 0, jogador: 0, prioridade: 0, reordem: 0, perigo: 0 };
+
+// ── NENHUM TRABALHADOR VAI PARA ZONA DE PERIGO (29/09) ─────────────────────────────────
+//
+// Pedido: "os aldeões não podem ser mandados perto de regiões perigosas, se tem inimigos, tem
+// que evitar região de perigo de ataque". O mapa vem de pudim_GetZonasDePerigo (só o que você
+// vê), relido a cada PUDIM_PERIGO_INTERVALO. Aqui no árbitro ele barra, para TODO sistema do
+// mod que não seja de defesa, as ordens de trabalho (coletar, entregar, construir, reparar)
+// cujo destino cai numa zona: Auto-Trabalho, armazém, casas, fazendas, reforço de obra,
+// série, volta do pânico. Fugir e abrigar (defesa) passam; botão seu também.
+const PUDIM_PERIGO_INTERVALO = 1000;
+const PUDIM_TIPOS_TRABALHO = new Set(["gather", "gather-near-position", "repair", "construct",
+	"returnresource"]);
+var g_PudimZonasPerigo = [];
+var g_PudimPerigoAccum = PUDIM_PERIGO_INTERVALO;
+var g_PudimPerigoLogAt = 0;
+
+function pudim_AtualizarPerigo() {
+	let d = null;
+	try { d = Engine.GuiInterfaceCall("pudim_GetZonasDePerigo", {}); } catch (e) { return; }
+	g_PudimZonasPerigo = (d && Array.isArray(d.zonas)) ? d.zonas : [];
+}
+
+/** Quantas zonas de perigo cobrem (x, z). */
+function pudim_PerigoEm(x, z) {
+	let n = 0;
+	for (const zn of g_PudimZonasPerigo) {
+		const dx = x - zn.x, dz = z - zn.z;
+		if (dx * dx + dz * dz < zn.r * zn.r) n++;
+	}
+	return n;
+}
+
+/** Para onde a ordem manda a unidade: x/z da ordem, ou a posição do alvo. */
+function pudim_DestinoDa(cmd) {
+	if (typeof cmd.x === "number" && typeof cmd.z === "number") return { x: cmd.x, z: cmd.z };
+	if (cmd.target === undefined || cmd.target === null) return null;
+	let st = null;
+	try { st = GetEntityState(+cmd.target); } catch (e) {}
+	return st && st.position ? { x: st.position.x, z: st.position.z } : null;
+}
 
 function pudim_PrioridadeDe(dono, tipo) {
 	const p = PUDIM_PRIORIDADE[dono + ":" + tipo];
@@ -1764,6 +1807,24 @@ function pudim_Ordenar(cmd, dono)
 		for (const k in g_PudimReserva)
 			if (g_PudimReserva[k].ate <= agora) delete g_PudimReserva[k];
 	if (!livres.length) return false;
+	// Destino em zona de perigo: trabalho nenhum vai para lá (ver "NENHUM TRABALHADOR VAI PARA
+	// ZONA DE PERIGO"). A unidade fica onde está; o Auto-Trabalho, que recebe o mesmo mapa,
+	// escolhe um recurso fora da zona no ciclo seguinte.
+	if (!doJogador && prio < PUDIM_PRIO_DEFESA && PUDIM_TIPOS_TRABALHO.has(cmd.type) &&
+	    g_PudimZonasPerigo.length) {
+		const dest = pudim_DestinoDa(cmd);
+		const n = dest ? pudim_PerigoEm(dest.x, dest.z) : 0;
+		if (n > 0) {
+			g_PudimArbitro.perigo += livres.length;
+			if (agora - g_PudimPerigoLogAt > 10000) {
+				g_PudimPerigoLogAt = agora;
+				pudim_Log("INFO", "PERIGO", "ordem barrada (" + dono + ", " + cmd.type + "): destino em (" +
+					Math.round(dest.x) + "," + Math.round(dest.z) + ") dentro do alcance de " + n +
+					" inimigo(s) — " + livres.length + " trabalhador(es) ficam fora");
+			}
+			return false;
+		}
+	}
 	// Continuação em fila não renova a reserva: ela pertence à ordem imediata que a abriu.
 	if (!emFila)
 		for (const e of livres) g_PudimReserva[+e] = { dono: dono, prio: prio, ate: agora + PUDIM_RESERVA_MS };
@@ -3244,6 +3305,14 @@ function pudim_Tick(dt)
 	if (g_PudimMercadoriasAccum >= PUDIM_MERCADORIAS_INTERVALO) {
 		g_PudimMercadoriasAccum = 0;
 		try { pudim_ProcessMercadorias(); } catch (e) {}
+	}
+
+	// Mapa de perigo (só lê): o árbitro e o Auto-Trabalho usam para não mandar trabalhador
+	// para perto de inimigo. Ver "NENHUM TRABALHADOR VAI PARA ZONA DE PERIGO".
+	g_PudimPerigoAccum += dt;
+	if (g_PudimPerigoAccum >= PUDIM_PERIGO_INTERVALO) {
+		g_PudimPerigoAccum = 0;
+		try { pudim_Medir("AtualizarPerigo", pudim_AtualizarPerigo); } catch (e) {}
 	}
 
 	// Balanceamento inicial de workers: a cada 1s até concluído
@@ -5469,13 +5538,38 @@ function pudim_ReturnPanicUnitsToWork(manual)
 	}
 	g_PudimHoldGarrisonLogged = false;
 
+	// ── QUEM VOLTARIA PARA O PERIGO FICA ABRIGADO (29/09) ─────────────────────────────
+	//
+	// Replay 2026-09-29_0005, 7:46: "ameaça encerrada, retornando 13 unidade(s)" — o mod as
+	// desabrigou e mandou de volta ao recurso de antes, e o inimigo ainda rondava. Na soltura
+	// AUTOMÁTICA, quem tem o abrigo ou o trabalho de antes dentro de uma zona de perigo fica
+	// onde está, e o pânico continua ativo só por eles: no ciclo seguinte tenta de novo. O
+	// botão "Voltar ao Trabalho" (manual) solta todo mundo, como sempre.
+	const ficam = {};
+	if (!manual && g_PudimZonasPerigo.length) {
+		for (const entId in g_PudimPanicGarrisoned) {
+			const info = g_PudimPanicGarrisoned[entId];
+			const task = g_PudimPanicPreTask[+entId];
+			let perigo = false;
+			const abrigo = info && info.shelterID ? pudim_DestinoDa({ target: info.shelterID }) : null;
+			if (abrigo && pudim_PerigoEm(abrigo.x, abrigo.z) > 0) perigo = true;
+			const dest = task ? pudim_DestinoDa(task) : null;
+			if (dest && pudim_PerigoEm(dest.x, dest.z) > 0) perigo = true;
+			if (perigo) ficam[entId] = true;
+		}
+	}
+	const nFicam = Object.keys(ficam).length;
+
 	if (g_PudimPanicMode)
-		pudim_Log("SUCCESS", "PANIC", "ameaça encerrada, retornando " + Object.keys(g_PudimPanicGarrisoned).length + " unidade(s) ao trabalho");
+		pudim_Log("SUCCESS", "PANIC", "ameaça encerrada, retornando " +
+			(Object.keys(g_PudimPanicGarrisoned).length - nFicam) + " unidade(s) ao trabalho" +
+			(nFicam ? " (" + nFicam + " ficam abrigadas: o trabalho delas está em zona de perigo)" : ""));
 
 	// Primeiro: desguarnecer unidades que foram enviadas para abrigo
 	const releaseNow = Date.now();
 	for (const entId in g_PudimPanicGarrisoned)
 	{
+		if (ficam[entId]) continue;
 		// Marca o momento da soltura: alimenta o cooldown anti vai-e-volta. A unidade
 		// volta a ser protegida num ataque novo, só não é re-guarnecida em segundos.
 		g_PudimLastReleaseTime[entId] = releaseNow;
@@ -5492,6 +5586,7 @@ function pudim_ReturnPanicUnitsToWork(manual)
 
 	for (const entId in g_PudimPanicPreTask)
 	{
+		if (ficam[entId]) continue;
 		const task = g_PudimPanicPreTask[+entId];
 		if (!task) continue;
 
@@ -5530,6 +5625,18 @@ function pudim_ReturnPanicUnitsToWork(manual)
 		}
 	}
 
+	// Quem ficou continua registrado — e o pânico continua ativo por ele, para a próxima
+	// calma tentar de novo (senão ficaria abrigado até você apertar o botão).
+	if (nFicam) {
+		const pre = {}, abr = {};
+		for (const id in ficam) {
+			if (g_PudimPanicPreTask[id]) pre[id] = g_PudimPanicPreTask[id];
+			abr[id] = g_PudimPanicGarrisoned[id];
+		}
+		g_PudimPanicPreTask = pre;
+		g_PudimPanicGarrisoned = abr;
+		return true;
+	}
 	g_PudimPanicPreTask = {};
 	g_PudimPanicGarrisoned = {};
 	g_PudimPanicMode = false;

@@ -56,7 +56,9 @@ const sandbox = {
 	g_PudimPanicModeStartTime: 0,
 	g_PudimPanicGarrisoned: {},
 	g_PudimPanicPreTask: {},
-	g_PudimLastReleaseTime: {}
+	g_PudimLastReleaseTime: {},
+	// Desde 29/09 a soltura consulta as zonas de perigo (tools/test_zonas_perigo.js).
+	g_PudimZonasPerigo: []
 };
 vm.createContext(sandbox);
 vm.runInContext(block, sandbox);

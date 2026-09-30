@@ -4539,7 +4539,7 @@ function pudim_ProcessFarms()
 			g_PudimFarmDebugLastLog = Date.now();
 			const d = farmData._dbg || {};
 			pudim_Log("DEBUG", "FARM", "fc=" + (d.fc||0) + " nfc=" + (d.nfc||0) +
-				" ncap=" + (d.ncap||0) + " tg=" + (d.tg||0) + " oci0=" + (d.oci0||0) +
+				" ncap=" + (d.ncap||0) + " fruta=" + (d.fruta||0) + " capf=" + (d.capf||0) + " tg=" + (d.tg||0) + " oci0=" + (d.oci0||0) +
 				" sold=" + (d.sold||0) +
 				" esc=" + ["food","wood","stone","metal"]
 					.filter(r => d["esc_" + r] !== undefined)

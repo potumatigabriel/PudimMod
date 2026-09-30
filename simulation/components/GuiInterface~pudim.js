@@ -2842,6 +2842,9 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 
 
 // ─── Fazendas ────────────────────────────────────────────────────
+const PUDIM_FRUTA_TAXA = 1;          // comida por segundo por coletor de fruta (medido, ver acima)
+const PUDIM_FRUTA_HORIZONTE = 120;   // segundos: o tempo de erguer os campos antes de a fruta acabar
+
 GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 {
 	const result = { "action": "none", "builderId": null, "template": null, "candidatePositions": [], "workersToRedirect": [], "ccX": 0, "ccZ": 0, "soldierEvictions": [], "_dbg": { "fc": 0, "nfc": 0, "fbc": 0, "tg": 0, "cfm": 0, "df": 0, "wp": 0, "fwc": 0, "fmc": 0, "ocio": 0, "pag": 0, "reason": "init" } };
@@ -3061,6 +3064,7 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	let naturalFoodCount = 0;
 	let naturalFoodCapacity = 0;
 	let territoryFruitFreeSlots = 0;
+	let frutaRestante = 0;   // comida que ainda sobra nos arbustos contados abaixo
 	const centerSearch = ccPositions.length > 0 ? ccPositions[0] : {x: mapSize/2, y: mapSize/2};
 	const allNaturalFood = cmpRangeManager.ExecuteQueryAroundPos(centerSearch, 0, 300, [0], IID_ResourceSupply, false);
 	for (const f of allNaturalFood) {
@@ -3121,8 +3125,24 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 
 			naturalFoodCapacity += rs.GetMaxGatherers();
 			naturalFoodCount++;
+			frutaRestante += rs.GetCurrentAmount();
 		}
 	}
+
+	// ── A FRUTA QUE SOBRA, NÃO AS VAGAS DO ARBUSTO (29/09) ─────────────────────────────────
+	//
+	// Replays 2026-09-29_0005 e _0006: o mod não fez NENHUM campo. O log dizia "nfc=13
+	// ncap=104 ... reason=nodeficit" — treze arbustos a 8 vagas cada (GetMaxGatherers) contavam
+	// como 104 trabalhadores de comida cobertos, com a fruta acabando. A comida travou o quartel
+	// (F36-49 no 0005; 0 de comida colhida no minuto 7) e os campos só vieram pela mão do
+	// jogador, aos 6:48. A capacidade da fruta agora é também quantos trabalhadores o que SOBRA
+	// sustenta por PUDIM_FRUTA_HORIZONTE: com a fruta no fim, os campos começam antes de ela
+	// acabar, e na medida em que ela acaba. A taxa é medida, não do motor: no 0006, 601 de
+	// comida num minuto com ~9 coletores ≈ 1/s.
+	const capPelaFruta = Math.floor(frutaRestante / (PUDIM_FRUTA_TAXA * PUDIM_FRUTA_HORIZONTE));
+	result._dbg.fruta = Math.round(frutaRestante);
+	result._dbg.capf = capPelaFruta;
+	naturalFoodCapacity = Math.min(naturalFoodCapacity, capPelaFruta);
 
 	// ── Ratio: quantos workers de fazenda são necessários ────────────────────────────────
 	// Fruta cobre até naturalFoodCapacity workers. Fazendas cobrem o excedente.

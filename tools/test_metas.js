@@ -143,7 +143,8 @@ const trava = execP.indexOf("if (typeof g_IsObserver !== \"undefined\" && g_IsOb
 const chamada = execP.indexOf("pudim_AtualizarMetas(passo)");
 check("atualizada no tique ACIMA da trava de espectador (só lê)", trava > 0 && chamada > 0 && chamada < trava);
 check("a simulação conta quartel com fundação, pela classe Barracks, só lendo",
-	/GuiInterface\.prototype\.pudim_ContarQuarteis = function\(player, data\) \{[\s\S]{0,400}HasClass\("Barracks"\)\) \+\+n;/.test(sim));
+	// Desde 29/09 conta a fundação por padrão e só pula quando pedem `prontos` (fase 2).
+	/GuiInterface\.prototype\.pudim_ContarQuarteis = function\(player, data\) \{[\s\S]{0,400}!id\.HasClass\("Barracks"\)\) continue;[\s\S]{0,300}if \(data && data\.prontos && Engine\.QueryInterface\(ent, IID_Foundation\)\) continue;\s*\+\+n;/.test(sim));
 check("sem símbolo que a fonte do jogo pode não ter", !/[✓○−]/.test(fonte));
 
 console.log(fails === 0 ? "\nTODOS OS TESTES PASSARAM" : "\n" + fails + " TESTE(S) FALHARAM");

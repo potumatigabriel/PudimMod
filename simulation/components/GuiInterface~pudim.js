@@ -4215,7 +4215,11 @@ GuiInterface.prototype.pudim_ContarQuarteis = function(player, data) {
 	let n = 0;
 	for (const ent of cmpRangeManager.GetEntitiesByPlayer(quem) || []) {
 		const id = Engine.QueryInterface(ent, IID_Identity);
-		if (id && id.HasClass("Barracks")) ++n;
+		if (!id || !id.HasClass("Barracks")) continue;
+		// Fundação tem as mesmas classes do prédio; `prontos` conta só o que já está de pé
+		// (pedido de 29/09: "só pode ir pra fase 2 se tiver pelo menos 1 barraca").
+		if (data && data.prontos && Engine.QueryInterface(ent, IID_Foundation)) continue;
+		++n;
 	}
 	return n;
 };

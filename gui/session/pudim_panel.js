@@ -1995,6 +1995,16 @@ function pudim_AtualizarReserva() {
 	// AUTOMÁTICA ligada, ela entra no guardado quando TODO recurso dela já tem
 	// PUDIM_FASE_GUARDA_FRACAO do custo; antes disso as unidades usam o estoque. (A reserva
 	// da fase que VOCÊ liga, pudim.reserva.fase, continua guardando tudo desde o início.)
+	// ── FASE 2 SÓ COM QUARTEL PRONTO (29/09) ─────────────────────────────────────────────
+	//
+	// Pedido: "só pode ir pra fase 2, se tiver pelo menos 1 barraca". A fase AUTOMÁTICA da
+	// vila (phase_town) nem guarda recurso nem é pesquisada antes de haver um quartel de pé —
+	// fundação não conta. A reserva de fase que você liga (pudim.reserva.fase) segue como é.
+	if (plano && plano.fase && !faseReserva && /phase_town/.test(plano.fase.tech || "")) {
+		let quarteis = 0;
+		try { quarteis = +Engine.GuiInterfaceCall("pudim_ContarQuarteis", { "prontos": true }) || 0; } catch (e) {}
+		if (quarteis < 1) plano.fase = null;
+	}
 	if (plano && plano.fase) {
 		let perto = true;
 		if (!faseReserva) {

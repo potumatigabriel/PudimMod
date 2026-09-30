@@ -27,7 +27,8 @@ console.log("reserva nao para a producao");
 // ── 1. A fase automática só entra no guardado perto de sair ────────────────────────────
 const a = panel.indexOf("function pudim_AtualizarReserva() {");
 const b = panel.indexOf("/** A fase sozinha, quando ligada e quando dá.");
-function reserva(estoque, faseManual) {
+function reserva(estoque, faseManual, quarteis) {
+	if (quarteis === undefined) quarteis = 1;
 	const ctx = {
 		Math, PUDIM_FASE_GUARDA_FRACAO: 0.6, PUDIM_MODO_CERCO: 2, g_PudimModoTreino: 0,
 		g_PudimObrasEspera: [], g_PudimPesquisasEspera: [], g_PudimCadeias: {},
@@ -37,7 +38,8 @@ function reserva(estoque, faseManual) {
 			GetPlayerID: () => 1,
 			ConfigDB_GetValue: (u, k) => (k === "pudim.reserva.faseauto" ? "true" :
 				k === "pudim.reserva.fase" ? String(!!faseManual) : ""),
-			GuiInterfaceCall: () => ({ fase: { tech: "phase_town_brit", custo: { food: 500, wood: 500 }, pronto: false, cc: 150 } })
+			GuiInterfaceCall: (n, d) => n === "pudim_ContarQuarteis" ? (d && d.prontos ? quarteis : 99) :
+				({ fase: { tech: "phase_town_brit", custo: { food: 500, wood: 500 }, pronto: true, cc: 150 } })
 		}
 	};
 	vm.createContext(ctx);
@@ -50,6 +52,9 @@ check("0006: F480 W126 — a madeira não tem 60% da fase: nada guardado", !g.to
 check("mas a fase continua conhecida (a pesquisa automática sai quando der)", g.fase && g.fase.tech === "phase_town_brit");
 g = reserva({ food: 480, wood: 320 });
 check("F480 W320 (tudo acima de 60%): aí guarda os 500/500", g.total.food === 500 && g.total.wood === 500);
+g = reserva({ food: 480, wood: 320 }, false, 0);
+check("sem quartel PRONTO: a fase automática nem guarda nem é pesquisada (29/09)",
+	!g.total.food && !g.fase, JSON.stringify(g));
 g = reserva({ food: 100, wood: 50 }, true);
 check("reserva da fase que VOCÊ ligou: guarda desde o início, como antes", g.total.food === 500);
 

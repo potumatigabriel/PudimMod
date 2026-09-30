@@ -1739,6 +1739,7 @@ const PUDIM_TIPOS_TRABALHO = new Set(["gather", "gather-near-position", "repair"
 var g_PudimZonasPerigo = [];
 var g_PudimPerigoAccum = PUDIM_PERIGO_INTERVALO;
 var g_PudimPerigoLogAt = 0;
+var g_PudimReservaObraLogAt = 0;   // "obra do mod adiada" no log, no máximo a cada 10s
 
 function pudim_AtualizarPerigo() {
 	let d = null;
@@ -1826,6 +1827,34 @@ function pudim_Ordenar(cmd, dono)
 					" inimigo(s) — " + livres.length + " trabalhador(es) ficam fora");
 			}
 			return false;
+		}
+	}
+	// ── O QUE VOCÊ PEDIU VEM ANTES (29/09) ──────────────────────────────────────────────
+	//
+	// Relato: "clique pra pesquisar quando tiver recursos não funciona". A pesquisa entrou
+	// na espera ("faltam 53W") e, 11s depois, a casa automática gastou a madeira — só o
+	// treino, a auto-pesquisa, o mercado e o tributo respeitavam a reserva; nenhuma obra do
+	// mod. Agora obra nenhuma do mod sai se o custo não couber no estoque MENOS o que você
+	// mandou esperar (pesquisa, obra, cerco, fase que você guarda). Exceção: casa com a
+	// população no teto — sem ela a produção para, e a produção nunca para.
+	if (!doJogador && cmd.type === "construct" && cmd.template) {
+		const dele = g_PudimGuardado.doJogador || {};
+		if (Object.keys(dele).some(r => dele[r] > 0)) {
+			let eu = null;
+			try { eu = GetSimState().players[Engine.GetPlayerID()]; } catch (e) {}
+			const tem = (eu && eu.resourceCounts) || {};
+			const custo = pudim_CustoDaObra(cmd.template);
+			const naoCabe = Object.keys(custo).some(r => (+tem[r] || 0) - (dele[r] || 0) < custo[r]);
+			const casaNoTeto = /house/.test(cmd.template) && eu &&
+				(eu.popLimit || 0) - (eu.popCount || 0) <= 0;
+			if (naoCabe && !casaNoTeto) {
+				if (agora - g_PudimReservaObraLogAt > 10000) {
+					g_PudimReservaObraLogAt = agora;
+					pudim_Log("INFO", "RESERVA", "obra do mod adiada (" + cmd.template.split("/").pop() +
+						"): o recurso está guardado para o que você pediu");
+				}
+				return false;
+			}
 		}
 	}
 	// Continuação em fila não renova a reserva: ela pertence à ordem imediata que a abriu.
@@ -1942,7 +1971,7 @@ var g_PudimModoTreino = PUDIM_MODO_NORMAL;
 // O que está guardado agora: total por recurso e a lista do que o compõe. Recalculado a cada
 // PUDIM_RESERVA_INTERVALO por pudim_AtualizarReserva, lido pela auto-fila, pela
 // auto-pesquisa, pelo contra-treino e pelo tributo.
-var g_PudimGuardado = { total: {}, itens: [] };
+var g_PudimGuardado = { total: {}, itens: [], doJogador: {} };
 const PUDIM_RESERVA_INTERVALO = 2000;
 var g_PudimReservaAccum = PUDIM_RESERVA_INTERVALO;
 var g_PudimFaseMandadaEm = 0;   // anti-repetição da fase automática (latência de rede)
@@ -2048,7 +2077,16 @@ function pudim_AtualizarReserva() {
 	const total = {};
 	for (const it of itens)
 		for (const r in it.custo) total[r] = (total[r] || 0) + it.custo[r];
-	g_PudimGuardado = { total: total, itens: itens, fase: plano && plano.fase };
+	// O que VOCÊ mandou esperar (pesquisa, obra, cerco, e a fase quando é você que a guarda):
+	// isso nem o lote de 1 nem as obras automáticas do mod tocam — ver "O QUE VOCÊ PEDIU VEM
+	// ANTES" em pudim_Ordenar. A fase automática fica de fora: dela o lote de 1 pode pegar.
+	const doJogador = {};
+	for (const it of itens) {
+		if (!(it.tipo === "obra" || it.tipo === "pesquisa" || it.tipo === "cerco" || (it.tipo === "fase" && faseReserva)))
+			continue;
+		for (const r in it.custo) doJogador[r] = (doJogador[r] || 0) + it.custo[r];
+	}
+	g_PudimGuardado = { total: total, itens: itens, fase: plano && plano.fase, doJogador: doJogador };
 	pudim_AtualizarBotaoPausa();
 }
 
@@ -2534,7 +2572,16 @@ function pudim_LiberarPesquisaSemRecurso(data) {
 		if (!botao || botao.enabled || botao.hidden) continue;
 		if (!Engine.GuiInterfaceCall("CheckTechnologyRequirements", { "tech": tech, "player": data.player })) continue;
 		botao.enabled = true;
-		botao.tooltip += "\n[color=\"150 220 255\"]Sem recurso agora: clique mesmo assim e o PudimMod pesquisa quando juntar.[/color]";
+		// Já na espera: diz que está, e quanto falta (29/09, "não sei se funciona").
+		const naEspera = g_PudimPesquisasEspera.find(p => p.tech === tech);
+		if (naEspera) {
+			const falta = pudim_FaltaParaObra(naEspera.custo) || {};
+			const partes = Object.keys(falta).filter(r => falta[r] > 0)
+				.map(r => Math.ceil(falta[r]) + " " + (PUDIM_NOMES_RECURSO[r] || r));
+			botao.tooltip += "\n[color=\"150 220 255\"]NA ESPERA" + (partes.length ? ": faltam " + partes.join(", ") : "") +
+				" — o PudimMod pesquisa quando juntar. Cancelar: clique direito no botão de treino do painel.[/color]";
+		} else
+			botao.tooltip += "\n[color=\"150 220 255\"]Sem recurso agora: clique mesmo assim e o PudimMod pesquisa quando juntar.[/color]";
 	}
 }
 
@@ -2558,6 +2605,8 @@ function pudim_ProcessPesquisasEspera() {
 	tirar(null);
 	Engine.PostNetworkCommand({ "type": "research", "entity": p.ent, "template": p.tech, "pushFront": false });
 	pudim_Log("INFO", "RESEARCH", "recurso juntou: pesquisando " + p.nome);
+	// "às vezes funcionou, mas não vi" (29/09): a saída também aparece na tela.
+	try { Engine.GuiInterfaceCall("pudim_PushNotification", { "message": "Pesquisa na espera saiu: " + p.nome }); } catch (e) {}
 }
 
 // ─── Divisão de mercadorias do comércio, lembrada entre partidas ────────────────────────
@@ -3561,6 +3610,9 @@ function pudim_ProcessAutoQueue()
 		// reservas comem todo o livre (ver "A RESERVA NUNCA PARA A PRODUÇÃO").
 		const resReal = {};
 		for (const k in resBruto) resReal[k] = resBruto[k];
+		// ...menos o que VOCÊ mandou esperar (29/09): o lote de 1 só pega da fase automática.
+		for (const r in (g_PudimGuardado.doJogador || {}))
+			resReal[r] = Math.max(0, (+resReal[r] || 0) - (g_PudimGuardado.doJogador[r] || 0));
 		if (g_PudimMadeiraReservada > 0) {
 			res.wood = Math.max(0, (+res.wood || 0) - g_PudimMadeiraReservada);
 			if (g_PudimShowDebug && res.wood === 0)
@@ -7051,6 +7103,45 @@ const PUDIM_OBRAS_BAR_X2 = 178;
 var g_PudimObrasAccum = 0;
 var g_PudimObrasLogAt = 0;
 
+// ── O QUE ESTÁ NA ESPERA TAMBÉM APARECE AQUI (29/09) ────────────────────────────────────
+//
+// "não sei se funciona, porque não fica azul igual da construção" e "às vezes funcionou, mas
+// não vi". A obra na espera tem o fantasma azulado no chão; a pesquisa na espera não tinha
+// sinal nenhum. As duas entram no topo deste indicador, com selo azulado, o que falta, e a
+// barra do quanto do custo já existe no estoque. Some quando sai (e a saída avisa na tela).
+const PUDIM_NOMES_RECURSO = { food: "comida", wood: "madeira", stone: "pedra", metal: "metal" };
+function pudim_ItensNaEspera()
+{
+	const itens = [];
+	let eu = null;
+	try { eu = GetSimState().players[Engine.GetPlayerID()]; } catch (e) {}
+	const tem = (eu && eu.resourceCounts) || {};
+	const linha = function(custo, nome, icone) {
+		const falta = pudim_FaltaParaObra(custo) || {};
+		const partes = [];
+		let custoTotal = 0, temTotal = 0;
+		for (const r in custo) {
+			custoTotal += custo[r];
+			temTotal += Math.min(custo[r], +tem[r] || 0);
+			if ((falta[r] || 0) > 0) partes.push(Math.ceil(falta[r]) + " " + (PUDIM_NOMES_RECURSO[r] || r));
+		}
+		itens.push({ tipo: "espera", nome: nome, icone: icone,
+			texto: partes.length ? "faltam " + partes.join(", ") : "saindo...",
+			progresso: custoTotal > 0 ? temTotal / custoTotal : 1 });
+	};
+	for (const p of g_PudimPesquisasEspera) {
+		let icone = null;
+		try { const t = GetTechnologyData(p.tech, eu && eu.civ); if (t && t.icon) icone = t.icon; } catch (e) {}
+		linha(p.custo, p.nome, icone);
+	}
+	for (const o of g_PudimObrasEspera) {
+		let icone = null;
+		try { const td = GetTemplateData(o.template); if (td && td.icon) icone = td.icon; } catch (e) {}
+		linha(o.custo, pudim_NomeDaObra(o.template), icone);
+	}
+	return itens;
+}
+
 function pudim_AtualizarObras()
 {
 	const painel = Engine.TryGetGUIObjectByName("pudimObras");
@@ -7070,7 +7161,8 @@ function pudim_AtualizarObras()
 	let d = null;
 	try { d = Engine.GuiInterfaceCall("pudim_GetObrasEmAndamento", { "jogador": verJogador }); }
 	catch (e) { return; }
-	const obras = (d && d.obras) || [];
+	// Primeiro o que está na espera (pesquisa/obra sua), depois o que está sendo erguido.
+	const obras = pudim_ItensNaEspera().concat((d && d.obras) || []);
 
 	// DIAGNÓSTICO, porque já errei três vezes o motivo de não aparecer.
 	//
@@ -7097,6 +7189,31 @@ function pudim_AtualizarObras()
 		const o = obras[i];
 		if (!o) { row.hidden = true; continue; }
 		row.hidden = false;
+		if (o.tipo === "espera") {
+			const szE = row.size;
+			szE.top = i * PUDIM_OBRAS_ALTURA;
+			szE.bottom = (i + 1) * PUDIM_OBRAS_ALTURA;
+			row.size = szE;
+			const icE = Engine.TryGetGUIObjectByName("pudimObrasIcon[" + i + "]");
+			if (icE) icE.sprite = o.icone ? "stretched:session/portraits/" + o.icone : "color: 0 0 0 0";
+			const lblE = Engine.TryGetGUIObjectByName("pudimObrasNome[" + i + "]");
+			if (lblE) lblE.caption = "[color=\"140 190 255\"]" + o.nome + "  " + o.texto + "[/color]";
+			const seloE = Engine.TryGetGUIObjectByName("pudimObrasSeloTxt[" + i + "]");
+			if (seloE) seloE.caption = "...";
+			const seloBgE = Engine.TryGetGUIObjectByName("pudimObrasSelo[" + i + "]");
+			if (seloBgE) seloBgE.sprite = "color: 60 110 200 230";
+			const barE = Engine.TryGetGUIObjectByName("pudimObrasBar[" + i + "]");
+			const barBgE = Engine.TryGetGUIObjectByName("pudimObrasBarBg[" + i + "]");
+			if (barBgE) barBgE.hidden = false;
+			if (barE) {
+				barE.hidden = false;
+				const bE = barE.size;
+				bE.left = PUDIM_OBRAS_BAR_X1;
+				bE.right = PUDIM_OBRAS_BAR_X1 + (PUDIM_OBRAS_BAR_X2 - PUDIM_OBRAS_BAR_X1) * Math.max(0, Math.min(1, o.progresso));
+				barE.size = bE;
+			}
+			continue;
+		}
 
 		// Empilha as linhas. Mesmo padrão da barra de aliados: lê o size, mexe nas pontas,
 		// devolve — atribuir campo a campo no objeto lido não tem efeito.

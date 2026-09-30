@@ -576,6 +576,8 @@ function pudim_LimiarObra(ent, generico)
 //
 // Peso zero continua zero: recurso que o jogador nao quer nao entra por escassez.
 const PUDIM_ESCASSEZ_MIN = 0.25;
+// Teto de coletores de um recurso que o jogador deixou em 0 e só entrou pela proporção.
+const PUDIM_COLETA_PROP_MAX = 5;
 const PUDIM_ESCASSEZ_MAX = 4;
 const PUDIM_RECURSOS = ["food", "wood", "stone", "metal"];
 
@@ -1299,6 +1301,15 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 	// desempata entre os recursos que ele ja escolheu, e some quando os estoques emparelham.
 	const bancoCota = cmpPlayer && cmpPlayer.GetResourceCounts ? cmpPlayer.GetResourceCounts() : null;
 	const efCota = pudim_PesosEfetivos(weights, bancoCota);
+	// ── RECURSO QUE SÓ ENTROU PELA PROPORÇÃO: POUCOS, E SEM ESCASSEZ (29/09) ─────────────
+	//
+	// Print de 29/09: "nem coloquei pedra na lista, e tá mandando coletores" — 18 na pedra,
+	// alvo 21. O painel dá peso 1 à pedra quando o fundeiro da proporção precisa dela
+	// (pudim_PesosDeColeta), e aqui o fator de escassez (3,02 com a pedra zerada) triplicava
+	// esse 1; a cota da comida caiu junto (F27/15) e o Auto-Trabalho tirou gente dos campos.
+	// Recurso que vem só da proporção usa o peso cru e tem teto de PUDIM_COLETA_PROP_MAX.
+	const propRec = new Set(((data && data.proporcaoRec) || []).filter(r => (weights[r] || 0) > 0));
+	for (const r of propRec) efCota.pesos[r] = weights[r];
 	for (const type of PUDIM_RECURSOS) {
 		if (weights[type] > 0) {
 			activeWeights.push(type);
@@ -1361,8 +1372,22 @@ GuiInterface.prototype.pudim_GetIdleWorkersAndBestResource = function(player, da
 		let worstSurplus = -Infinity;
 		let worstSurplusRes = null;
 		
+		// Cota dos recursos da proporção primeiro (com teto); o resto dos trabalhadores se
+		// divide entre os outros pelos pesos deles.
+		const quotaDe = {};
+		let fixo = 0, pesoLivre = 0;
+		for (const t of activeWeights) {
+			if (propRec.has(t)) {
+				quotaDe[t] = Math.min(PUDIM_COLETA_PROP_MAX, (efCota.pesos[t] / totalWeight) * totalWorkers);
+				fixo += quotaDe[t];
+			} else pesoLivre += efCota.pesos[t];
+		}
+		for (const t of activeWeights)
+			if (!propRec.has(t))
+				quotaDe[t] = pesoLivre > 0 ? (efCota.pesos[t] / pesoLivre) * Math.max(0, totalWorkers - fixo) : 0;
+		result._bal.prop = Array.from(propRec);
 		for (const type of activeWeights) {
-			const targetQuota = (efCota.pesos[type] / totalWeight) * totalWorkers;
+			const targetQuota = quotaDe[type];
 			const currentCount = activeGatherers[type].length;
 			const diff = targetQuota - currentCount; // Positivo: precisa de gente. Negativo: excesso.
 			deficits[type] = diff;
@@ -2842,6 +2867,9 @@ GuiInterface.prototype.pudim_GetScoutBorderTarget = function(player, data)
 
 
 // ─── Fazendas ────────────────────────────────────────────────────
+// Fator de escassez da comida acima do qual soldado nenhum sai do campo (ver "E A TROCA É
+// FEITA DE VERDADE"). 1 = estoques parelhos; 1,1 = comida já abaixo da média.
+const PUDIM_FAZENDA_TROCA_ESCASSEZ = 1.1;
 const PUDIM_FRUTA_TAXA = 1;          // comida por segundo por coletor de fruta (medido, ver acima)
 const PUDIM_FRUTA_HORIZONTE = 120;   // segundos: o tempo de erguer os campos antes de a fruta acabar
 
@@ -2986,7 +3014,16 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 	// de fato disponivel. "Disponivel" e aldeao ocioso ou na madeira — quem ja esta na
 	// comida nao e troca, e so mudaria a vaga de lugar.
 	const playerOrderedFarm = new Set(((data && data.playerOrdered) || []).map(Number));
-	let aldeoesDisponiveis = 0;
+	// ── E A TROCA É FEITA DE VERDADE (29/09) ───────────────────────────────────────────
+	//
+	// Relato: "o jogo tá tirando toda hora meus coletores da fazenda". O log mostrava
+	// "soldado → madeira (vaga p/ aldeão na fazenda …)" a cada 5-15s, com ocio=0 e a comida
+	// em falta (alvo F130 contra 50, escassez 2,33) — e 106 na madeira. Contava-se o aldeão
+	// da madeira como "disponível", mas NINGUÉM o mandava para o campo: ele continuava
+	// ocupado cortando, e o campo ficava vazio. Agora cada saída leva o aldeão mais perto
+	// daquele campo (result.soldierEvictions[].villagerId), e o painel manda os dois na mesma
+	// hora. Sem aldeão, o soldado fica; com a comida em falta, ninguém sai do campo.
+	const candidatosAldeao = [];   // { ent, x, z }
 	for (const ent of allEnts) {
 		const cid = Engine.QueryInterface(ent, IID_Identity);
 		if (!cid || cid.HasClass("CitizenSoldier") || cid.HasClass("FastMoving")) continue;
@@ -2994,14 +3031,31 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 		if (playerOrderedFarm.has(ent)) continue;
 		const uai = Engine.QueryInterface(ent, IID_UnitAI);
 		if (!uai) continue;
+		const pA = Engine.QueryInterface(ent, IID_Position);
+		if (!pA || !pA.IsInWorld()) continue;
+		const qA = pA.GetPosition2D();
 		const oq = uai.orderQueue;
-		if (!oq || oq.length === 0) { aldeoesDisponiveis++; continue; }
+		if (!oq || oq.length === 0) { candidatosAldeao.push({ ent: ent, x: qA.x, z: qA.y }); continue; }
 		const o0 = oq[0];
 		if (o0.type !== "Gather" || !o0.data || !o0.data.target) continue;
 		const rsA = Engine.QueryInterface(o0.data.target, IID_ResourceSupply);
-		if (rsA && rsA.GetType().generic === "wood") aldeoesDisponiveis++;
+		if (rsA && rsA.GetType().generic === "wood") candidatosAldeao.push({ ent: ent, x: qA.x, z: qA.y });
 	}
+	let aldeoesDisponiveis = candidatosAldeao.length;
 	result._dbg.aldLivres = aldeoesDisponiveis;
+	// Comida em falta pela mesma conta da cota (pudim_PesosEfetivos): soldado nenhum sai.
+	const fatorComidaFarm = pudim_PesosEfetivos((data && data.weights) || {},
+		cmpPlayer.GetResourceCounts ? cmpPlayer.GetResourceCounts() : null).fatores.food || 1;
+	const comidaEmFalta = fatorComidaFarm > PUDIM_FAZENDA_TROCA_ESCASSEZ;
+	result._dbg.fComida = Math.round(fatorComidaFarm * 100) / 100;
+	const pegarAldeao = function(fx, fz) {
+		let melhor = -1, dMin = Infinity;
+		candidatosAldeao.forEach(function(c, i) {
+			const dx = c.x - fx, dz = c.z - fz, d = dx * dx + dz * dz;
+			if (d < dMin) { dMin = d; melhor = i; }
+		});
+		return melhor >= 0 ? candidatosAldeao.splice(melhor, 1)[0].ent : null;
+	};
 
 	for (const ent of allEnts) {
 		const cmpUnitAI = Engine.QueryInterface(ent, IID_UnitAI);
@@ -3023,15 +3077,17 @@ GuiInterface.prototype.pudim_GetFarmBuildData = function(player, data)
 							// Ver o bloco "SOLDADO NA FAZENDA" acima.
 							if (cmpEntId && cmpEntId.HasClass("CitizenSoldier")) {
 								const dele = playerOrderedFarm.has(ent);
-								if (!dele && aldeoesDisponiveis > 0) {
-									const cmpSolPos = Engine.QueryInterface(ent, IID_Position);
-									if (cmpSolPos && cmpSolPos.IsInWorld()) {
-										const sp = cmpSolPos.GetPosition2D();
-										result.soldierEvictions.push({ soldierId: ent, farmId: tgt, soldierX: sp.x, soldierZ: sp.y });
-										// Cada expulsão consome um aldeão do saldo: sem isto, um
-										// único aldeão livre autorizava esvaziar TODAS as fazendas.
-										aldeoesDisponiveis--;
-									}
+								const cmpSolPos = Engine.QueryInterface(ent, IID_Position);
+								const aldeao = (!dele && !comidaEmFalta && aldeoesDisponiveis > 0 &&
+									cmpSolPos && cmpSolPos.IsInWorld())
+									? pegarAldeao(cmpSolPos.GetPosition2D().x, cmpSolPos.GetPosition2D().y) : null;
+								if (aldeao !== null) {
+									const sp = cmpSolPos.GetPosition2D();
+									result.soldierEvictions.push({ soldierId: ent, farmId: tgt, soldierX: sp.x, soldierZ: sp.y,
+										villagerId: aldeao });
+									// Cada expulsão consome um aldeão da lista: sem isto, um único
+									// aldeão livre autorizava esvaziar TODAS as fazendas.
+									aldeoesDisponiveis--;
 									// Não contar soldado como food worker: a fazenda ficará "vaga"
 									// para o sistema enviar um aldeão no lugar
 								} else {

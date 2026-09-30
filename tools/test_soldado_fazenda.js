@@ -54,7 +54,8 @@ check("e a simulação a lê",
 	/const playerOrderedFarm = new Set\(\(\(data && data\.playerOrdered\) \|\| \[\]\)\.map\(Number\)\);/.test(exec));
 check("a expulsão consulta as duas condições",
 	/const dele = playerOrderedFarm\.has\(ent\);/.test(exec) &&
-	/if \(!dele && aldeoesDisponiveis > 0\) \{/.test(exec));
+	// Desde 29/09 também a comida não pode estar em falta, e a troca leva um aldeão de verdade.
+	/const aldeao = \(!dele && !comidaEmFalta && aldeoesDisponiveis > 0 &&/.test(exec));
 
 // ── Quem conta como aldeão disponível ──────────────────────────────────────────────────
 check("soldado e cavalaria não contam como aldeão disponível",
@@ -62,9 +63,9 @@ check("soldado e cavalaria não contam como aldeão disponível",
 check("aldeão sob ordem do jogador também não conta — ele não está livre",
 	/if \(playerOrderedFarm\.has\(ent\)\) continue;/.test(exec));
 check("aldeão ocioso conta",
-	/if \(!oq \|\| oq\.length === 0\) \{ aldeoesDisponiveis\+\+; continue; \}/.test(exec));
+	/if \(!oq \|\| oq\.length === 0\) \{ candidatosAldeao\.push\(\{ ent: ent, x: qA\.x, z: qA\.y \}\); continue; \}/.test(exec));
 check("e aldeão na madeira conta — é a troca que o mod quer fazer",
-	/if \(rsA && rsA\.GetType\(\)\.generic === "wood"\) aldeoesDisponiveis\+\+;/.test(exec));
+	/if \(rsA && rsA\.GetType\(\)\.generic === "wood"\) candidatosAldeao\.push\(\{ ent: ent, x: qA\.x, z: qA\.y \}\);/.test(exec));
 // Quem já está na comida NÃO conta: trocá-lo só muda a vaga de lugar.
 check("aldeão que já está na comida não conta como disponível",
 	!/generic === "food"\) aldeoesDisponiveis/.test(exec));

@@ -929,6 +929,9 @@ function pudim_RunAutoWork()
 			"weights": pudim_PesosDeColeta((GetSimState().players[Engine.GetPlayerID()] || {}).resourceCounts),
 			// Recurso dentro de zona de perigo não é candidato: o trabalhador vai para outro.
 			"perigo": g_PudimZonasPerigo,
+			// O que entrou só pela proporção: sem escassez e no máximo 5 coletores
+			// (PUDIM_COLETA_PROP_MAX na simulação). Calculado junto dos pesos, logo acima.
+			"proporcaoRec": Object.keys(g_PudimColetaPropLigada),
 			"repeatBuilders": Object.keys(g_PudimRepeatBuilding).map(Number).filter(ent => g_PudimRepeatBuilding[ent]),
 			"playerOrdered": pudim_GetPlayerOrderedIds(),
 			"protectedIds": pudim_GetProtectedBuilderIds(),
@@ -4571,6 +4574,12 @@ function pudim_ProcessFarms()
 		// ── Soldados em fazendas: trocar por aldeões (soldado → madeira) ─────────────────
 		// Isso acontece ANTES do action check para garantir a troca em qualquer estado
 		for (const ev of (farmData.soldierEvictions || [])) {
+			// TROCA DE VERDADE (29/09): primeiro o aldeão vai para o campo; se a ordem dele não
+			// sair (ordem sua recente, zona de perigo…), o soldado FICA — nunca esvaziar o campo.
+			if (!ev.villagerId) continue;
+			const entrou = pudim_Ordenar({ "type": "gather", "entities": [ev.villagerId], "target": ev.farmId,
+				"queued": false, "pushFront": false }, "pudim_ProcessFarms");
+			if (!entrou) continue;
 			// Envia o soldado para coletar madeira perto de sua posição atual
 			pudim_Ordenar({
 				"type": "gather-near-position",
@@ -4581,7 +4590,8 @@ function pudim_ProcessFarms()
 				"resourceTemplate": "",
 				"queued": false
 			}, "pudim_ProcessFarms");
-			pudim_Log("INFO", "FARM", "soldado " + ev.soldierId + " → madeira (vaga p/ aldeão na fazenda " + ev.farmId + ")");
+			pudim_Log("INFO", "FARM", "troca na fazenda " + ev.farmId + ": aldeão " + ev.villagerId +
+				" entra, soldado " + ev.soldierId + " → madeira");
 		}
 
 		// Atraso de comida: quantos trabalhadores a cota pede a mais do que existe.
@@ -7586,6 +7596,8 @@ function pudim_ProporcaoAtiva()
 // pesquisa por pontuação e as fazendas continuam lendo os seus pesos como estão.
 const PUDIM_COLETA_PROP_LOTES = 5;
 const PUDIM_COLETA_PROP_PESO = 1;
+// Só para o painel e o log: o teto real é PUDIM_COLETA_PROP_MAX, na simulação (os dois = 5).
+const PUDIM_COLETA_PROP_TETO = 5;
 var g_PudimColetaPropLigada = {};   // recurso -> true enquanto a proporção o puxa
 
 function pudim_PesosDeColeta(res)
@@ -7623,11 +7635,18 @@ function pudim_PesosDeColeta(res)
 			pesos[r] = PUDIM_COLETA_PROP_PESO;
 			g_PudimColetaPropLigada[r] = true;
 		} else delete g_PudimColetaPropLigada[r];
+		if (liga !== antes) {
+			// No painel: "0 +5" em laranja enquanto durar — você vê de onde vêm os coletores.
+			const nomeVal = { stone: "pudim_stoneVal", metal: "pudim_metalVal", food: "pudim_foodVal", wood: "pudim_woodVal" }[r];
+			pudim_SetCaption(nomeVal, liga
+				? "[color=\"255 170 60\"]" + (g_PudimResourceWeights[r] || 0) + " +" + PUDIM_COLETA_PROP_TETO + "[/color]"
+				: String(g_PudimResourceWeights[r] || 0));
+		}
 		if (liga !== antes)
 			pudim_Log("INFO", "BALANCE", liga
 				? r + " em 0 nas prioridades, mas " + quem[r].split("/").pop() +
 				  " da proporção precisa (tem " + Math.round(tem) + ", " + precisa[r] +
-				  " paga " + PUDIM_COLETA_PROP_LOTES + "): alguns coletores vão para " + r
+				  " paga " + PUDIM_COLETA_PROP_LOTES + "): até " + PUDIM_COLETA_PROP_TETO + " coletores vão para " + r
 				: r + " juntou " + Math.round(tem) + ": coletores voltam às suas prioridades");
 	}
 	return pesos;

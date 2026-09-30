@@ -32,13 +32,15 @@ const custos = {
 	"units/rome/support_civilian": { food: 50, population: 1 }
 };
 const logs = [];
+const rotulos = {};
 const ctx = {
 	Math, Object,
 	g_PudimResourceWeights: { food: 3, wood: 4, stone: 0, metal: 0 },
 	g_PudimUnitPesos: {},
 	g_PudimUnitTodas: Object.keys(custos).map(tpl => ({ tpl, existentes: 0, emFila: 0 })),
 	GetTemplateData: t => ({ cost: custos[t] }),
-	pudim_Log: (l, c, m) => logs.push(c + " " + m)
+	pudim_Log: (l, c, m) => logs.push(c + " " + m),
+	pudim_SetCaption: (n, t) => { rotulos[n] = t; }
 };
 vm.createContext(ctx);
 vm.runInContext(panel.slice(a, b) + "\nthis.f = pudim_PesosDeColeta;", ctx);

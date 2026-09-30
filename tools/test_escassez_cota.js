@@ -60,7 +60,10 @@ check("e a conta não ficou duplicada: só um Math.sqrt de escassez no arquivo",
 	(exec.match(/Math\.sqrt\(media \/ Math\.max/g) || []).length === 1,
 	(exec.match(/Math\.sqrt\(media \/ Math\.max/g) || []).length + " ocorrência(s)");
 check("o alvo por recurso sai do peso EFETIVO, não do cru",
-	/const targetQuota = \(efCota\.pesos\[type\] \/ totalWeight\) \* totalWorkers;/.test(exec));
+	// Desde 29/09 o recurso da proporção tem cota à parte (teto de 5) e o resto se divide
+	// pelos pesos efetivos dos outros (tools/test_proporcao_teto.js).
+	/quotaDe\[t\] = pesoLivre > 0 \? \(efCota\.pesos\[t\] \/ pesoLivre\) \* Math\.max\(0, totalWorkers - fixo\) : 0;/.test(exec) &&
+	/const targetQuota = quotaDe\[type\];/.test(exec));
 check("e o total também, senão as frações não somam 1",
 	/totalWeight \+= efCota\.pesos\[type\];/.test(exec));
 

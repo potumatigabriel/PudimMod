@@ -5166,6 +5166,13 @@ var g_PudimInitialFemaleSeen = new Set();
 var g_PudimInitialFemaleLastCount = -1;
 var g_PudimInitialSoldierSeen = new Set();
 var g_PudimInitialSoldierLastCount = -1;
+// id -> { t: instante da última ordem, n: quantas ordens } — ver "SÓ DEPOIS DO PRIMEIRO TURNO".
+var g_PudimInitialEnviado = {};
+const PUDIM_BAL_INICIO_MS = 600;     // 3 turnos de 200ms: a ordem do 1º tique se perdia
+// Ainda parada 3,5s depois da ordem: não pegou. Acima de PUDIM_RESERVA_MS (3s) de propósito —
+// antes disso o árbitro barra a segunda ordem do mesmo sistema como "reordem".
+const PUDIM_BAL_CONFERE_MS = 3500;
+const PUDIM_BAL_TENTATIVAS = 3;
 
 /**
  * Executa o balanceamento inicial de coleta de recursos no início do jogo.
@@ -5208,6 +5215,38 @@ function pudim_ExecuteInitialBalance()
 	if (data.femaleCitizens.length === 0 && data.soldiers.length === 0 && !data.cavalry)
 		return false;
 
+	// ── SÓ DEPOIS DO PRIMEIRO TURNO, E CONFERINDO SE PEGOU (29/09) ────────────────────────
+	//
+	// Replays 2026-09-29_0005 e _0006: o balanceamento rodou aos 0,0s e NENHUMA ordem dele
+	// chegou à partida (turnos 0-20 só com autoqueue e train). O painel marcou todo mundo como
+	// despachado, reservou e protegeu por 15-20s, e as unidades ficaram paradas até você mandar
+	// — a primeira ordem de trabalho do mod saiu aos 9s ("no início demora pra mandar fazer as
+	// coisas"). Agora espera PUDIM_BAL_INICIO_MS de simulação, e quem continua OCIOSO
+	// PUDIM_BAL_CONFERE_MS depois da ordem recebe de novo (até PUDIM_BAL_TENTATIVAS vezes).
+	if (((g_SimState && g_SimState.timeElapsed) || 0) < PUDIM_BAL_INICIO_MS) return false;
+	const ociososIni = new Set(data.ociosos || []);
+	const agoraIni = Date.now();
+	// Quem mandar agora: quem nunca foi mandado, e quem foi mas continua parado.
+	const aMandar = function(ids) {
+		return ids.filter(id => {
+			const env = g_PudimInitialEnviado[id];
+			if (!env) return true;
+			return ociososIni.has(id) && agoraIni - env.t > PUDIM_BAL_CONFERE_MS &&
+				env.n < PUDIM_BAL_TENTATIVAS;
+		});
+	};
+	const marcarEnviado = function(ids) {
+		for (const id of ids) {
+			const env = g_PudimInitialEnviado[id];
+			g_PudimInitialEnviado[id] = { t: agoraIni, n: env ? env.n + 1 : 1 };
+			if (env) pudim_Log("INFO", "BALANCE", "unidade inicial " + id +
+				" continuava parada: ordem de novo (" + (env.n + 1) + "ª)");
+		}
+	};
+	// O grupo só conta como despachado quando ninguém dele está parado — ou já se tentou tudo.
+	const grupoSaiu = ids => ids.every(id => !ociososIni.has(id) ||
+		(g_PudimInitialEnviado[id] && g_PudimInitialEnviado[id].n >= PUDIM_BAL_TENTATIVAS));
+
 	// Marcar como despachado se o grupo não existe após 8s (era 3s — em alguns mapas as unidades
 	// demoram mais para desguarnecer do CC, causando dispatch nunca ocorrer em 2/4 jogos)
 	const elapsed = (g_SimState && g_SimState.timeElapsed) || 0;
@@ -5230,8 +5269,8 @@ function pudim_ExecuteInitialBalance()
 	{
 		if (data.berryBush)
 		{
-			// Despacha só as que ainda não foram vistas (evita reenviar comando pra quem já está indo)
-			const newFemales = data.femaleCitizens.filter(id => !g_PudimInitialFemaleSeen.has(id));
+			// Despacha quem nunca foi mandado e quem foi mas continua parado (ver acima)
+			const newFemales = aMandar(data.femaleCitizens);
 			if (newFemales.length > 0)
 			{
 				pudim_Ordenar({
@@ -5241,6 +5280,7 @@ function pudim_ExecuteInitialBalance()
 					"queued": false,
 					"pushFront": false
 				}, "pudim_ExecuteInitialBalance");
+				marcarEnviado(newFemales);
 				// Protege por 15s: sem isso, sistemas de armazém/celeiro proativo (que buscam
 				// "qualquer builder civil disponível", mesmo coletando) podiam sequestrar as
 				// aldeãs recém-despachadas segundos depois, antes delas sequer chegarem na fruta.
@@ -5250,8 +5290,8 @@ function pudim_ExecuteInitialBalance()
 					pudim_ProtectBuilder(id, femaleExpiry);
 				}
 			}
-			// Contagem estabilizou entre duas checagens (1s) -> ninguém novo apareceu, concluído
-			if (data.femaleCitizens.length === g_PudimInitialFemaleLastCount)
+			// Contagem estabilizou entre duas checagens (1s) e ninguém ficou parado: concluído
+			if (data.femaleCitizens.length === g_PudimInitialFemaleLastCount && grupoSaiu(data.femaleCitizens))
 				g_PudimInitialFemaleDispatched = true;
 			g_PudimInitialFemaleLastCount = data.femaleCitizens.length;
 		}
@@ -5267,7 +5307,7 @@ function pudim_ExecuteInitialBalance()
 	{
 		if (data.tree)
 		{
-			const newSoldiers = data.soldiers.filter(id => !g_PudimInitialSoldierSeen.has(id));
+			const newSoldiers = aMandar(data.soldiers);
 			if (newSoldiers.length > 0)
 			{
 				pudim_Ordenar({
@@ -5277,6 +5317,7 @@ function pudim_ExecuteInitialBalance()
 					"queued": false,
 					"pushFront": false
 				}, "pudim_ExecuteInitialBalance");
+				marcarEnviado(newSoldiers);
 				// Protege soldados por 20s para auto-work não os mandar de volta para frutas
 				const soldierExpiry = Date.now() + 20000;
 				for (const s of newSoldiers) {
@@ -5284,7 +5325,7 @@ function pudim_ExecuteInitialBalance()
 					g_PudimInitialSoldierSeen.add(s);
 				}
 			}
-			if (data.soldiers.length === g_PudimInitialSoldierLastCount)
+			if (data.soldiers.length === g_PudimInitialSoldierLastCount && grupoSaiu(data.soldiers))
 				g_PudimInitialSoldierDispatched = true;
 			g_PudimInitialSoldierLastCount = data.soldiers.length;
 		}
@@ -5297,16 +5338,20 @@ function pudim_ExecuteInitialBalance()
 	{
 		if (data.chicken)
 		{
-			pudim_Ordenar({
-				"type": "gather",
-				"entities": [data.cavalry],
-				"target": data.chicken,
-				"queued": false,
-				"pushFront": false
-			}, "pudim_ExecuteInitialBalance");
-			// Protege cavalaria por 20s para auto-work não a redirecionar para frutas
-			pudim_ProtectBuilder(data.cavalry, Date.now() + 20000);
-			g_PudimInitialCavalryDispatched = true;
+			if (aMandar([data.cavalry]).length) {
+				pudim_Ordenar({
+					"type": "gather",
+					"entities": [data.cavalry],
+					"target": data.chicken,
+					"queued": false,
+					"pushFront": false
+				}, "pudim_ExecuteInitialBalance");
+				marcarEnviado([data.cavalry]);
+				// Protege cavalaria por 20s para auto-work não a redirecionar para frutas
+				pudim_ProtectBuilder(data.cavalry, Date.now() + 20000);
+			}
+			if (grupoSaiu([data.cavalry]) && g_PudimInitialEnviado[data.cavalry])
+				g_PudimInitialCavalryDispatched = true;
 		}
 		else if (g_SimState && g_SimState.timeElapsed > 1500)
 			g_PudimInitialCavalryDispatched = true;

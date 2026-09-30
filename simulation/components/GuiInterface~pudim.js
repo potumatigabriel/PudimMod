@@ -6309,6 +6309,14 @@ GuiInterface.prototype.pudim_GetInitialBalanceData = function(player, data)
 			bestMeatDist = distSq; result.chicken = ent;
 		}
 	}
+	// Quem ainda está OCIOSO (UnitAI.IsIdle): o painel confere se a ordem inicial pegou.
+	// Replays de 29/09: a ordem saía no primeiro tique e não chegava à partida; o painel
+	// marcava todo mundo como despachado e as unidades ficavam paradas até você mandar.
+	result.ociosos = [];
+	for (const ent of result.femaleCitizens.concat(result.soldiers, result.cavalry ? [result.cavalry] : [])) {
+		const ai = Engine.QueryInterface(ent, IID_UnitAI);
+		if (ai && ai.IsIdle && ai.IsIdle()) result.ociosos.push(ent);
+	}
 	return result;
 };
 // Focus fire: direciona todos os soldados em combate para o alvo mais fraco.

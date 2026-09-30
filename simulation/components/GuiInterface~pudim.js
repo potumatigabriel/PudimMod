@@ -5052,6 +5052,9 @@ GuiInterface.prototype.pudim_GetPalicadaData = function(player, data)
 };
 
 
+// Teto do limite efetivo de "faltando N" das casas (ver "A CASA ACOMPANHA A PRODUÇÃO").
+const PUDIM_CASA_LIMIAR_MAX = 25;
+
 GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 	const cmpPlayerManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_PlayerManager);
 	const playerEnt = cmpPlayerManager.GetPlayerByID(player);
@@ -5061,11 +5064,13 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 	const pop = cmpPlayer.GetPopulationCount();
 	const popLimit = cmpPlayer.GetPopulationLimit();
 	const maxPop = cmpPlayer.GetMaxPopulation();
-	const threshold = data.threshold || 3;
+	const thresholdBotao = data.threshold || 3;
+	let threshold = thresholdBotao;   // vira o maior entre o botão e as filas (ver abaixo)
 	const rawHeadroom = popLimit - pop;
 
 	// Fast-path: headroom grande demais para precisar calcular fila de treino
-	if (rawHeadroom > threshold + 20) return { _skip: "pop+" + rawHeadroom + ">" + threshold, stuckGhosts: [] };
+	if (rawHeadroom > Math.max(thresholdBotao, PUDIM_CASA_LIMIAR_MAX) + 20)
+		return { _skip: "pop+" + rawHeadroom + ">" + thresholdBotao, stuckGhosts: [] };
 	if (popLimit >= maxPop) return { _skip: "atCap", stuckGhosts: [] };
 
 	const cmpRangeManager = Engine.QueryInterface(SYSTEM_ENTITY, IID_RangeManager);
@@ -5092,6 +5097,7 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 	// troca de lote ("lote degradado x3 trocado por x10" no log), então está conferido por
 	// comportamento, não suposto.
 	let trainingCount = 0;
+	let filaTotal = 0;   // toda unidade nas filas, andando ou esperando vaga
 	for (const ent of allEnts) {
 		const cmpPQ = Engine.QueryInterface(ent, IID_ProductionQueue);
 		if (!cmpPQ) continue;
@@ -5099,10 +5105,21 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 		for (const item of q) {
 			// item.productiontype NAO EXISTE — ver "A FILA NAO TEM productiontype" abaixo.
 			if (!item.unitTemplate) continue;
+			filaTotal += (item.count || 1);
 			if ((item.progress || 0) <= 0) continue;
 			trainingCount += (item.count || 1);
 		}
 	}
+	// ── A CASA ACOMPANHA A PRODUÇÃO (29/09) ──────────────────────────────────────────────
+	//
+	// Print de 29/09: "só tá fazendo de 2 em 2, ao invés de usar o máximo de recursos e o
+	// máximo de pop disponível". No log, 22/25, 30/35, 36/40: a comida pagava 4-5 aldeãs e
+	// só havia 2-3 vagas, porque a casa só começava faltando 3 e sobe em ~40s. O limite
+	// efetivo é o MAIOR entre o do botão e tudo o que está nas filas — o lote que anda
+	// (e que a auto-fila vai repetir) mais o que espera vaga —, com teto PUDIM_CASA_LIMIAR_MAX.
+	// Com só o CC fazendo lote de 3, fica perto do botão: não volta o "muitas casas no começo"
+	// de 13/09; com três quartéis em lote de 5, sobe para ~20.
+	threshold = Math.min(PUDIM_CASA_LIMIAR_MAX, Math.max(thresholdBotao, filaTotal));
 	// ── E A PROJEÇÃO NÃO PODE OLHAR MAIS LONGE QUE A PRÓPRIA MARGEM ─────────────────────
 	//
 	// Relato de 14/09: "ao iniciar ja tenta fazer uma casa, mesmo n estando dentro da
@@ -5139,7 +5156,7 @@ GuiInterface.prototype.pudim_GetAutoHouseData = function(player, data) {
 	// A folga que vale é a REAL, a mesma conta da barra do jogo (limite − população). O treino
 	// fica só no log, para diagnóstico.
 	if (rawHeadroom > threshold) return { _skip: "pop+" + rawHeadroom + "|trn=" + trainingCount +
-		"(ja na pop)>" + threshold, stuckGhosts: [] };
+		"(ja na pop)>" + threshold + "(botao " + thresholdBotao + ", filas " + filaTotal + ")", stuckGhosts: [] };
 
 	let civ = "gaul";
 	let ccPosList = [];
